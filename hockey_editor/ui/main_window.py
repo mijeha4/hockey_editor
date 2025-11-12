@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import threading
-
 import cv2
 from .timeline import TimelineWidget
 from models.marker import Marker, EventType
@@ -16,19 +15,31 @@ class MainWindow:
         self.root.geometry("900x700")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+        self.playing = False
         self.setup_ui()
-        self.playback_thread = None
 
     def setup_ui(self):
         # Видео
         self.video_label = tk.Label(self.root, bg="black")
         self.video_label.pack(pady=10, fill=tk.X, padx=20)
 
-        # Кнопки
+        # Кнопки управления
         ctrl_frame = tk.Frame(self.root)
         ctrl_frame.pack(pady=5)
-        tk.Button(ctrl_frame, text="Открыть видео", command=self.controller.load_video).pack(side=tk.LEFT, padx=5)
-        tk.Button(ctrl_frame, text="Экспорт", command=self.controller.export_video, bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=5)
+
+        tk.Button(ctrl_frame, text="Открыть", command=self.controller.load_video).pack(side=tk.LEFT, padx=5)
+        self.play_btn = tk.Button(ctrl_frame, text="Play", command=self.toggle_play)
+        self.play_btn.pack(side=tk.LEFT, padx=5)
+
+        # Скорость
+        tk.Label(ctrl_frame, text="Скорость:").pack(side=tk.LEFT, padx=5)
+        self.speed_var = tk.DoubleVar(value=1.0)
+        for speed in [0.5, 1.0, 2.0]:
+            tk.Radiobutton(ctrl_frame, text=f"{speed}x", variable=self.speed_var, value=speed,
+                           command=self.controller.update_speed).pack(side=tk.LEFT)
+
+        tk.Button(ctrl_frame, text="Экспорт", command=self.controller.export_video,
+                  bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=10)
 
         # Выбор события
         event_frame = tk.Frame(self.root)
@@ -43,7 +54,7 @@ class MainWindow:
         # Таймлайн
         self.timeline = TimelineWidget(self.root, height=60)
         self.timeline.pack(pady=10, fill=tk.X, padx=20)
-        self.timeline.on_click = self.controller.add_marker_at_frame
+        self.timeline.on_click = self.controller.on_timeline_click
 
         # Список маркеров
         list_frame = tk.Frame(self.root)
@@ -60,6 +71,15 @@ class MainWindow:
     def _get_color(self, event_type: EventType) -> str:
         colors = {EventType.ATTACK: "#FF4444", EventType.DEFENSE: "#4444FF", EventType.SHIFT: "#44AA44"}
         return colors.get(event_type, "gray")
+
+    def toggle_play(self):
+        if self.playing:
+            self.controller.pause()
+            self.play_btn.config(text="Play")
+        else:
+            self.controller.play()
+            self.play_btn.config(text="Pause")
+        self.playing = not self.playing
 
     def update_video_frame(self, frame):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -81,12 +101,6 @@ class MainWindow:
 
     def update_playhead(self, frame: int):
         self.timeline.update_playhead(frame)
-
-    def start_playback(self):
-        if self.playback_thread and self.playback_thread.is_alive():
-            return
-        self.playback_thread = threading.Thread(target=self.controller.play_video, daemon=True)
-        self.playback_thread.start()
 
     def on_closing(self):
         self.controller.stop()

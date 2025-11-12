@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Optional, Tuple
+from typing import Optional
 
 class VideoProcessor:
     def __init__(self):
@@ -40,6 +40,10 @@ class VideoProcessor:
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame = cv2.resize(frame, size)
         return Image.fromarray(frame)
+
+    def seek(self, frame_num: int):
+        if self.cap:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
     def release(self):
         if self.cap:
