@@ -1,8 +1,10 @@
+import tkinter as tk
 import threading
 from tkinter import filedialog, messagebox
 import cv2
 import time
-from typing import List
+from typing import List, Optional
+from utils.time_utils import format_time
 from models.marker import Marker, EventType
 from .video_processor import VideoProcessor
 from .exporter import VideoExporter
@@ -19,6 +21,9 @@ class VideoController:
         self.playing = False
         self.playback_thread = None
 
+        # Для создания отрезка
+        self.pending_start: Optional[int] = None  # начало отрезка
+
     def set_view(self, view: MainWindow):
         self.view = view
 
@@ -30,8 +35,9 @@ class VideoController:
         self.fps = self.processor.fps
         self.current_frame = 0
         self.markers = []
+        self.pending_start = None
         self.view.update_markers_list(self.markers)
-        self.view.update_timeline(self.processor.total_frames, self.markers)
+        self.view.update_all_timelines()
         self.seek_frame(0)
 
     def play(self):
@@ -62,26 +68,56 @@ class VideoController:
     def update_speed(self):
         self.speed = self.view.speed_var.get()
 
-    def on_timeline_click(self, frame: int):
+    def on_timeline_click(self, event: tk.Event, event_type: EventType):
         if not self.processor.cap:
             return
-        self.seek_frame(frame)
-        event_str = self.view.event_var.get()
-        event_type = EventType(event_str)
-        marker = Marker(frame=frame, type=event_type)
-        self.markers.append(marker)
-        self.markers.sort(key=lambda m: m.frame)
-        self.view.root.after(0, self.view.update_markers_list, self.markers)
-        self.view.root.after(0, self.view.update_timeline, self.processor.total_frames, self.markers)
+
+        w = event.widget.winfo_width()
+        if w <= 1:
+            return
+        frame = int(event.x / w * self.processor.total_frames)
+
+        was_playing = self.playing
+        if self.playing:
+            self.pause()
+
+        if self.pending_start is None:
+            self.pending_start = frame
+            self.seek_frame(frame)
+            self.view.root.after(0, lambda: messagebox.showinfo(
+                "Отрезок", f"{event_type.value}: Начало {format_time(frame / self.fps)}\nКликните для конца"
+            ))
+        else:
+            start = self.pending_start
+            end = frame
+            if end <= start:
+                messagebox.showwarning("Ошибка", "Конец должен быть позже начала")
+                self.pending_start = None
+                if was_playing:
+                    self.play()
+                return
+
+            marker = Marker(start_frame=start, end_frame=end, type=event_type)
+            self.markers.append(marker)
+            self.markers.sort(key=lambda m: m.start_frame)
+
+            self.pending_start = None
+            self.view.root.after(0, self.view.update_all_timelines)
+            self.view.root.after(0, self.view.update_markers_list, self.markers)
+
+        if was_playing:
+            self.play()
 
     def seek_frame(self, frame: int):
         self.current_frame = max(0, min(frame, self.processor.total_frames - 1))
+        if self.playing:
+            self.pause()
         self.processor.seek(self.current_frame)
-        # Обновляем кадр
         frame_bgr = self.processor.get_frame(self.current_frame)
         if frame_bgr is not None:
             self.view.root.after(0, self.view.update_video_frame, frame_bgr)
-            self.view.root.after(0, self.view.update_playhead, self.current_frame)
+            #self.view.root.after(0, self.view.update_playhead, self.current_frame)
+            self.view.root.after(0, self.view.update_all_timelines)
 
     def remove_selected_marker(self):
         sel = self.view.markers_list.curselection()
@@ -89,17 +125,18 @@ class VideoController:
             idx = sel[0]
             self.markers.pop(idx)
             self.view.root.after(0, self.view.update_markers_list, self.markers)
-            self.view.root.after(0, self.view.update_timeline, self.processor.total_frames, self.markers)
+            self.view.root.after(0, self.view.update_all_timelines, self.processor.total_frames, self.markers)
 
     def clear_markers(self):
         if messagebox.askyesno("Очистить", "Удалить все маркеры?"):
             self.markers = []
+            self.pending_start = None
             self.view.root.after(0, self.view.update_markers_list, self.markers)
-            self.view.root.after(0, self.view.update_timeline, self.processor.total_frames, self.markers)
+            self.view.root.after(0, self.view.update_all_timelines, self.processor.total_frames, self.markers)
 
     def export_video(self):
         if not self.processor.path or not self.markers:
-            messagebox.showerror("Ошибка", "Загрузите видео и добавьте маркеры")
+            messagebox.showerror("Ошибка", "Загрузите видео и добавьте отрезки")
             return
         path = filedialog.asksaveasfilename(defaultextension=".mp4", filetypes=[("MP4", "*.mp4")])
         if not path:
