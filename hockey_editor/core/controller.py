@@ -35,7 +35,6 @@ class VideoController:
         self.fps = self.processor.fps
         self.current_frame = 0
         self.markers = []
-        self.pending_start = None
         self.view.update_markers_list(self.markers)
         self.view.update_all_timelines()
         self.seek_frame(0)
@@ -68,46 +67,6 @@ class VideoController:
     def update_speed(self):
         self.speed = self.view.speed_var.get()
 
-    def on_timeline_click(self, event: tk.Event, event_type: EventType):
-        if not self.processor.cap:
-            return
-
-        w = event.widget.winfo_width()
-        if w <= 1:
-            return
-        frame = int(event.x / w * self.processor.total_frames)
-
-        was_playing = self.playing
-        if self.playing:
-            self.pause()
-
-        if self.pending_start is None:
-            self.pending_start = frame
-            self.seek_frame(frame)
-            self.view.root.after(0, lambda: messagebox.showinfo(
-                "Отрезок", f"{event_type.value}: Начало {format_time(frame / self.fps)}\nКликните для конца"
-            ))
-        else:
-            start = self.pending_start
-            end = frame
-            if end <= start:
-                messagebox.showwarning("Ошибка", "Конец должен быть позже начала")
-                self.pending_start = None
-                if was_playing:
-                    self.play()
-                return
-
-            marker = Marker(start_frame=start, end_frame=end, type=event_type)
-            self.markers.append(marker)
-            self.markers.sort(key=lambda m: m.start_frame)
-
-            self.pending_start = None
-            self.view.root.after(0, self.view.update_all_timelines)
-            self.view.root.after(0, self.view.update_markers_list, self.markers)
-
-        if was_playing:
-            self.play()
-
     def seek_frame(self, frame: int):
         self.current_frame = max(0, min(frame, self.processor.total_frames - 1))
         if self.playing:
@@ -130,7 +89,6 @@ class VideoController:
     def clear_markers(self):
         if messagebox.askyesno("Очистить", "Удалить все маркеры?"):
             self.markers = []
-            self.pending_start = None
             self.view.root.after(0, self.view.update_markers_list, self.markers)
             self.view.root.after(0, self.view.update_all_timelines, self.processor.total_frames, self.markers)
 

@@ -79,7 +79,7 @@ class MainWindow:
 
             # Клик — только на активный
             if et.value == self.event_var.get():
-                canvas.bind("<Button-1>", lambda e, t=et: self.controller.on_timeline_click(e, t))
+                canvas.bind("<Button-1>", lambda event, et=et: self.controller.on_timeline_click(event, et))
             else:
                 canvas.bind("<Button-1>", lambda e: None)
 
@@ -89,7 +89,7 @@ class MainWindow:
             for et, tl in self.timelines.items():
                 canvas = tl["canvas"]
                 if et == selected:
-                    canvas.bind("<Button-1>", lambda e, t=et: self.controller.on_timeline_click(e, t))
+                    canvas.bind("<Button-1>", lambda event, et=et: self.controller.on_timeline_click(event, et))
                 else:
                     canvas.bind("<Button-1>", lambda e: None)
 
@@ -188,6 +188,20 @@ class MainWindow:
                 tl["playhead_id"] = canvas.create_line(0, 0, 0, h, fill="yellow", width=2)
             x = current_frame / total_frames * w
             canvas.coords(tl["playhead_id"], x, 0, x, h)
+            
+    def open_segment_editor(self, event_type: EventType):
+        if not self.controller.processor.cap:
+            messagebox.showwarning("Нет видео", "Сначала загрузите видео")
+            return
+
+        def on_save(marker):
+            self.controller.markers.append(marker)
+            self.controller.markers.sort(key=lambda m: m.start_frame)
+            self.update_markers_list(self.controller.markers)
+            self.update_all_timelines()
+
+        from ui.segment_editor import SegmentEditor
+        SegmentEditor(self.root, self.controller, event_type, on_save)
 
     def update_playhead(self, frame: int):
         self.controller.current_frame = frame
