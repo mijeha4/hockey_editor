@@ -218,8 +218,8 @@ class MainWindow:
         PreviewWindow(self.root, self.controller, self.controller.markers)
 
     def save_project(self):
-        if not self.controller.markers:
-            messagebox.showwarning("Нет данных", "Нет маркеров для сохранения")
+        if not self.controller.processor.path:
+            messagebox.showwarning("Нет данных", "Сначала загрузите видео")
             return
 
         file_path = filedialog.asksaveasfilename(
@@ -231,6 +231,7 @@ class MainWindow:
             return
 
         project_data = {
+            "video_path": self.controller.processor.path,
             "markers": [
                 {
                     "type": marker.type.value,
@@ -258,18 +259,25 @@ class MainWindow:
             with open(file_path, "r") as f:
                 project_data = json.load(f)
 
-            self.controller.markers = []
-            for marker_data in project_data.get("markers", []):
-                marker = Marker(
-                    type=EventType(marker_data["type"]),
-                    start_frame=marker_data["start_frame"],
-                    end_frame=marker_data["end_frame"]
-                )
-                self.controller.markers.append(marker)
-
-            self.update_markers_list(self.controller.markers)
-            self.update_all_timelines()
-            messagebox.showinfo("Открыто", f"Проект загружен из {file_path}")
+            video_path = project_data.get("video_path")
+            if video_path and os.path.exists(video_path):
+                self.controller.processor.load(video_path)
+                self.controller.fps = self.controller.processor.fps
+                self.controller.current_frame = 0
+                self.controller.markers = []
+                for marker_data in project_data.get("markers", []):
+                    marker = Marker(
+                        type=EventType(marker_data["type"]),
+                        start_frame=marker_data["start_frame"],
+                        end_frame=marker_data["end_frame"]
+                    )
+                    self.controller.markers.append(marker)
+                self.update_markers_list(self.controller.markers)
+                self.update_all_timelines()
+                self.controller.seek_frame(0)
+                messagebox.showinfo("Открыто", f"Проект загружен из {file_path}")
+            else:
+                messagebox.showerror("Ошибка", "Видеофайл не найден")
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть проект: {str(e)}")
@@ -279,6 +287,13 @@ class MainWindow:
             self.controller.markers = []
             self.update_markers_list(self.controller.markers)
             self.update_all_timelines()
+            self.controller.processor.release()
+            self.controller.processor.path = None
+            self.controller.processor.cap = None
+            self.controller.processor.total_frames = 0
+            self.controller.fps = 30.0
+            self.controller.current_frame = 0
+            self.video_label.config(image=None)
             messagebox.showinfo("Новый проект", "Создан новый проект")
 
     def on_closing(self):
