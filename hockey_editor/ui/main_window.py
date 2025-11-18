@@ -1,11 +1,16 @@
+# ui/main_window.py
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, Menu
 from PIL import Image, ImageTk
 import threading
 import cv2
-from utils.time_utils import format_time
+import json
+import os
 from models.marker import Marker, EventType
+from utils.time_utils import format_time
+from .segment_editor import SegmentEditor  # ← относительный импорт
 from .timeline import TimelineWidget
+
 
 class MainWindow:
     def __init__(self, controller):
@@ -19,6 +24,16 @@ class MainWindow:
         self.setup_ui()
 
     def setup_ui(self):
+        # Создаем меню
+        menubar = Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Файл", menu=file_menu)
+        file_menu.add_command(label="Сохранить проект", command=self.save_project)
+        file_menu.add_command(label="Открыть проект", command=self.open_project)
+        file_menu.add_command(label="Новый проект", command=self.new_project)
+
         # Видео
         self.video_label = tk.Label(self.root, bg="black")
         self.video_label.pack(pady=10, fill=tk.X, padx=20)
@@ -41,59 +56,54 @@ class MainWindow:
         tk.Button(ctrl_frame, text="Экспорт", command=self.controller.export_video,
                   bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=10)
 
-        # Выбор события
+        tk.Button(ctrl_frame, text="Предпросмотр", command=self.open_preview_window,
+                  bg="#2196F3", fg="white").pack(side=tk.LEFT, padx=10)
+
+        # === КНОПКИ СОБЫТИЙ ===
         event_frame = tk.Frame(self.root)
         event_frame.pack(pady=5)
-        tk.Label(event_frame, text="Событие:").pack(side=tk.LEFT)
-        self.event_var = tk.StringVar(value=EventType.ATTACK.value)
-        for et in EventType:
-            color = self._get_color(et)
-            tk.Radiobutton(event_frame, text=et.value, variable=self.event_var,
-                           value=et.value, bg=color, fg="white", selectcolor="#333").pack(side=tk.LEFT, padx=5)
 
-        # === Таймлайны для каждого события ===
+        self.event_buttons = {}
+        for et in EventType:
+            color = {
+                EventType.ATTACK: "#FF4444",
+                EventType.DEFENSE: "#4444FF",
+                EventType.SHIFT: "#44AA44"
+            }[et]
+            btn = tk.Button(event_frame, text=et.value, bg=color, fg="white",
+                            command=lambda t=et: self.open_segment_editor(t))
+            btn.pack(side=tk.LEFT, padx=5)
+            self.event_buttons[et] = btn
+
+        # === ТАЙМЛАЙНЫ (с использованием TimelineWidget) ===
         self.timeline_frame = tk.Frame(self.root)
         self.timeline_frame.pack(pady=10, fill=tk.X, padx=20)
 
         self.timelines = {}
         event_types = [EventType.ATTACK, EventType.DEFENSE, EventType.SHIFT]
-        colors = ["#FF4444", "#4444FF", "#44AA44"]
 
-        for et, color in zip(event_types, colors):
+        for et in event_types:
             frame = tk.Frame(self.timeline_frame)
             frame.pack(fill=tk.X, pady=2)
 
-            label = tk.Label(frame, text=et.value, fg="white", bg=color, font=("Arial", 9, "bold"))
+            label = tk.Label(frame, text=et.value, fg="white", bg={
+                EventType.ATTACK: "#FF4444",
+                EventType.DEFENSE: "#4444FF",
+                EventType.SHIFT: "#44AA44"
+            }[et], font=("Arial", 9, "bold"))
             label.pack(side=tk.LEFT, padx=5)
 
-            canvas = tk.Canvas(frame, height=40, bg="#222", highlightthickness=0)
-            canvas.pack(fill=tk.X, expand=True)
+            timeline_widget = TimelineWidget(frame, width=800, height=40, event_type=et)
+            timeline_widget.on_click = lambda frame, pause_if_playing: self.controller.seek_frame(frame, pause_if_playing)
+            timeline_widget.pack(fill=tk.X, expand=True)
 
-            # Сохраняем
             self.timelines[et] = {
-                "canvas": canvas,
+                "widget": timeline_widget,
                 "label": label,
-                "color": color,
-                "playhead_id": None
+                "dragging": False,
+                "drag_start": None,
+                "drag_marker": None
             }
-
-            # Клик — только на активный
-            if et.value == self.event_var.get():
-                canvas.bind("<Button-1>", lambda event, et=et: self.controller.on_timeline_click(event, et))
-            else:
-                canvas.bind("<Button-1>", lambda e: None)
-
-        # Обновление привязок при смене события
-        def update_timeline_bindings(*args):
-            selected = EventType(self.event_var.get())
-            for et, tl in self.timelines.items():
-                canvas = tl["canvas"]
-                if et == selected:
-                    canvas.bind("<Button-1>", lambda event, et=et: self.controller.on_timeline_click(event, et))
-                else:
-                    canvas.bind("<Button-1>", lambda e: None)
-
-        self.event_var.trace("w", update_timeline_bindings)
 
         # Список маркеров
         list_frame = tk.Frame(self.root)
@@ -106,10 +116,6 @@ class MainWindow:
         btn_frame.pack()
         tk.Button(btn_frame, text="Удалить", command=self.controller.remove_selected_marker).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Очистить", command=self.controller.clear_markers).pack(side=tk.LEFT, padx=5)
-
-    def _get_color(self, event_type: EventType) -> str:
-        colors = {EventType.ATTACK: "#FF4444", EventType.DEFENSE: "#4444FF", EventType.SHIFT: "#44AA44"}
-        return colors.get(event_type, "gray")
 
     def toggle_play(self):
         if self.playing:
@@ -140,55 +146,21 @@ class MainWindow:
                 EventType.SHIFT: "#44AA44"
             }.get(m.type, "gray")
             self.markers_list.itemconfig(i, fg=color)
+        self.controller.markers = markers
 
     def update_all_timelines(self):
         if not self.controller.processor.cap:
             return
+
         total_frames = self.controller.processor.total_frames
         current_frame = self.controller.current_frame
         markers = self.controller.markers
 
         for et, tl in self.timelines.items():
-            canvas = tl["canvas"]
-            canvas.delete("all")
-            w = canvas.winfo_width()
-            h = canvas.winfo_height()
-            if w <= 1 or h <= 1:
-                continue
+            timeline_widget = tl["widget"]
+            timeline_widget.set_data(total_frames, markers)
+            timeline_widget.update_playhead(current_frame)
 
-            # Фон
-            canvas.create_rectangle(0, 0, w, h, fill="#333", outline="#555")
-
-            # Отрезки
-            for m in markers:
-                if m.type != et:
-                    continue
-                x1 = m.start_frame / total_frames * w
-                x2 = m.end_frame / total_frames * w
-                if x1 >= w or x2 <= 0:
-                    continue
-
-                color = tl["color"]
-                # Полупрозрачный: используем светлый оттенок вместо альфа
-                light_color = {
-                    "#FF4444": "#FF8888",  # светло-красный
-                    "#4444FF": "#8888FF",  # светло-синий
-                    "#44AA44": "#88CC88",  # светло-зелёный
-                }.get(color, "#AAAAAA")
-
-                # Основной прямоугольник — полупрозрачный (светлый)
-                canvas.create_rectangle(x1, 0, x2, h, fill=light_color, outline=color, width=2)
-
-                # Надпись
-                mid_x = (x1 + x2) / 2
-                canvas.create_text(mid_x, h//2, text=m.type.value, fill="black", font=("Arial", 8, "bold"))
-
-            # Плейхед
-            if tl["playhead_id"] is None:
-                tl["playhead_id"] = canvas.create_line(0, 0, 0, h, fill="yellow", width=2)
-            x = current_frame / total_frames * w
-            canvas.coords(tl["playhead_id"], x, 0, x, h)
-            
     def open_segment_editor(self, event_type: EventType):
         if not self.controller.processor.cap:
             messagebox.showwarning("Нет видео", "Сначала загрузите видео")
@@ -200,16 +172,119 @@ class MainWindow:
             self.update_markers_list(self.controller.markers)
             self.update_all_timelines()
 
-        from ui.segment_editor import SegmentEditor
-        SegmentEditor(self.root, self.controller, event_type, on_save)
+        SegmentEditor(self.root, self.controller, event_type, on_save, self.update_markers_list, self.update_all_timelines)
 
-    def update_playhead(self, frame: int):
-        self.controller.current_frame = frame
-        self.update_all_timelines()
+    def on_timeline_press(self, event, event_type):
+        tl = self.timelines[event_type]
+        timeline_widget = tl["widget"]
+        x = event.x
+        total_frames = self.controller.processor.total_frames
+        frame = int(x / timeline_widget.winfo_width() * total_frames)
+
+        for marker in self.controller.markers:
+            if marker.type == event_type and marker.start_frame <= frame <= marker.end_frame:
+                tl["dragging"] = True
+                tl["drag_start"] = x
+                tl["drag_marker"] = marker
+                break
+
+    def on_timeline_drag(self, event, event_type):
+        tl = self.timelines[event_type]
+        if tl["dragging"]:
+            timeline_widget = tl["widget"]
+            x = event.x
+            total_frames = self.controller.processor.total_frames
+            frame = int(x / timeline_widget.winfo_width() * total_frames)
+            marker = tl["drag_marker"]
+
+            if marker:
+                duration = marker.end_frame - marker.start_frame
+                marker.start_frame = frame
+                marker.end_frame = frame + duration
+                self.update_all_timelines()
+
+    def on_timeline_release(self, event, event_type):
+        tl = self.timelines[event_type]
+        tl["dragging"] = False
+        tl["drag_start"] = None
+        tl["drag_marker"] = None
+
+    def open_preview_window(self):
+        if not self.controller.processor.cap:
+            messagebox.showwarning("Нет видео", "Сначала загрузите видео")
+            return
+
+        from .preview_window import PreviewWindow
+        PreviewWindow(self.root, self.controller, self.controller.markers)
+
+    def save_project(self):
+        if not self.controller.markers:
+            messagebox.showwarning("Нет данных", "Нет маркеров для сохранения")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        project_data = {
+            "markers": [
+                {
+                    "type": marker.type.value,
+                    "start_frame": marker.start_frame,
+                    "end_frame": marker.end_frame
+                }
+                for marker in self.controller.markers
+            ]
+        }
+
+        with open(file_path, "w") as f:
+            json.dump(project_data, f, indent=4)
+
+        messagebox.showinfo("Сохранено", f"Проект сохранен в {file_path}")
+
+    def open_project(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r") as f:
+                project_data = json.load(f)
+
+            self.controller.markers = []
+            for marker_data in project_data.get("markers", []):
+                marker = Marker(
+                    type=EventType(marker_data["type"]),
+                    start_frame=marker_data["start_frame"],
+                    end_frame=marker_data["end_frame"]
+                )
+                self.controller.markers.append(marker)
+
+            self.update_markers_list(self.controller.markers)
+            self.update_all_timelines()
+            messagebox.showinfo("Открыто", f"Проект загружен из {file_path}")
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть проект: {str(e)}")
+
+    def new_project(self):
+        if messagebox.askokcancel("Новый проект", "Создать новый проект? Несохраненные данные будут потеряны."):
+            self.controller.markers = []
+            self.update_markers_list(self.controller.markers)
+            self.update_all_timelines()
+            messagebox.showinfo("Новый проект", "Создан новый проект")
 
     def on_closing(self):
-        self.controller.stop()
-        self.root.destroy()
+            if messagebox.askokcancel("Выход", "Закрыть приложение?"):
+                self.controller.stop()
+                self.root.destroy()
 
     def run(self):
         self.root.mainloop()

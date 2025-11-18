@@ -4,12 +4,13 @@ from typing import List, Callable
 from models.marker import Marker, EventType
 
 class TimelineWidget(tk.Canvas):
-    def __init__(self, parent, width=800, height=60):
+    def __init__(self, parent, width=800, height=60, event_type=None):
         super().__init__(parent, width=width, height=height, bg="#222", highlightthickness=0)
         self.on_click: Callable[[int], None] = lambda x: None
         self.markers: List[Marker] = []
         self.total_frames = 0
         self.playhead_x = 0
+        self.event_type = event_type
         self.event_colors = {
             EventType.ATTACK: "#FF4444",
             EventType.DEFENSE: "#4444FF",
@@ -45,14 +46,17 @@ class TimelineWidget(tk.Canvas):
         for marker in self.markers:
             if self.total_frames <= 0:
                 continue
+            # Filter markers by event type
+            if self.event_type is not None and marker.type != self.event_type:
+                continue
+
             x1 = marker.start_frame / self.total_frames * w
             x2 = marker.end_frame / self.total_frames * w
             if x1 >= w or x2 <= 0:
                 continue
             color = self.event_colors.get(marker.type, "white")
-            alpha_color = color + "40"
 
-            rect = self.create_rectangle(x1, 0, x2, h, fill=alpha_color, outline=color, width=2)
+            rect = self.create_rectangle(x1, 0, x2, h, fill=color, outline=color, width=2)
             self.segment_rects.append(rect)
 
             mid_x = (x1 + x2) / 2
@@ -69,4 +73,18 @@ class TimelineWidget(tk.Canvas):
     def _on_click(self, event):
         if self.total_frames > 0 and self.winfo_width() > 1:
             frame = int(event.x / self.winfo_width() * self.total_frames)
-            self.on_click(frame)
+
+            # Check if click is on a segment
+            for marker in self.markers:
+                if self.event_type is not None and marker.type != self.event_type:
+                    continue
+
+                x1 = marker.start_frame / self.total_frames * self.winfo_width()
+                x2 = marker.end_frame / self.total_frames * self.winfo_width()
+
+                if x1 <= event.x <= x2:
+                    self.on_click(marker.start_frame, pause_if_playing=False)
+                    return
+
+            # If not on a segment, seek to clicked position
+            self.on_click(frame, pause_if_playing=False)

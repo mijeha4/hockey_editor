@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from typing import Optional
+import threading
 
 class VideoProcessor:
     def __init__(self):
@@ -10,6 +11,7 @@ class VideoProcessor:
         self.total_frames = 0
         self.fps = 30.0
         self.frame_cache = {}
+        self.video_lock = threading.Lock()
 
     def load(self, path: str) -> bool:
         self.path = path
@@ -26,11 +28,12 @@ class VideoProcessor:
             return self.frame_cache[frame_num]
         if not self.cap:
             return None
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
-        ret, frame = self.cap.read()
-        if ret:
-            self.frame_cache[frame_num] = frame
-            return frame
+        with self.video_lock:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            ret, frame = self.cap.read()
+            if ret:
+                self.frame_cache[frame_num] = frame
+                return frame
         return None
 
     def get_thumbnail(self, frame_num: int, size=(20, 15)) -> Optional[Image.Image]:
@@ -43,7 +46,8 @@ class VideoProcessor:
 
     def seek(self, frame_num: int):
         if self.cap:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            with self.video_lock:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
 
     def release(self):
         if self.cap:
