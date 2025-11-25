@@ -1,9 +1,12 @@
 from PySide6.QtCore import QObject, Signal, QTimer
-from typing import List, Optional
+from typing import List, Optional, Dict
 from enum import Enum
 import json
+import os
 from .video_processor import VideoProcessor
 from ..models.marker import Marker, EventType
+from ..utils.settings_manager import get_settings_manager
+from ..utils.custom_events import get_custom_event_manager
 
 
 class RecordingMode(Enum):
@@ -25,29 +28,37 @@ class VideoController(QObject):
 
     def __init__(self):
         super().__init__()
-        
+
         self.processor = VideoProcessor()
         self.markers: List[Marker] = []
-        
+
+        # SettingsManager для персистентности
+        self.settings = get_settings_manager()
+
+        # CustomEventManager - менеджер событий
+        self.event_manager = get_custom_event_manager()
+
+        # UndoRedoManager
+        from ..utils.undo_redo import UndoRedoManager
+        self.undo_redo = UndoRedoManager()
+
         # Параметры воспроизведения
         self.playing = False
         self.playback_timer = QTimer()
         self.playback_timer.timeout.connect(self._on_playback_tick)
         self.frame_time_ms = 33  # ~30 FPS (рассчитывается на основе FPS видео)
-        
-        # Параметры расстановки отрезков
-        self.recording_mode = RecordingMode.DYNAMIC
-        self.fixed_duration_sec = 10  # для режима FIXED_LENGTH
-        self.pre_roll_sec = 3.0
-        self.post_roll_sec = 0.0
-        
+
+        # Параметры расстановки отрезков (загрузить из QSettings)
+        mode_str = self.settings.load_recording_mode()
+        self.recording_mode = RecordingMode(mode_str)
+        self.fixed_duration_sec = self.settings.load_fixed_duration()
+        self.pre_roll_sec = self.settings.load_pre_roll()
+        self.post_roll_sec = self.settings.load_post_roll()
+
         # Состояние текущей записи (динамический режим)
         self.is_recording = False
-        self.recording_event_type: Optional[EventType] = None
+        self.recording_event_name: Optional[str] = None  # Имя события вместо EventType
         self.recording_start_frame: Optional[int] = None
-        
-        # Горячие клавиши
-        self.hotkeys = {'A': EventType.ATTACK, 'D': EventType.DEFENSE, 'S': EventType.SHIFT}
 
     def load_video(self, video_path: str) -> bool:
         """Загрузить видеофайл (ПАУЗИРОВАН!)."""
@@ -143,72 +154,78 @@ class VideoController(QObject):
         if frame is not None:
             self.frame_ready.emit(frame)
 
-    def on_hotkey_pressed(self, event_type: EventType):
+    def on_hotkey_pressed(self, key: str):
         """Обработка нажатия горячей клавиши."""
-        current_frame = self.processor.get_current_frame_idx()
-        
-        if self.recording_mode == RecordingMode.DYNAMIC:
-            self._handle_dynamic_mode(event_type, current_frame)
-        elif self.recording_mode == RecordingMode.FIXED_LENGTH:
-            self._handle_fixed_length_mode(event_type, current_frame)
+        # Найти событие по клавише
+        event = self.event_manager.get_event_by_hotkey(key)
+        if not event:
+            return  # Нет события для этой клавиши
 
-    def _handle_dynamic_mode(self, event_type: EventType, current_frame: int):
+        current_frame = self.processor.get_current_frame_idx()
+        event_name = event.name
+
+        if self.recording_mode == RecordingMode.DYNAMIC:
+            self._handle_dynamic_mode(event_name, current_frame)
+        elif self.recording_mode == RecordingMode.FIXED_LENGTH:
+            self._handle_fixed_length_mode(event_name, current_frame)
+
+    def _handle_dynamic_mode(self, event_name: str, current_frame: int):
         """Динамический режим: два нажатия = начало и конец."""
         if not self.is_recording:
             # Начало записи
             self.is_recording = True
-            self.recording_event_type = event_type
+            self.recording_event_name = event_name
             self.recording_start_frame = current_frame
-            self.recording_status_changed.emit(event_type.name, "Recording")
+            self.recording_status_changed.emit(event_name, "Recording")
             self.timeline_update.emit()
-        elif self.recording_event_type == event_type:
+        elif self.recording_event_name == event_name:
             # Конец записи
             pre_roll_frames = max(0, int(self.pre_roll_sec * self.processor.fps))
             start_frame = max(0, self.recording_start_frame - pre_roll_frames)
-            
+
             marker = Marker(
                 start_frame=start_frame,
                 end_frame=current_frame,
-                type=event_type,
+                event_name=event_name,
                 note=""
             )
             self.markers.append(marker)
-            
+
             # Автооткат начала отрезка
             self.seek_frame(start_frame)
-            
+
             self.is_recording = False
-            self.recording_event_type = None
+            self.recording_event_name = None
             self.recording_start_frame = None
-            
-            self.recording_status_changed.emit(event_type.name, "Complete")
+
+            self.recording_status_changed.emit(event_name, "Complete")
             self.markers_changed.emit()
             self.timeline_update.emit()
 
-    def _handle_fixed_length_mode(self, event_type: EventType, current_frame: int):
+    def _handle_fixed_length_mode(self, event_name: str, current_frame: int):
         """Фиксированная длина: одно нажатие = отрезок фиксированной длины."""
         # Рассчитать границы
         fixed_frames = int(self.fixed_duration_sec * self.processor.fps)
         pre_roll_frames = max(0, int(self.pre_roll_sec * self.processor.fps))
-        
+
         start_frame = max(0, current_frame - pre_roll_frames)
         end_frame = min(self.processor.total_frames - 1, current_frame + fixed_frames - pre_roll_frames)
-        
+
         # Создать отрезок
         marker = Marker(
             start_frame=start_frame,
             end_frame=end_frame,
-            type=event_type,
+            event_name=event_name,
             note=""
         )
         self.markers.append(marker)
-        
+
         # Визуальная обратная связь
-        self.recording_status_changed.emit(event_type.name, "Fixed")
-        
+        self.recording_status_changed.emit(event_name, "Fixed")
+
         # Автооткат начала отрезка
         self.seek_frame(start_frame)
-        
+
         self.markers_changed.emit()
         self.timeline_update.emit()
 
@@ -216,39 +233,49 @@ class VideoController(QObject):
         """Отменить текущую запись."""
         if self.is_recording:
             self.is_recording = False
-            self.recording_event_type = None
+            self.recording_event_name = None
             self.recording_start_frame = None
             self.recording_status_changed.emit("", "Cancelled")
             self.timeline_update.emit()
 
     def delete_marker(self, idx: int):
-        """Удалить отрезок."""
+        """Удалить отрезок (с undo/redo)."""
         if 0 <= idx < len(self.markers):
-            del self.markers[idx]
+            from ..utils.undo_redo import DeleteMarkerCommand
+            command = DeleteMarkerCommand(self.markers, idx)
+            self.undo_redo.push_command(command)
             self.markers_changed.emit()
             self.timeline_update.emit()
 
     def clear_markers(self):
-        """Удалить все отрезки."""
-        self.markers.clear()
+        """Удалить все отрезки (с undo/redo)."""
+        from ..utils.undo_redo import ClearMarkersCommand
+        command = ClearMarkersCommand(self.markers)
+        self.undo_redo.push_command(command)
         self.markers_changed.emit()
         self.timeline_update.emit()
 
     def set_recording_mode(self, mode: RecordingMode):
         """Установить режим расстановки отрезков."""
         self.recording_mode = mode
+        self.settings.save_recording_mode(mode.value)
 
-    def set_fixed_duration(self, seconds: float):
+    def set_fixed_duration(self, seconds: int):
         """Установить фиксированную длину отрезка."""
         self.fixed_duration_sec = seconds
+        self.settings.save_fixed_duration(seconds)
 
     def set_pre_roll(self, seconds: float):
-        """Установить предпросмотр (откат) перед отрезком."""
+        """Установить откат перед началом отрезка."""
         self.pre_roll_sec = seconds
+        self.settings.save_pre_roll(seconds)
 
-    def set_hotkey(self, key: str, event_type: EventType):
-        """Переназначить горячую клавишу."""
-        self.hotkeys[key.upper()] = event_type
+    def set_post_roll(self, seconds: float):
+        """Установить добавление в конец отрезка."""
+        self.post_roll_sec = seconds
+        self.settings.save_post_roll(seconds)
+
+    # Метод update_hotkeys убран - hotkeys теперь управляются через CustomEventManager
 
     def get_current_frame_idx(self) -> int:
         """Получить текущий индекс кадра."""
@@ -267,3 +294,66 @@ class VideoController(QObject):
         self.pause()
         self.processor.cleanup()
         self.markers.clear()
+
+    # ===== ПРОЕКТЫ =====
+    
+    def save_project(self, file_path: str) -> bool:
+        """Сохранить проект в файл."""
+        from .project_manager import ProjectManager, Project
+        
+        project = Project(
+            name=self.processor.filename or "Untitled",
+            video_path=self.processor.path,
+            fps=self.get_fps()
+        )
+        project.markers = self.markers.copy()
+        
+        success = ProjectManager.save_project(project, file_path)
+        if success:
+            ProjectManager.add_to_recent(file_path)
+        return success
+    
+    def load_project(self, file_path: str) -> bool:
+        """Загрузить проект из файла."""
+        from .project_manager import ProjectManager
+        
+        project = ProjectManager.load_project(file_path)
+        if not project:
+            return False
+        
+        # Загрузить видео
+        if project.video_path and os.path.exists(project.video_path):
+            if not self.load_video(project.video_path):
+                return False
+        
+        # Загрузить маркеры
+        self.markers = project.markers.copy()
+        self.markers_changed.emit()
+        
+        ProjectManager.add_to_recent(file_path)
+        return True
+    
+    def get_recent_projects(self) -> List[str]:
+        """Получить список недавних проектов."""
+        from .project_manager import ProjectManager
+        return ProjectManager.get_recent_projects()
+    
+    # ===== UNDO/REDO =====
+    
+    def undo(self):
+        """Отменить последнюю операцию."""
+        self.undo_redo.undo()
+        self.markers_changed.emit()
+    
+    def redo(self):
+        """Повторить последнюю отменённую операцию."""
+        self.undo_redo.redo()
+        self.markers_changed.emit()
+    
+    def can_undo(self) -> bool:
+        """Проверить, можно ли отменить."""
+        return self.undo_redo.can_undo()
+    
+    def can_redo(self) -> bool:
+        """Проверить, можно ли повторить."""
+        return self.undo_redo.can_redo()

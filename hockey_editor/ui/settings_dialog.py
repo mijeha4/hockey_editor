@@ -2,12 +2,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
     QComboBox, QDoubleSpinBox, QSpinBox, QPushButton, QColorDialog,
-    QLineEdit, QCheckBox
+    QLineEdit, QCheckBox, QWidget, QMessageBox
 )
 from PySide6.QtGui import QColor
-import json
-import os
 from enum import Enum
+from ..utils.settings_manager import get_settings_manager
+from .custom_event_dialog import CustomEventManagerDialog
 
 
 class SettingsDialog(QDialog):
@@ -16,8 +16,7 @@ class SettingsDialog(QDialog):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
-        self.config_file = "config.json"
-        self.load_config()
+        self.settings_manager = get_settings_manager()
         
         self.setWindowTitle("Settings")
         self.setGeometry(200, 200, 500, 400)
@@ -43,7 +42,12 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._create_autosave_tab(), "Autosave")
         
         layout.addWidget(tabs)
-        
+
+        # Кнопка управления пользовательскими событиями
+        events_btn = QPushButton("📝 Manage Events")
+        events_btn.clicked.connect(self._manage_events)
+        layout.addWidget(events_btn)
+
         # Кнопки
         button_layout = QHBoxLayout()
         
@@ -101,20 +105,25 @@ class SettingsDialog(QDialog):
     def _create_hotkeys_tab(self):
         """Вкладка горячих клавиш."""
         widget = QVBoxLayout()
-        
-        widget.addWidget(QLabel("Customize Hotkeys:"))
-        
-        self.hotkey_edits = {}
-        for key, event_type in self.controller.hotkeys.items():
-            layout = QHBoxLayout()
-            layout.addWidget(QLabel(f"{event_type.name}:"))
-            edit = QLineEdit()
-            edit.setText(key)
-            edit.setMaxLength(1)
-            self.hotkey_edits[event_type.name] = edit
-            layout.addWidget(edit)
-            widget.addLayout(layout)
-        
+
+        widget.addWidget(QLabel("Hotkeys Settings:"))
+        widget.addWidget(QLabel("Hotkeys are managed in the 'Manage Events' dialog."))
+        widget.addWidget(QLabel("Use the '📝 Manage Events' button below to customize events and their shortcuts."))
+
+        # Статусная информация
+        info_text = """
+Hotkey System:
+• A/D/S keys for quick event marking during video playback
+• Custom shortcuts for user-defined events
+• Works globally even when timeline or other controls are focused
+• Space bar for Play/Pause video
+• Ctrl+E for Export, Ctrl+S for Save Project
+"""
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #cccccc; font-size: 11px;")
+        widget.addWidget(info_label)
+
         widget.addStretch()
         return self._wrap_widget(widget)
 
@@ -153,19 +162,19 @@ class SettingsDialog(QDialog):
         widget.addWidget(QLabel("Autosave Settings:"))
         
         self.autosave_check = QCheckBox("Enable autosave")
-        self.autosave_check.setChecked(True)
+        self.autosave_check.setChecked(self.settings_manager.load_autosave_enabled())
         widget.addWidget(self.autosave_check)
-        
+
         # Интервал
         widget.addWidget(QLabel("\nAutosave interval (minutes):"))
         self.autosave_interval_spin = QSpinBox()
         self.autosave_interval_spin.setRange(1, 60)
-        self.autosave_interval_spin.setValue(5)
+        self.autosave_interval_spin.setValue(self.settings_manager.load_autosave_interval())
         widget.addWidget(self.autosave_interval_spin)
-        
+
         # Информация
         widget.addWidget(QLabel("\nMarkers are automatically saved to 'project.json'"))
-        
+
         widget.addStretch()
         return self._wrap_widget(widget)
 
@@ -189,43 +198,36 @@ class SettingsDialog(QDialog):
         """Сохранить настройки и закрыть."""
         # Режим расстановки
         mode_str = "dynamic" if self.mode_combo.currentIndex() == 0 else "fixed_length"
-        from hockey_editor.core.video_controller import RecordingMode
+        from ..core.video_controller import RecordingMode
         self.controller.set_recording_mode(RecordingMode(mode_str))
-        
+
         # Фиксированная длина
         self.controller.set_fixed_duration(self.fixed_duration_spin.value())
-        
+
         # Pre-roll и Post-roll
         self.controller.set_pre_roll(self.pre_roll_spin.value())
-        self.controller.post_roll_sec = self.post_roll_spin.value()
-        
-        # Сохранить конфиг
-        self.save_config()
-        
+        self.controller.set_post_roll(self.post_roll_spin.value())
+
+        # Цвета дорожек (сохранить в QSettings)
+        colors = {}
+        for event_type, (_, color_hex) in self.color_buttons.items():
+            colors[event_type] = color_hex
+        self.settings_manager.save_track_colors(colors)
+
+        # Автосохранение
+        self.settings_manager.save_autosave_enabled(self.autosave_check.isChecked())
+        self.settings_manager.save_autosave_interval(self.autosave_interval_spin.value())
+
+        # Применить изменения - перезагрузить настройки
+        self.settings_manager.sync()
+
+        QMessageBox.information(self, "Settings Saved",
+                               "Settings have been saved successfully.\n\n"
+                               "Restart the application for some changes to take full effect.")
+
         self.accept()
 
-    def load_config(self):
-        """Загрузить конфиг из файла."""
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r') as f:
-                    data = json.load(f)
-                    # Применить настройки из файла
-                    if 'recording_mode' in data:
-                        pass  # Применять при инициализации контроллера
-            except:
-                pass
-
-    def save_config(self):
-        """Сохранить конфиг в файл."""
-        config = {
-            'recording_mode': self.controller.recording_mode.value,
-            'fixed_duration_sec': self.controller.fixed_duration_sec,
-            'pre_roll_sec': self.controller.pre_roll_sec,
-            'post_roll_sec': self.controller.post_roll_sec,
-        }
-        try:
-            with open(self.config_file, 'w') as f:
-                json.dump(config, f, indent=2)
-        except:
-            pass
+    def _manage_events(self):
+        """Открыть диалог управления событиями."""
+        dialog = CustomEventManagerDialog(self)
+        dialog.exec()

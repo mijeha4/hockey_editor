@@ -1,6 +1,6 @@
 from moviepy import VideoFileClip, concatenate_videoclips
 from typing import List
-from models.marker import Marker
+from ..models.marker import Marker
 
 class VideoExporter:
     @staticmethod
