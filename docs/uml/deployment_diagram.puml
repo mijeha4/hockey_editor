@@ -1,0 +1,151 @@
+@startuml Deployment Diagram
+title Диаграмма развертывания: Hockey Editor Pro Desktop Application
+
+node "User Workstation\n(Windows/Linux/macOS)" as Workstation {
+    node "Hockey Editor Pro Application" as App {
+        component [MainWindow] as MW
+        component [VideoController] as VC
+        component [VideoProcessor] as VP
+        component [ProjectManager] as PM
+        component [SettingsManager] as SM
+        component [UndoRedoManager] as URM
+
+        MW --> VC : controls
+        VC --> VP : video I/O
+        VC --> PM : project persistence
+        VC --> SM : configuration
+        VC --> URM : command history
+    }
+
+    database "Local Storage" as Storage {
+        folder "Project Files (.hep)" as Projects
+        file "Settings (QSettings)" as Settings
+        folder "Autosave Recovery" as Recovery
+        folder "Recent Projects" as Recent
+    }
+
+    App --> Storage : persists data
+}
+
+node "External Dependencies\n(Provided Interfaces)" as External {
+
+    interface "PySide6" as PySide6 {
+        +QApplication
+        +QMainWindow
+        +QGraphicsView
+        +QTimer
+        +QSettings
+        +QShortcut
+        +QDialog
+    }
+
+    interface "OpenCV" as OpenCV {
+        +VideoCapture
+        +imshow()
+        +waitKey()
+        +read()
+        +set()
+        +get()
+    }
+
+    interface "FFmpeg" as FFmpeg {
+        +Video Encoding
+        +Format Conversion
+        +Codec Support
+        +Stream Processing
+    }
+
+    interface "moviepy" as MoviePy {
+        +VideoFileClip
+        +concatenate_videoclips()
+        +write_videofile()
+        +subclip()
+    }
+
+    note right of PySide6
+      **PySide6 (Qt for Python):**
+      • GUI framework and widgets
+      • Event-driven programming
+      • Cross-platform compatibility
+      • Native OS integration
+    end note
+
+    note right of OpenCV
+      **OpenCV (Computer Vision):**
+      • Video file reading/decoding
+      • Frame extraction and seeking
+      • Real-time video processing
+      • Multi-format support
+    end note
+
+    note right of FFmpeg
+      **FFmpeg (Multimedia Framework):**
+      • Video encoding/decoding
+      • Format conversion
+      • Codec libraries
+      • Command-line video processing
+    end note
+
+    note right of MoviePy
+      **moviepy (Video Editing):**
+      • High-level video editing
+      • Clip concatenation
+      • Effects and transitions
+      • Export to various formats
+    end note
+}
+
+' Deployment relationships
+App --> PySide6 : <<use>>
+App --> OpenCV : <<use>>
+App --> FFmpeg : <<use>>
+App --> MoviePy : <<use>>
+
+' Data flow
+VP --> "Video Files\n(.mp4, .avi, .mov, .mkv)" : reads
+PM --> Projects : saves/loads
+SM --> Settings : persists
+URM --> Recovery : backup commands
+
+artifact "Video Files" as VideoFiles {
+    file "*.mp4" as MP4
+    file "*.avi" as AVI
+    file "*.mov" as MOV
+    file "*.mkv" as MKV
+    file "*.flv" as FLV
+}
+
+artifact "Export Formats" as ExportFormats {
+    file "*.mp4" as ExportMP4
+    file "*.mov" as ExportMOV
+    file "*.mkv" as ExportMKV
+}
+
+App --> VideoFiles : processes input
+App --> ExportFormats : generates output
+
+note as N1
+  **Deployment Environment:**
+  • **Target Platforms**: Windows 10+, Linux (Ubuntu 18.04+), macOS 10.14+
+  • **Python Version**: 3.8+
+  • **Installation**: Standalone executable or pip install
+  • **Dependencies**: All external libraries bundled or installed via pip
+end note
+
+note as N2
+  **Runtime Requirements:**
+  • **RAM**: Minimum 4GB, Recommended 8GB+
+  • **Storage**: 500MB application + project data
+  • **Display**: 1920x1080 minimum resolution
+  • **GPU**: Optional, for hardware-accelerated video decoding
+end note
+
+note as N3
+  **Component Distribution:**
+  • **Core Application**: Single executable with embedded Python
+  • **External Libraries**: Either bundled or installed system-wide
+  • **User Data**: Stored in user home directory or AppData
+  • **Temporary Files**: Created in system temp directory during export
+end note
+
+@enduml

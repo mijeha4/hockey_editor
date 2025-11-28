@@ -1,0 +1,91 @@
+@startuml Extended State Machine Diagram
+title Диаграмма состояний: Marker и Video Playback
+
+state "Video Playback States" as VideoStates {
+    [*] --> Stopped
+
+    state Stopped as "Stopped\n• Video loaded but not playing\n• Position at frame 0 or paused position\n• Playback controls enabled"
+    state Playing as "Playing\n• Video advancing automatically\n• Frame timer active\n• Pause/Stop controls active"
+    state Paused as "Paused\n• Video frozen at current frame\n• Playback can resume from current position\n• All controls enabled"
+    state "Frame-by-frame" as FrameByFrame
+
+    Stopped --> Playing : play()\n[User clicks Play or Space]
+    Playing --> Paused : pause()\n[User clicks Pause or Space]
+    Paused --> Playing : play()\n[User clicks Play or Space]
+    Playing --> Stopped : stop()\n[User clicks Stop or video ends]
+    Paused --> Stopped : stop()\n[User clicks Stop]
+    Paused --> FrameByFrame : frame_step()\n[User presses Left/Right arrow]
+    FrameByFrame --> Paused : release_key()\n[User releases arrow key]
+
+    note right of Playing
+      **Playing State Details:**
+      • QTimer active with frame_time_ms interval
+      • Automatic frame advancement
+      • Real-time timeline updates
+      • Marker recording possible
+    end note
+
+    note right of Paused
+      **Paused State Details:**
+      • QTimer stopped
+      • Frame position maintained
+      • Seek operations allowed
+      • Marker editing possible
+    end note
+}
+
+state "Marker Lifecycle States" as MarkerStates {
+    [*] --> Created
+
+    state Created as "Created\n• Marker object instantiated\n• Basic properties set\n• Not yet visible on timeline\n• Temporary state"
+    state Visible as "Visible\n• Marker displayed on timeline\n• Can be selected/edited\n• Part of markers collection\n• Persistent state"
+    state Selected as "Selected\n• Marker highlighted on timeline\n• Edit operations available\n• Drag/resize handles visible\n• Single selection mode"
+    state Edited as "Edited\n• Marker properties being modified\n• Edit dialog open or inline editing\n• Changes not yet committed\n• Undo state available"
+    state Deleted as "Deleted\n• Marker removed from collection\n• Not visible on timeline\n• Can be restored via Undo\n• Temporary state before final removal"
+
+    Created --> Visible : markers_changed.emit()\n[Marker added to collection]
+    Visible --> Selected : mouse_click()\n[User clicks on marker]
+    Selected --> Edited : double_click() or edit_dialog()\n[User initiates edit]
+    Edited --> Visible : save_changes()\n[User confirms changes]
+    Edited --> Selected : cancel_edit()\n[User cancels changes]
+    Selected --> Visible : deselect()\n[User clicks elsewhere]
+    Visible --> Deleted : delete_marker()\n[User deletes marker]
+    Deleted --> [*] : command_executed()\n[Undo command processed]
+
+    note right of Selected
+      **Selected State Details:**
+      • Visual highlighting (color change)
+      • Resize handles visible
+      • Context menu available
+      • Keyboard shortcuts active
+    end note
+
+    note right of Edited
+      **Edited State Details:**
+      • EditSegmentDialog open
+      • Frame spinboxes active
+      • Note field editable
+      • Validation active
+    end note
+}
+
+' Transitions between state machines
+Playing --> Created : hotkey_pressed()\n[During playback, user presses A/D/S]
+Paused --> Created : hotkey_pressed()\n[During pause, user presses A/D/S]
+FrameByFrame --> Created : hotkey_pressed()\n[During frame stepping, user presses A/D/S]
+
+note as N1
+  **Key State Transitions:**
+  • Video playback states control when markers can be created
+  • Marker states manage the lifecycle from creation to deletion
+  • Both state machines are independent but coordinated
+end note
+
+note as N2
+  **State Machine Coordination:**
+  • VideoController manages both state machines
+  • Signals coordinate state changes between components
+  • Undo/Redo system preserves state integrity
+end note
+
+@enduml

@@ -1,0 +1,135 @@
+@startuml Package Diagram
+title Диаграмма пакетов: 4-слойная архитектура Hockey Editor Pro
+
+package "Presentation Layer\n(Уровень презентации)" as Presentation {
+    package "ui" as UI {
+        [MainWindow]
+        [TimelineGraphicsView]
+        [PreviewWindow]
+        [EditSegmentDialog]
+        [ExportDialog]
+        [SettingsDialog]
+        [VideoWindow]
+    }
+
+    package "assets" as Assets {
+        [Icons]
+        [Stylesheets]
+        [UI Resources]
+    }
+
+    note right of Presentation
+      **Presentation Layer Responsibilities:**
+      • User interface components
+      • Event handling and user input
+      • Data visualization (timeline, video display)
+      • Dialog management
+      • UI state management
+    end note
+}
+
+package "Application Logic Layer\n(Уровень прикладной логики)" as ApplicationLogic {
+    package "core" as Core {
+        [VideoController]
+        [EventCreationController]
+        [ProjectManager]
+        [Exporter]
+        [VideoProcessor]
+        [VideoReaderThread]
+    }
+
+    package "utils" as Utils {
+        [ShortcutManager]
+        [UndoRedoManager]
+        [AutosaveManager]
+        [SettingsManager]
+        [TimeUtils]
+        [CustomEvents]
+    }
+
+    note right of ApplicationLogic
+      **Application Logic Layer Responsibilities:**
+      • Business workflow orchestration
+      • Cross-cutting concerns (undo/redo, settings)
+      • External system integration (file I/O, export)
+      • Application state management
+      • Event coordination between layers
+    end note
+}
+
+package "Domain Logic Layer\n(Уровень доменной логики)" as DomainLogic {
+    package "models" as Models {
+        [Marker]
+        [EventType]
+        [Project]
+        [RecordingMode]
+        [CustomEvent]
+    }
+
+    note right of DomainLogic
+      **Domain Logic Layer Responsibilities:**
+      • Business rules and validations
+      • Domain object behavior
+      • Data integrity constraints
+      • Domain event definitions
+      • Business entity relationships
+    end note
+}
+
+package "Data Model Layer\n(Уровень модели данных)" as DataModel {
+    package "Persistence" as Persistence {
+        [Project File (.hep)]
+        [Settings Storage]
+        [Recent Projects]
+        [Autosave Recovery]
+    }
+
+    package "External Data" as External {
+        [Video Files]
+        [Export Formats]
+        [Configuration Files]
+    }
+
+    note right of DataModel
+      **Data Model Layer Responsibilities:**
+      • Data persistence and retrieval
+      • File format handling
+      • External data source integration
+      • Data serialization/deserialization
+      • Backup and recovery
+    end note
+}
+
+' Layer Dependencies (from top to bottom)
+Presentation --> ApplicationLogic : uses services
+ApplicationLogic --> DomainLogic : manipulates domain objects
+ApplicationLogic --> DataModel : persists/retrieves data
+DomainLogic --> DataModel : defines data contracts
+
+' Cross-cutting dependencies
+Presentation --> DomainLogic : displays domain objects
+ApplicationLogic --> Presentation : updates UI
+
+' External Dependencies
+ApplicationLogic --> "PySide6" : GUI framework
+ApplicationLogic --> "OpenCV" : video processing
+ApplicationLogic --> "FFmpeg" : video encoding
+ApplicationLogic --> "moviepy" : video editing
+
+note as N1
+  **Layer Interaction Patterns:**
+  • **Presentation → Application**: User actions trigger business operations
+  • **Application → Domain**: Business logic manipulates domain objects
+  • **Application → Data**: Persistence operations
+  • **Domain → Data**: Data contract definitions
+end note
+
+note as N2
+  **Key Architectural Principles:**
+  • **Separation of Concerns**: Each layer has distinct responsibilities
+  • **Dependency Inversion**: Higher layers depend on abstractions
+  • **Single Responsibility**: Classes have focused purposes
+  • **Dependency Direction**: Dependencies flow downward only
+end note
+
+@enduml
