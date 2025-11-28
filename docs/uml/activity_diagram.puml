@@ -1,4 +1,4 @@
-@startuml Activity Diagram: Event Marking Scenario
+@startuml
 title Диаграмма деятельности: Разметка события во время просмотра матча
 
 start
@@ -7,82 +7,56 @@ start
 :Видео воспроизводится в режиме Playing;
 
 if (Нажата горячая клавиша?) then (Да)
-    :Определить тип события по клавише\n(A/D/S или пользовательская);
-    :Получить текущий номер кадра\ncurrent_frame = get_current_frame_idx();
-
-    if (Режим записи == Dynamic) then (Да)
-        if (Запись уже активна?) then (Да)
-            :Завершить текущую запись;
-            :Вычислить start_frame с учетом pre-roll;
-            :Создать объект Marker\n(start_frame, current_frame, event_name);
-            :Добавить Marker в коллекцию markers[];
-            :Автоматически перейти к start_frame\nseek_frame(start_frame);
-            :Отправить сигнал markers_changed.emit();
-            :Обновить timeline\nemit timeline_update();
-        else (Нет)
-            :Начать новую запись;
-            :Установить флаг is_recording = true;
-            :Сохранить recording_event_name и recording_start_frame;
-            :Показать статус "Recording";
-            :emit recording_status_changed(event_name, "Recording");
-        endif
-    else (Fixed Length)
-        :Вычислить границы сегмента\n(fixed_duration + pre/post roll);
-        :Создать Marker с фиксированной длиной;
-        :Добавить в коллекцию markers[];
-        :Показать статус "Fixed";
-        :emit recording_status_changed(event_name, "Fixed");
-        :Перейти к началу сегмента\nseek_frame(start_frame);
+  :Определить тип события по клавише\n(A/D/S или пользовательская);
+  :Получить текущий номер кадра\ncurrent_frame = get_current_frame_idx();
+  
+  if (Режим записи == Dynamic) then (Да)
+    if (Запись уже активна?) then (Да)
+      :Завершить текущую запись;
+      :Вычислить start_frame с учетом pre-roll;
+      :Создать объект Marker\n(start_frame, current_frame, event_name);
+      :Добавить Marker в коллекцию markers[];
+      :Автоматически перейти к start_frame\nseek_frame(start_frame);
+      :Отправить сигнал markers_changed.emit();
+      :Обновить timeline\nemit timeline_update();
+    else (Нет)
+      :Начать новую запись;
+      :Установить флаг is_recording = true;
+      :Сохранить recording_event_name и recording_start_frame;
+      :Показать статус "Recording";
+      :emit recording_status_changed(event_name, "Recording");
     endif
-
-    :Отправить сигнал markers_changed.emit();
-    :Обновить отображение timeline;
-    :Сохранить операцию в Undo стек\npush_command(new AddMarkerCommand());
-
+  else (Fixed Length)
+    :Вычислить границы сегмента\n(fixed_duration + pre/post roll);
+    :Создать Marker с фиксированной длиной;
+    :Добавить в коллекцию markers[];
+    :Показать статус "Fixed";
+    :emit recording_status_changed(event_name, "Fixed");
+    :Перейти к началу сегмента\nseek_frame(start_frame);
+  endif
+  
+  :Отправить сигнал markers_changed.emit();
+  :Обновить отображение timeline;
+  :Сохранить операцию в Undo стек\npush_command(new AddMarkerCommand());
 else (Нет)
-    :Продолжить воспроизведение видео;
+  :Продолжить воспроизведение видео;
 endif
 
 :Проверить условия завершения;
 
 if (Конец видео?) then (Да)
-    :Остановить воспроизведение\npause();
-    :Показать финальный кадр;
-    stop
+  :Остановить воспроизведение\npause();
+  :Показать финальный кадр;
+  stop
 else (Нет)
-    if (Пользователь нажал Pause/Stop?) then (Да)
-        :Остановить воспроизведение;
-        :Сохранить текущую позицию;
-        stop
-    else (Нет)
-        :Продолжить цикл воспроизведения;
-        goto :Пользователь просматривает видео;
-    endif
+  if (Пользователь нажал Pause/Stop?) then (Да)
+    :Остановить воспроизведение;
+    :Сохранить текущую позицию;
+    stop
+  else (Нет)
+    :Продолжить цикл воспроизведения;
+    detach
+  endif
 endif
-
-note right
-  **Ключевые действия:**
-  1. Определение типа события по горячей клавише
-  2. Получение текущего кадра
-  3. Создание/завершение маркера
-  4. Обновление UI и сигналов
-  5. Сохранение в undo-стек
-end note
-
-note as N1
-  **Режимы работы:**
-  • **Dynamic**: Два нажатия клавиши = начало и конец сегмента
-  • **Fixed Length**: Одно нажатие = сегмент фиксированной длины
-  • **Pre-roll**: Автоматический откат перед началом сегмента
-  • **Post-roll**: Добавление кадров в конец сегмента
-end note
-
-note as N2
-  **Сигналы и события:**
-  • markers_changed.emit() - обновление списка маркеров
-  • recording_status_changed.emit() - статус записи
-  • timeline_update.emit() - обновление таймлайна
-  • frame_ready.emit(frame) - новый кадр для отображения
-end note
 
 @enduml

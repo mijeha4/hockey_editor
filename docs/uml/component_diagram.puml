@@ -1,97 +1,121 @@
-@startuml Hockey Editor Component Diagram
-title Hockey Editor System Component Diagram
+@startuml
+!theme plain
+title Системная архитектура Hockey Editor — Диаграмма компонентов
 
-package "hockey_editor" as HE {
+' ======================= ОСНОВНОЕ ПРИЛОЖЕНИЕ =======================
+package "hockey_editor" as HE #F5F5F5 {
 
-    package "core" as Core {
-        [VideoController] as VC
-        [VideoProcessor] as VP
-        [EventCreationController] as ECC
-        [ProjectManager] as PM
-        [Exporter] as EXP
+    package "Ядро системы" as Core #FFE5E5 {
+        component "VideoController" as VC
+        component "VideoProcessor" as VP
+        component "EventCreationController" as ECC
+        component "ProjectManager" as PM
+        component "Exporter" as EXP
     }
 
-    package "ui" as UI {
-        [MainWindow] as MW
-        [TimelineGraphicsView] as TGV
-        [PreviewWindow] as PW
-        [EditSegmentDialog] as ESD
-        [ExportDialog] as ED
-        [SettingsDialog] as SD
-        [VideoWindow] as VW
+    package "Пользовательский интерфейс" as UI #E3F2FD {
+        component "MainWindow" as MW
+        component "TimelineGraphicsView" as TGV
+        component "PreviewWindow" as PW
+        component "EditSegmentDialog" as ESD
+        component "ExportDialog" as ED
+        component "SettingsDialog" as SD
+        component "VideoWindow" as VW
     }
 
-    package "models" as Models {
-        [Marker] as M
-        [EventType] as ET
+    package "Модели данных" as Models #FFF8E5 {
+        component "Marker" as M
+        component "EventType (enum)" as ET
     }
 
-    package "utils" as Utils {
-        [SettingsManager] as SM
-        [ShortcutManager] as SCM
-        [UndoRedoManager] as URM
-        [AutosaveManager] as AM
-        [TimeUtils] as TU
+    package "Вспомогательные утилиты" as Utils #E8F5E8 {
+        component "SettingsManager" as SM
+        component "ShortcutManager" as SCM
+        component "UndoRedoManager" as URM
+        component "AutosaveManager" as AM
+        component "TimeUtils" as TU
     }
 }
 
-' External Dependencies
-[OpenCV] as CV
-[PySide6] as PS6
-[FFmpeg] as FF
-[MPV] as MPV
+' ======================= ВНЕШНИЕ БИБЛИОТЕКИ =======================
+component "OpenCV" as CV #FFCDD2
+component "libmpv" as MPV #F8BBD0
+component "FFmpeg" as FF #C8E6C9
+component "PySide6 / Qt" as PS6 #BBDEFB
 
-' Data Flow and Dependencies
-VC --> VP : video I/O operations
-VC --> ECC : event creation management
-VC --> PM : project persistence
-VC --> EXP : segment export
-VC --> URM : undo/redo operations
-VC --> AM : autosave functionality
+' ======================= СИНХРОННЫЕ ЗАВИСИМОСТИ =======================
+VC --> VP : чтение кадров и метаданных
+VC --> ECC : управление записью событий
+VC --> PM : сохранение / загрузка проекта
+VC --> EXP : запуск экспорта
+VC --> URM : команды undo / redo
+VC --> AM : автосохранение
 
-MW --> VC : user commands
-MW --> TGV : timeline updates
-MW --> PW : segment preview
-MW --> ESD : segment editing
-MW --> ED : export operations
-MW --> SD : settings management
+MW --> VC : команды и горячие клавиши
+MW --> TGV : обновление таймлайна
+MW --> PW : обновление списка сегментов
+MW --> ESD : редактирование маркера
+MW --> ED : диалог экспорта
+MW --> SD : настройки приложения
 
-TGV --> M : marker display
-PW --> M : marker filtering/playback
-ESD --> M : marker editing
-PM --> M : marker serialization
+TGV --> M : отображает на таймлайне
+PW --> M : фильтрует и проигрывает
+ESD --> M : редактирует данные
+PM --> M : сериализует ↔ десериализует
+ECC --> M : создаёт новые маркеры
+EXP --> M : обрабатывает при экспорте
 
-ECC --> M : marker creation
-EXP --> M : marker processing
+SCM --> SM : сохраняет горячие клавиши
+AM --> PM : использует для снимков проекта
 
-SCM --> SM : shortcut persistence
-AM --> PM : recovery snapshots
+VP --> CV : обработка видео
+VP --> MPV : воспроизведение в VideoWindow
+VW --> MPV : отображение видео
+EXP --> FF : кодирование выходных файлов
+MW --> PS6 : весь GUI на Qt
 
-' External Dependencies
-VP --> CV : computer vision
-VP --> MPV : video playback
-EXP --> FF : video encoding
-UI --> PS6 : GUI framework
+' ======================= СИГНАЛЫ Qt (асинхронная связь) =======================
+VC ..> MW : markers_changed
+VC ..> MW : recording_status_changed
+VC ..> TGV : timeline_update_requested
+VC ..> PW : segments_list_changed
 
-' Signal/Slot Communications (Qt)
-VC ..> MW : signals (markers_changed,\nrecording_status_changed)
-ECC ..> VC : signals (recording_started,\nrecording_finished)
-ECC ..> MW : signals (state_changed)
-AM ..> VC : signals (autosave_completed)
+ECC ..> VC : recording_started
+ECC ..> VC : recording_finished
+ECC ..> MW : state_changed
 
-note as N1
-  **Component Responsibilities:**
-  • **Core**: Business logic, video processing, data management
-  • **UI**: User interface, event handling, visualization
-  • **Models**: Data structures, domain objects
-  • **Utils**: Cross-cutting concerns, utilities
+AM ..> MW : autosave_completed
+AM ..> VC : autosave_triggered
+
+' ======================= ПОЯСНЕНИЯ =======================
+note top of HE #FFEBEE
+  <size:15><b>Hockey Editor</b></size>
+  Система покадровой разметки и анализа хоккейных матчей
+  • Чёткое разделение ответственности
+  • Модульная архитектура
+  • Асинхронная связь через сигналы Qt
 end note
 
-note as N2
-  **Communication Patterns:**
-  • Direct method calls for synchronous operations
-  • Qt signals/slots for asynchronous events
-  • Dependency injection for testability
+note right of VC #FFCDD2
+  <b>VideoController — центральный хаб</b>
+  • Координирует все модули
+  • Управляет состоянием приложения
+  • Рассылает уведомления об изменениях
 end note
+
+note left of MW #BBDEFB
+  <b>MainWindow — главный контейнер UI</b>
+  • Собирает все виджеты
+  • Обрабатывает ввод пользователя
+  • Реагирует на сигналы ядра
+end note
+
+legend bottom right
+  | Тип связи                | Значение                              |
+  | ------------------------ | ------------------------------------- |
+  | ──›                      | Синхронный вызов / зависимость        |
+  | - - - -›                 | Сигнал Qt (асинхронное событие)       |
+  | Цветные прямоугольники   | Внешние библиотеки                    |
+end legend
 
 @enduml

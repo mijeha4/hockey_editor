@@ -1,81 +1,91 @@
-@startuml Hockey Editor Context Class Diagram
-title Контекстная диаграмма классов Hockey Editor Pro
+@startuml
+!theme plain
+title Диаграмма классов: Контекст Hockey Editor Pro
 
-class MainWindow {
-    +show()
-    +close()
+' =================== ГРУППА UI (ИНТЕРФЕЙС) ===================
+package "Interface (Интерфейс)" {
+    class MainWindow {
+        +show()
+        +close()
+    }
+    note right of MainWindow
+      Точка входа в приложение.
+      Обрабатывает нажатия клавиш
+      и передает их контроллеру.
+    end note
 }
 
-class VideoController {
-    +load_video(path: str): bool
-    +play(): void
-    +pause(): void
-    +on_hotkey_pressed(key: str): void
-    +save_project(path: str): bool
-    +load_project(path: str): bool
+' =================== ГРУППА CORE (ЯДРО) ===================
+package "Core (Ядро системы)" {
+    class VideoController {
+        +load_video(path: str): bool
+        +play(): void
+        +pause(): void
+        +on_hotkey_pressed(key: str): void
+        +save_project(path: str): bool
+        +load_project(path: str): bool
+    }
+
+    class VideoProcessor {
+        +load(path: str): bool
+        +get_frame(frame: int): ndarray
+        +get_fps(): float
+        +get_total_frames(): int
+    }
 }
 
-class VideoProcessor {
-    +load(path: str): bool
-    +get_frame(frame: int): ndarray
-    +get_fps(): float
-    +get_total_frames(): int
+' =================== ГРУППА DATA (ДАННЫЕ) ===================
+package "Data (Данные и Проект)" {
+    class ProjectManager {
+        +save_project(project: Project, path: str): bool
+        +load_project(path: str): Project
+        +get_recent_projects(): List[str]
+    }
+
+    class CustomEventManager {
+        +get_event_by_hotkey(key: str): CustomEvent
+        +add_event(event: CustomEvent): void
+    }
+
+    class Marker {
+        +start_frame: int
+        +end_frame: int
+        +event_name: str
+        +note: str
+    }
 }
 
-class ProjectManager {
-    +save_project(project: Project, path: str): bool
-    +load_project(path: str): Project
-    +get_recent_projects(): List[str]
+' =================== ГРУППА UTILS (УТИЛИТЫ) ===================
+package "Utils (Инструменты)" {
+    class SettingsManager {
+        +save_hotkeys(hotkeys: Dict): void
+        +load_hotkeys(): Dict
+        +save_recording_mode(mode: str): void
+    }
+
+    class UndoRedoManager {
+        +push_command(command: UndoCommand): void
+        +undo(): void
+        +redo(): void
+    }
 }
 
-class Marker {
-    +start_frame: int
-    +end_frame: int
-    +event_name: str
-    +note: str
-}
+' =================== СВЯЗИ (RELATIONSHIPS) ===================
 
-class SettingsManager {
-    +save_hotkeys(hotkeys: Dict): void
-    +load_hotkeys(): Dict
-    +save_recording_mode(mode: str): void
-}
+MainWindow --> VideoController : Делегирует команды\nпользователя
 
-class UndoRedoManager {
-    +push_command(command: UndoCommand): void
-    +undo(): void
-    +redo(): void
-}
+VideoController --> VideoProcessor : Управляет\nвоспроизведением
+VideoController --> ProjectManager : Сохраняет/Загружает\nпроект
+VideoController --> SettingsManager : Читает настройки\nи горячие клавиши
+VideoController --> UndoRedoManager : Записывает историю\nдействий
+VideoController --> CustomEventManager : Определяет тип события\nпо клавише
 
-class CustomEventManager {
-    +get_event_by_hotkey(key: str): CustomEvent
-    +add_event(event: CustomEvent): void
-    +remove_event(name: str): void
-}
+ProjectManager ..> Marker : Сериализует список\nмаркеров в файл
 
-' Main relationships
-MainWindow --> VideoController : controls
-VideoController --> VideoProcessor : uses
-VideoController --> ProjectManager : uses
-VideoController --> SettingsManager : uses
-VideoController --> UndoRedoManager : uses
-VideoController --> CustomEventManager : uses
-VideoController --> Marker : creates/manages
-
-' Marker relationships
-ProjectManager --> Marker : serializes
-UndoRedoManager --> Marker : operates on
-
-note as N1
-  **Основные компоненты системы:**
-  • MainWindow - главный интерфейс пользователя
-  • VideoController - центральный контроллер видео операций
-  • VideoProcessor - обработка видео файлов
-  • ProjectManager - управление проектами
-  • Marker - модель данных события
-  • SettingsManager - управление настройками
-  • UndoRedoManager - система отмены/повтора
-  • CustomEventManager - управление типами событий
+note bottom of VideoController
+  <b>Центральный контроллер</b>
+  Координирует работу всех
+  подсистем (Mediator pattern)
 end note
 
 @enduml

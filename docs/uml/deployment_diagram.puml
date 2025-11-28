@@ -1,8 +1,11 @@
 @startuml Deployment Diagram
+!theme plain
 title Диаграмма развертывания: Hockey Editor Pro Desktop Application
 
-node "User Workstation\n(Windows/Linux/macOS)" as Workstation {
-    node "Hockey Editor Pro Application" as App {
+' ================== РАБОЧАЯ СТАНЦИЯ ==================
+node "Рабочая станция пользователя\n(Windows/Linux/macOS)" as Workstation {
+    
+    node "Приложение Hockey Editor Pro" as App {
         component [MainWindow] as MW
         component [VideoController] as VC
         component [VideoProcessor] as VP
@@ -10,142 +13,115 @@ node "User Workstation\n(Windows/Linux/macOS)" as Workstation {
         component [SettingsManager] as SM
         component [UndoRedoManager] as URM
 
-        MW --> VC : controls
-        VC --> VP : video I/O
-        VC --> PM : project persistence
-        VC --> SM : configuration
-        VC --> URM : command history
+        MW --> VC : управление
+        VC --> VP : видео ввод/вывод
+        VC --> PM : работа с проектом
+        VC --> SM : конфигурация
+        VC --> URM : история команд
     }
 
-    database "Local Storage" as Storage {
-        folder "Project Files (.hep)" as Projects
-        file "Settings (QSettings)" as Settings
-        folder "Autosave Recovery" as Recovery
-        folder "Recent Projects" as Recent
+    database "Локальное хранилище" as Storage {
+        folder "Файлы проектов (.hep)" as Projects
+        file "Настройки (QSettings)" as Settings
+        folder "Автосохранение" as Recovery
+        folder "Недавние проекты" as Recent
     }
 
-    App --> Storage : persists data
+    App --> Storage : сохраняет данные
 }
 
-node "External Dependencies\n(Provided Interfaces)" as External {
+' ================== ВНЕШНИЕ ЗАВИСИМОСТИ ==================
+node "Внешние зависимости\n(Библиотеки и API)" as External {
 
-    interface "PySide6" as PySide6 {
-        +QApplication
-        +QMainWindow
-        +QGraphicsView
-        +QTimer
-        +QSettings
-        +QShortcut
-        +QDialog
-    }
-
-    interface "OpenCV" as OpenCV {
-        +VideoCapture
-        +imshow()
-        +waitKey()
-        +read()
-        +set()
-        +get()
-    }
-
-    interface "FFmpeg" as FFmpeg {
-        +Video Encoding
-        +Format Conversion
-        +Codec Support
-        +Stream Processing
-    }
-
-    interface "moviepy" as MoviePy {
-        +VideoFileClip
-        +concatenate_videoclips()
-        +write_videofile()
-        +subclip()
-    }
+    interface "PySide6" as PySide6
+    interface "OpenCV" as OpenCV
+    interface "FFmpeg" as FFmpeg
+    interface "moviepy" as MoviePy
 
     note right of PySide6
       **PySide6 (Qt for Python):**
-      • GUI framework and widgets
-      • Event-driven programming
-      • Cross-platform compatibility
-      • Native OS integration
+      • Графический каркас и виджеты
+      • Событийно-ориентированное ПО
+      • Кроссплатформенность
+      • Нативная интеграция с ОС
     end note
 
     note right of OpenCV
       **OpenCV (Computer Vision):**
-      • Video file reading/decoding
-      • Frame extraction and seeking
-      • Real-time video processing
-      • Multi-format support
+      • Чтение и декодирование видео
+      • Извлечение кадров и навигация
+      • Обработка видео в реальном времени
+      • Поддержка множества форматов
     end note
 
     note right of FFmpeg
       **FFmpeg (Multimedia Framework):**
-      • Video encoding/decoding
-      • Format conversion
-      • Codec libraries
-      • Command-line video processing
+      • Кодирование/декодирование
+      • Конвертация форматов
+      • Библиотеки кодеков
+      • Обработка потоков
     end note
 
     note right of MoviePy
       **moviepy (Video Editing):**
-      • High-level video editing
-      • Clip concatenation
-      • Effects and transitions
-      • Export to various formats
+      • Высокоуровневый монтаж
+      • Склейка клипов (Concatenation)
+      • Эффекты и переходы
+      • Экспорт в разные форматы
     end note
 }
 
-' Deployment relationships
-App --> PySide6 : <<use>>
-App --> OpenCV : <<use>>
-App --> FFmpeg : <<use>>
-App --> MoviePy : <<use>>
+' ================== СВЯЗИ РАЗВЕРТЫВАНИЯ ==================
+App ..> PySide6 : <<использует>>
+App ..> OpenCV : <<использует>>
+App ..> FFmpeg : <<использует>>
+App ..> MoviePy : <<использует>>
 
-' Data flow
-VP --> "Video Files\n(.mp4, .avi, .mov, .mkv)" : reads
-PM --> Projects : saves/loads
-SM --> Settings : persists
-URM --> Recovery : backup commands
+' ================== ПОТОКИ ДАННЫХ ==================
+VP <-- "Видео файлы\n(.mp4, .avi, .mov, .mkv)" : чтение
+PM --> Projects : сохранение/загрузка
+SM --> Settings : запись настроек
+URM --> Recovery : резервное копирование
 
-artifact "Video Files" as VideoFiles {
+' ================== АРТЕФАКТЫ ==================
+artifact "Исходные видео" as VideoFiles {
     file "*.mp4" as MP4
     file "*.avi" as AVI
     file "*.mov" as MOV
     file "*.mkv" as MKV
-    file "*.flv" as FLV
 }
 
-artifact "Export Formats" as ExportFormats {
+artifact "Форматы экспорта" as ExportFormats {
     file "*.mp4" as ExportMP4
     file "*.mov" as ExportMOV
-    file "*.mkv" as ExportMKV
 }
 
-App --> VideoFiles : processes input
-App --> ExportFormats : generates output
+App <-- VideoFiles : входные данные
+App --> ExportFormats : генерация выходных файлов
 
+' ================== ОБЩИЕ ЗАМЕТКИ ==================
 note as N1
-  **Deployment Environment:**
-  • **Target Platforms**: Windows 10+, Linux (Ubuntu 18.04+), macOS 10.14+
-  • **Python Version**: 3.8+
-  • **Installation**: Standalone executable or pip install
-  • **Dependencies**: All external libraries bundled or installed via pip
+  **Среда развертывания:**
+  • **Целевые платформы**: Windows 10+, Linux (Ubuntu 18.04+), macOS 10.14+
+  • **Версия Python**: 3.8+
+  • **Установка**: Standalone executable или pip install
+  • **Зависимости**: Все внешние библиотеки упакованы или ставятся через pip
 end note
 
 note as N2
-  **Runtime Requirements:**
-  • **RAM**: Minimum 4GB, Recommended 8GB+
-  • **Storage**: 500MB application + project data
-  • **Display**: 1920x1080 minimum resolution
-  • **GPU**: Optional, for hardware-accelerated video decoding
+  **Системные требования (Runtime):**
+  • **ОЗУ**: Минимум 4GB, Рекомендуется 8GB+
+  • **Диск**: 500MB приложение + место под проекты
+  • **Экран**: Минимум 1920x1080
+  • **GPU**: Опционально, для аппаратного ускорения декодирования
 end note
 
 note as N3
-  **Component Distribution:**
-  • **Core Application**: Single executable with embedded Python
-  • **External Libraries**: Either bundled or installed system-wide
-  • **User Data**: Stored in user home directory or AppData
-  • **Temporary Files**: Created in system temp directory during export
+  **Распределение компонентов:**
+  • **Ядро приложения**: Единый исполняемый файл со встроенным Python
+  • **Внешние библиотеки**: Либо встроены (bundled), либо системные
+  • **Данные пользователя**: Хранятся в домашней директории или AppData
+  • **Временные файлы**: Создаются в системной temp папке при экспорте
 end note
 
 @enduml

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 import cv2
 import numpy as np
 from pathlib import Path
-from .timeline_graphics import TimelineGraphicsView
+from .timeline_graphics import TimelineWidget
 from .segment_editor import SegmentEditorDialog
 from .settings_dialog import SettingsDialog
 from ..models.marker import EventType
@@ -169,9 +169,15 @@ class MainWindow(QMainWindow):
         
         # ===== ТАЙМЛАЙН =====
         main_layout.addWidget(QLabel("Timeline:"))
-        self.timeline_widget = TimelineGraphicsView()
-        self.timeline_widget.main_window = self  # Set reference for double-click
-        self.timeline_widget.set_controller(self.controller)
+        
+        # 1. Передаем контроллер СРАЗУ в скобках
+        self.timeline_widget = TimelineWidget(self.controller)
+        
+        # 2. Настраиваем ссылку на главное окно (для двойного клика)
+        # В новом коде мы обращаемся к scene внутри виджета
+        self.timeline_widget.scene.main_window = self
+        
+        # 3. Добавляем виджет на форму
         main_layout.addWidget(self.timeline_widget)
         
         # ===== КНОПКИ СОБЫТИЙ (динамические) И НАСТРОЙКИ =====
@@ -467,8 +473,7 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z', self._on_redo_clicked)
 
     def _setup_event_shortcuts(self):
-        """Создаёт глобальные горячие клавиши для всех событий."""
-        # Очищаем старые (на всякий случай)
+        """Создаёт глобальные горячие клавиши для всех событий (A, D, S и кастомные)."""
         if hasattr(self, '_event_shortcuts'):
             for s in self._event_shortcuts:
                 s.activated.disconnect()
@@ -480,11 +485,11 @@ class MainWindow(QMainWindow):
         for event in self.event_manager.get_all_events():
             if not event.shortcut:
                 continue
-                
-            # Правильно захватываем переменную!
+
             shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self)
+            # ПРАВИЛЬНЫЙ вызов — передаём только строку с клавишей
             shortcut.activated.connect(
-                lambda checked=False, ev=event: self._on_event_hotkey_pressed(ev)
+                lambda checked=False, key=event.shortcut.upper(): self.controller.on_hotkey_pressed(key)
             )
             self._event_shortcuts.append(shortcut)
 
@@ -497,34 +502,6 @@ class MainWindow(QMainWindow):
         """Отмена записи (Escape)."""
         self.controller.cancel_recording()
         self._update_play_btn_text()
-
-    def _on_event_hotkey_pressed(self, event):
-        """Обрабатывает нажатие горячей клавиши события."""
-        current = self.controller.active_event
-        
-        if current and current.name == event.name:
-            # Это второе нажатие — завершаем отрезок
-            self.controller.finish_recording()
-            self._update_recording_indicator(None)
-        else:
-            # Первое нажатие — начинаем запись
-            self.controller.start_recording(event)
-            self._update_recording_indicator(event)
-
-    def _update_recording_indicator(self, event):
-        """Подсвечивает активную кнопку и статус."""
-        # Сброс всех кнопок
-        for btn in self.event_buttons.values():
-            btn.setStyleSheet("")
-        
-        if event:
-            if event.name in self.event_buttons:
-                self.event_buttons[event.name].setStyleSheet(
-                    "background-color: #00ff00; color: black; font-weight: bold;"
-                )
-            self.statusBar().showMessage(f"ЗАПИСЬ: {event.name} (нажмите {event.shortcut} снова для завершения)")
-        else:
-            self.statusBar().showMessage("Готов")
 
     def _on_selection_changed(self) -> None:
         """Handle event selection change."""

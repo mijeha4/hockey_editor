@@ -1,9 +1,11 @@
 @startuml Hockey Editor Use Case Diagram
-title Hockey Editor Use Case Diagram
+!theme plain
+left to right direction
+title Диаграмма вариантов использования Hockey Editor Pro
 
-actor "Hockey Coach/Analyst" as Coach
+actor "Хоккейный Тренер / Аналитик" as Coach
 
-rectangle "Hockey Editor Pro" {
+rectangle "Hockey Editor Pro (System)" {
     usecase "Load Video" as UC1
     usecase "Mark Attack Events" as UC2
     usecase "Mark Defense Events" as UC3
@@ -19,71 +21,77 @@ rectangle "Hockey Editor Pro" {
     usecase "Undo/Redo Actions" as UC13
 }
 
-' Primary use cases
-Coach --> UC1 : Open video file
-Coach --> UC2 : Press 'A' key twice
-Coach --> UC3 : Press 'D' key twice
-Coach --> UC4 : Press 'S' key twice
-Coach --> UC5 : View interactive timeline
-Coach --> UC6 : Double-click segment
-Coach --> UC7 : Click Preview button
-Coach --> UC8 : Click Export button
-Coach --> UC9 : Ctrl+S or File→Save
-Coach --> UC10 : File→Open Project
-Coach --> UC11 : Settings dialog
-Coach --> UC12 : Settings→Hotkeys
+' ================== ПРЯМЫЕ ВЗАИМОДЕЙСТВИЯ ==================
+Coach --> UC1 : Открыть видеофайл
+Coach --> UC2 : Клавиша 'A' (2 раза)
+Coach --> UC3 : Клавиша 'D' (2 раза)
+Coach --> UC4 : Клавиша 'S' (2 раза)
+Coach --> UC5 : Работа с таймлайном
+Coach --> UC6 : Двойной клик по сегменту
+Coach --> UC7 : Кнопка Preview
+Coach --> UC8 : Кнопка Export
+Coach --> UC9 : Ctrl+S или Файл->Сохранить
+Coach --> UC10 : Файл->Открыть проект
+Coach --> UC11 : Меню Настроек
+Coach --> UC12 : Настройки -> Горячие клавиши
 Coach --> UC13 : Ctrl+Z / Ctrl+Shift+Z
 
-' Include relationships (mandatory dependencies)
+' ================== ОТНОШЕНИЯ INCLUDE (Обязательные) ==================
+' Чтобы разметить событие, видео должно быть загружено
 UC2 ..> UC1 : <<include>>
 UC3 ..> UC1 : <<include>>
 UC4 ..> UC1 : <<include>>
+' Просмотр таймлайна требует загруженного видео
 UC5 ..> UC1 : <<include>>
+' Редактирование происходит на таймлайне
 UC6 ..> UC5 : <<include>>
 UC7 ..> UC5 : <<include>>
 UC8 ..> UC5 : <<include>>
+' Сохранение требует загруженного контента
 UC9 ..> UC1 : <<include>>
-UC10 ..> UC9 : <<include>>
 
-' Extend relationships (optional extensions)
+' ================== ОТНОШЕНИЯ EXTEND (Опциональные) ==================
+' Настройка горячих клавиш расширяет общие настройки
 UC11 ..> UC12 : <<extend>>
+' Отмена действия применима к созданию и редактированию
 UC13 ..> UC2 : <<extend>>
 UC13 ..> UC3 : <<extend>>
 UC13 ..> UC4 : <<extend>>
 UC13 ..> UC6 : <<extend>>
 
-note right of UC2
-  **Event Marking Workflow:**
-  1. Video playing
-  2. Press hotkey (A/D/S) - start recording
-  3. Video continues playing
-  4. Press same hotkey again - end recording
-  5. Segment appears on timeline
+' ================== ЗАМЕТКИ И ПОЯСНЕНИЯ ==================
+note bottom of UC2
+  **Процесс разметки событий:**
+  1. Видео воспроизводится
+  2. Нажатие хоткея (A/D/S) — начало записи
+  3. Видео продолжает играть
+  4. Повторное нажатие — конец записи
+  5. Сегмент появляется на таймлайне
 end note
 
-note right of UC5
-  **Timeline Features:**
-  • 3 color-coded tracks (Attack/Defense/Shift)
-  • Zoom and pan support
-  • Real-time playhead
-  • Segment drag/resize
-  • Double-click to edit
+note bottom of UC5
+  **Функции таймлайна:**
+  • 3 цветных трека (Атака/Оборона/Смена)
+  • Поддержка зума и панорамирования
+  • Курсор воспроизведения (Playhead)
+  • Перетаскивание и растягивание
+  • Двойной клик для правки
 end note
 
-note right of UC8
-  **Export Options:**
-  • Video segments (MP4/MOV/MKV)
-  • CSV data export
-  • Quality settings
-  • Batch processing
+note bottom of UC8
+  **Опции экспорта:**
+  • Видеосегменты (MP4/MOV/MKV)
+  • Экспорт данных в CSV
+  • Настройки качества
+  • Пакетная обработка
 end note
 
 note as N1
-  **Primary Actor Goals:**
-  • **Mark Events**: Real-time event annotation during video playback
-  • **Review Work**: Interactive timeline with filtering and preview
-  • **Share Results**: Export segments for analysis or presentation
-  • **Manage Projects**: Save/load work with version control
+  **Основные цели пользователя:**
+  • **Разметка**: Аннотация событий в реальном времени при просмотре
+  • **Проверка**: Интерактивный таймлайн с фильтрацией
+  • **Результат**: Экспорт нарезок для анализа командой
+  • **Управление**: Сохранение работы и версионность (.hep)
 end note
 
 @enduml

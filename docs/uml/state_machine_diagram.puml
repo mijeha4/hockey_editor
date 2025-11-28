@@ -1,33 +1,63 @@
 @startuml Event Creation State Machine
-title Event Creation State Machine (EventCreationController)
+!theme plain
+title Диаграмма состояний: Создание событий (EventCreationController)
 
+' Начало диаграммы
 [*] --> IDLE
 
-state IDLE as "IDLE\n• No active recording\n• Waiting for hotkey press"
-state RECORDING as "RECORDING\n• Event type captured\n• Start frame recorded\n• Pre-roll applied\n• Recording active"
-state RECORDED as "RECORDED\n• Marker created\n• Video seeked to start\n• Temporary state"
+' ================== ОПРЕДЕЛЕНИЕ СОСТОЯНИЙ ==================
+state IDLE as "IDLE (Ожидание)\n• Нет активной записи\n• Ожидание нажатия горячей клавиши"
+state RECORDING as "RECORDING (Запись)\n• Тип события зафиксирован\n• Начальный кадр сохранён\n• Применён Pre-roll (отступ)\n• Идет процесс записи"
+state RECORDED as "RECORDED (Записано)\n• Маркер создан\n• Видео перемотано на начало\n• Временное состояние"
 
-IDLE --> RECORDING : on_hotkey_pressed(event_type)\n[First press of A/D/S]
-note right : _start_recording()\n• Set current_event_type\n• Record start_frame\n• Calculate pre-roll\n• Emit recording_started
+' ================== ПЕРЕХОДЫ ==================
+IDLE --> RECORDING : on_hotkey_pressed(event_type)\n[Первое нажатие A/D/S]
+note right
+  **_start_recording()**
+  • Установить current_event_type
+  • Записать start_frame
+  • Рассчитать pre-roll
+  • Сигнал: recording_started
+end note
 
-RECORDING --> RECORDING : update_recording_frame()\n[Video playback continues]
-note right : recording_updated signal\nemitted continuously
+RECORDING --> RECORDING : update_recording_frame()\n[Видео воспроизводится]
+note right
+  Сигнал **recording_updated**
+  отправляется непрерывно
+  (для UI индикации)
+end note
 
-RECORDING --> RECORDED : on_hotkey_pressed(event_type)\n[Same key pressed again]
-note right : _finish_recording()\n• Calculate end frame\n• Apply post-roll\n• Create Marker\n• Seek to start frame\n• Emit recording_finished
+RECORDING --> RECORDED : on_hotkey_pressed(event_type)\n[Повторное нажатие той же клавиши]
+note right
+  **_finish_recording()**
+  • Рассчитать конечный кадр
+  • Применить post-roll
+  • Создать объект Marker
+  • Перемотать видео на начало
+  • Сигнал: recording_finished
+end note
 
-RECORDING --> IDLE : cancel_recording()\n[ESC pressed or error]
-note right : _reset_state()\ncalled immediately
+RECORDING --> IDLE : cancel_recording()\n[Нажат ESC или ошибка]
+note right
+  **_reset_state()**
+  вызывается немедленно
+  для сброса
+end note
 
-RECORDED --> IDLE : Timer (500ms)\n[Automatic transition]
-note right : _reset_state()\ncalled via QTimer.singleShot
+RECORDED --> IDLE : Таймер (500мс)\n[Автоматический переход]
+note right
+  **_reset_state()**
+  вызывается через
+  QTimer.singleShot
+end note
 
+' ================== ЗАМЕТКИ ==================
 note as N1
-  **State Transitions:**
-  • IDLE → RECORDING: User initiates event marking
-  • RECORDING → RECORDED: User completes event marking
-  • RECORDED → IDLE: Automatic cleanup
-  • RECORDING → IDLE: Cancellation
+  **Логика переходов:**
+  • **IDLE → RECORDING**: Пользователь начинает разметку события
+  • **RECORDING → RECORDED**: Пользователь завершает разметку (фиксация конца)
+  • **RECORDED → IDLE**: Автоматическая очистка состояния и подготовка к следующему
+  • **RECORDING → IDLE**: Принудительная отмена записи
 end note
 
 @enduml

@@ -1,149 +1,167 @@
-"""
-Undo/Redo System - QUndoStack с командами для всех операций.
-"""
+# utils/undo_redo.py
+# Исправленная версия — поддерживает новую структуру Marker (event_name)
 
-from PySide6.QtGui import QUndoStack, QUndoCommand
-from PySide6.QtCore import Signal, QObject
-from typing import Optional, List
-from ..models.marker import Marker, EventType
+from PySide6.QtCore import QObject
+from typing import List
+from abc import ABC, abstractmethod
+
+
+class QUndoCommand(ABC):
+    """Базовый класс для команд undo/redo."""
+
+    def __init__(self):
+        self.description = ""
+
+    @abstractmethod
+    def undo(self):
+        """Отменить операцию."""
+        pass
+
+    @abstractmethod
+    def redo(self):
+        """Повторить операцию."""
+        pass
 
 
 class MarkerCommand(QUndoCommand):
     """Базовый класс для команд операций с маркерами."""
-    
-    def __init__(self, description: str):
-        super().__init__(description)
+
+    def __init__(self, markers_list: List):
+        super().__init__()
+        self.markers = markers_list
 
 
 class AddMarkerCommand(MarkerCommand):
     """Команда добавления маркера."""
-    
-    def __init__(self, markers_list: List[Marker], marker: Marker):
-        super().__init__(f"Add {marker.type.name} marker")
-        self.markers_list = markers_list
-        self.marker = marker.copy() if hasattr(marker, 'copy') else marker
 
-    def redo(self):
-        """Добавить маркер."""
-        self.markers_list.append(self.marker)
+    def __init__(self, markers_list: List, marker):
+        super().__init__(markers_list)
+        self.marker = marker
+        # ИСПРАВЛЕНО: используется event_name вместо type.name
+        self.description = f"Add {marker.event_name} marker"
 
     def undo(self):
         """Удалить маркер."""
-        if self.marker in self.markers_list:
-            self.markers_list.remove(self.marker)
+        if self.marker in self.markers:
+            self.markers.remove(self.marker)
+
+    def redo(self):
+        """Добавить маркер."""
+        if self.marker not in self.markers:
+            self.markers.append(self.marker)
 
 
 class DeleteMarkerCommand(MarkerCommand):
     """Команда удаления маркера."""
-    
-    def __init__(self, markers_list: List[Marker], index: int):
-        super().__init__("Delete marker")
-        self.markers_list = markers_list
-        self.index = index
-        self.marker = markers_list[index].copy() if hasattr(markers_list[index], 'copy') else markers_list[index]
 
-    def redo(self):
-        """Удалить маркер."""
-        if self.index < len(self.markers_list):
-            self.markers_list.pop(self.index)
+    def __init__(self, markers_list: List, index: int):
+        super().__init__(markers_list)
+        self.index = index
+        if 0 <= index < len(markers_list):
+            self.marker = markers_list[index]
+            # ИСПРАВЛЕНО: используется event_name вместо type.name
+            self.description = f"Delete {self.marker.event_name} marker"
+        else:
+            self.marker = None
+            self.description = "Delete marker"
 
     def undo(self):
         """Восстановить маркер."""
-        self.markers_list.insert(self.index, self.marker)
+        if self.marker and self.marker not in self.markers:
+            self.markers.insert(self.index, self.marker)
+
+    def redo(self):
+        """Удалить маркер."""
+        if self.marker and self.marker in self.markers:
+            self.markers.remove(self.marker)
 
 
 class ModifyMarkerCommand(MarkerCommand):
     """Команда изменения маркера."""
-    
-    def __init__(self, markers_list: List[Marker], index: int, 
-                 old_marker: Marker, new_marker: Marker):
-        super().__init__(f"Modify {new_marker.type.name} marker")
-        self.markers_list = markers_list
-        self.index = index
-        self.old_marker = old_marker.copy() if hasattr(old_marker, 'copy') else old_marker
-        self.new_marker = new_marker.copy() if hasattr(new_marker, 'copy') else new_marker
 
-    def redo(self):
-        """Применить новые значения."""
-        if self.index < len(self.markers_list):
-            self.markers_list[self.index] = self.new_marker
+    def __init__(self, markers_list: List, index: int, old_marker, new_marker):
+        super().__init__(markers_list)
+        self.index = index
+        self.old_marker = old_marker
+        self.new_marker = new_marker
+        # ИСПРАВЛЕНО: используется event_name вместо type.name
+        self.description = f"Modify {old_marker.event_name} marker"
 
     def undo(self):
-        """Восстановить старые значения."""
-        if self.index < len(self.markers_list):
-            self.markers_list[self.index] = self.old_marker
+        """Восстановить старый маркер."""
+        if 0 <= self.index < len(self.markers):
+            self.markers[self.index] = self.old_marker
+
+    def redo(self):
+        """Применить новый маркер."""
+        if 0 <= self.index < len(self.markers):
+            self.markers[self.index] = self.new_marker
 
 
 class ClearMarkersCommand(MarkerCommand):
     """Команда очистки всех маркеров."""
-    
-    def __init__(self, markers_list: List[Marker]):
-        super().__init__("Clear all markers")
-        self.markers_list = markers_list
-        self.saved_markers = [
-            (m.copy() if hasattr(m, 'copy') else m) for m in markers_list
-        ]
 
-    def redo(self):
-        """Очистить маркеры."""
-        self.markers_list.clear()
+    def __init__(self, markers_list: List):
+        super().__init__(markers_list)
+        self.saved_markers = markers_list.copy()
+        self.description = "Clear all markers"
 
     def undo(self):
-        """Восстановить маркеры."""
-        self.markers_list.clear()
-        self.markers_list.extend(self.saved_markers)
+        """Восстановить все маркеры."""
+        self.markers.clear()
+        self.markers.extend(self.saved_markers)
+
+    def redo(self):
+        """Удалить все маркеры."""
+        self.markers.clear()
 
 
 class UndoRedoManager(QObject):
     """Менеджер undo/redo операций."""
-    
-    # Сигналы
-    can_undo_changed = Signal(bool)
-    can_redo_changed = Signal(bool)
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.undo_stack = QUndoStack()
-        self.undo_stack.canUndoChanged.connect(self._on_can_undo_changed)
-        self.undo_stack.canRedoChanged.connect(self._on_can_redo_changed)
+
+    def __init__(self, max_history: int = 50):
+        super().__init__()
+        self.history: List[QUndoCommand] = []
+        self.current_index = -1
+        self.max_history = max_history
 
     def push_command(self, command: QUndoCommand):
-        """Добавить команду в стек."""
-        self.undo_stack.push(command)
+        """Добавить команду в историю."""
+        # Удалить все команды после текущей позиции (если мы делали undo, а потом новое действие)
+        self.history = self.history[:self.current_index + 1]
+
+        # Добавить новую команду
+        self.history.append(command)
+        self.current_index += 1
+
+        # Ограничить размер истории
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
+            self.current_index -= 1
 
     def undo(self):
         """Отменить последнюю операцию."""
-        self.undo_stack.undo()
+        if self.can_undo():
+            command = self.history[self.current_index]
+            command.undo()
+            self.current_index -= 1
 
     def redo(self):
         """Повторить последнюю отменённую операцию."""
-        self.undo_stack.redo()
+        if self.can_redo():
+            self.current_index += 1
+            command = self.history[self.current_index]
+            command.redo()
 
     def can_undo(self) -> bool:
         """Проверить, можно ли отменить."""
-        return self.undo_stack.canUndo()
+        return self.current_index >= 0
 
     def can_redo(self) -> bool:
         """Проверить, можно ли повторить."""
-        return self.undo_stack.canRedo()
+        return self.current_index < len(self.history) - 1
 
-    def undo_text(self) -> str:
-        """Получить текст для кнопки Undo."""
-        return self.undo_stack.undoText()
-
-    def redo_text(self) -> str:
-        """Получить текст для кнопки Redo."""
-        return self.undo_stack.redoText()
-
-    def _on_can_undo_changed(self, can_undo: bool):
-        """Сигнал изменения возможности undo."""
-        self.can_undo_changed.emit(can_undo)
-
-    def _on_can_redo_changed(self, can_redo: bool):
-        """Сигнал изменения возможности redo."""
-        self.can_redo_changed.emit(can_redo)
-
-    def clear(self):
-        """Очистить стек команд."""
-        self.undo_stack.clear()
-
+    def clear_history(self):
+        """Очистить историю команд."""
+        self.history.clear()
+        self.current_index = -1

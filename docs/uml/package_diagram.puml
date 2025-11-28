@@ -1,7 +1,14 @@
 @startuml Package Diagram
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+skinparam packageStyle rectangle
+
 title Диаграмма пакетов: 4-слойная архитектура Hockey Editor Pro
 
+' ================== LEVEL 1: PRESENTATION ==================
 package "Presentation Layer\n(Уровень презентации)" as Presentation {
+    
     package "ui" as UI {
         [MainWindow]
         [TimelineGraphicsView]
@@ -18,16 +25,15 @@ package "Presentation Layer\n(Уровень презентации)" as Present
         [UI Resources]
     }
 
-    note right of Presentation
-      **Presentation Layer Responsibilities:**
-      • User interface components
-      • Event handling and user input
-      • Data visualization (timeline, video display)
-      • Dialog management
-      • UI state management
+    note bottom of UI
+      **Обязанности:**
+      • UI компоненты и ввод
+      • Визуализация данных
+      • Управление диалогами
     end note
 }
 
+' ================== LEVEL 2: APPLICATION LOGIC ==================
 package "Application Logic Layer\n(Уровень прикладной логики)" as ApplicationLogic {
     package "core" as Core {
         [VideoController]
@@ -47,16 +53,15 @@ package "Application Logic Layer\n(Уровень прикладной логи�
         [CustomEvents]
     }
 
-    note right of ApplicationLogic
-      **Application Logic Layer Responsibilities:**
-      • Business workflow orchestration
-      • Cross-cutting concerns (undo/redo, settings)
-      • External system integration (file I/O, export)
-      • Application state management
-      • Event coordination between layers
+    note bottom of Core
+      **Обязанности:**
+      • Оркестрация процессов
+      • Сквозной функционал
+      • Состояние приложения
     end note
 }
 
+' ================== LEVEL 3: DOMAIN LOGIC ==================
 package "Domain Logic Layer\n(Уровень доменной логики)" as DomainLogic {
     package "models" as Models {
         [Marker]
@@ -66,70 +71,73 @@ package "Domain Logic Layer\n(Уровень доменной логики)" as 
         [CustomEvent]
     }
 
-    note right of DomainLogic
-      **Domain Logic Layer Responsibilities:**
-      • Business rules and validations
-      • Domain object behavior
-      • Data integrity constraints
-      • Domain event definitions
-      • Business entity relationships
+    note bottom of Models
+      **Обязанности:**
+      • Бизнес-правила
+      • Валидация данных
+      • Поведение объектов
     end note
 }
 
+' ================== LEVEL 4: DATA MODEL ==================
 package "Data Model Layer\n(Уровень модели данных)" as DataModel {
-    package "Persistence" as Persistence {
+    package "Persistence (Хранение)" as Persistence {
         [Project File (.hep)]
         [Settings Storage]
         [Recent Projects]
         [Autosave Recovery]
     }
 
-    package "External Data" as External {
+    package "External Data (Внешние данные)" as External {
         [Video Files]
         [Export Formats]
         [Configuration Files]
     }
-
-    note right of DataModel
-      **Data Model Layer Responsibilities:**
-      • Data persistence and retrieval
-      • File format handling
-      • External data source integration
-      • Data serialization/deserialization
-      • Backup and recovery
-    end note
 }
 
-' Layer Dependencies (from top to bottom)
-Presentation --> ApplicationLogic : uses services
-ApplicationLogic --> DomainLogic : manipulates domain objects
-ApplicationLogic --> DataModel : persists/retrieves data
-DomainLogic --> DataModel : defines data contracts
+' ================== ВНЕШНИЕ БИБЛИОТЕКИ ==================
+package "External Libraries (Библиотеки)" as Libs #F0F0F0 {
+    component "PySide6"
+    component "OpenCV"
+    component "FFmpeg"
+    component "moviepy"
+}
 
-' Cross-cutting dependencies
-Presentation --> DomainLogic : displays domain objects
-ApplicationLogic --> Presentation : updates UI
+' ================== ПРИНУДИТЕЛЬНАЯ ВЕРТИКАЛЬНАЯ СТРУКТУРА ==================
+' Эти скрытые связи выстраивают слои строго друг под другом
+Presentation -[hidden]-> ApplicationLogic
+ApplicationLogic -[hidden]-> DomainLogic
+DomainLogic -[hidden]-> DataModel
 
-' External Dependencies
-ApplicationLogic --> "PySide6" : GUI framework
-ApplicationLogic --> "OpenCV" : video processing
-ApplicationLogic --> "FFmpeg" : video encoding
-ApplicationLogic --> "moviepy" : video editing
+' ================== ЛОГИЧЕСКИЕ СВЯЗИ ==================
+Presentation --> ApplicationLogic : использует сервисы
+ApplicationLogic --> DomainLogic : управляет объектами
+ApplicationLogic --> DataModel : сохраняет/загружает
+DomainLogic ..> DataModel : определяет схему
 
+' Дополнительные связи
+Presentation ..> DomainLogic : отображает
+ApplicationLogic ..> Presentation : обновляет UI
+
+' Связи с библиотеками
+ApplicationLogic ..> Libs
+
+' ================== ЛЕГЕНДА И ЗАМЕТКИ (СНИЗУ) ==================
 note as N1
-  **Layer Interaction Patterns:**
-  • **Presentation → Application**: User actions trigger business operations
-  • **Application → Domain**: Business logic manipulates domain objects
-  • **Application → Data**: Persistence operations
-  • **Domain → Data**: Data contract definitions
+  **Паттерны взаимодействия:**
+  • Presentation → Application: Запуск операций
+  • Application → Domain: Логика и модели
+  • Application → Data: CRUD операции
 end note
 
 note as N2
-  **Key Architectural Principles:**
-  • **Separation of Concerns**: Each layer has distinct responsibilities
-  • **Dependency Inversion**: Higher layers depend on abstractions
-  • **Single Responsibility**: Classes have focused purposes
-  • **Dependency Direction**: Dependencies flow downward only
+  **Принципы:**
+  • Separation of Concerns (Разделение ответственности)
+  • Dependency Inversion (Инверсия зависимостей)
+  • Single Responsibility (Единственная обязанность)
 end note
+
+DataModel -[hidden]-> N1
+N1 -[hidden]-> N2
 
 @enduml
