@@ -83,6 +83,17 @@ Hockey Editor projects are saved as `.hep` files (ZIP format) containing:
 
 ## Architecture
 
+### Formal UML Diagrams
+
+The codebase includes formal UML diagrams that provide visual representations of the system architecture:
+
+- **[State Machine Diagram](docs/uml/state_machine_diagram.puml)**: Event creation workflow (IDLE → RECORDING → RECORDED)
+- **[Class Diagram](docs/uml/class_diagram.puml)**: Core classes and their relationships across all packages
+- **[Component Diagram](docs/uml/component_diagram.puml)**: System-level component interactions and dependencies
+- **[Use Case Diagram](docs/uml/use_case_diagram.puml)**: User interactions and primary workflows
+
+These diagrams are created in PlantUML format for version control and can be viewed online or with VS Code extensions.
+
 ### Core Components
 
 - **VideoProcessor** (`hockey_editor/core/video_processor.py`)
@@ -376,4 +387,3 @@ Inspired by:
 
 **Hockey Editor Pro v1.0** - Professional Video Analysis Tool
 Made with ❤️ for hockey teams and analysts worldwide
-

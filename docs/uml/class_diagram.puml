@@ -1,0 +1,194 @@
+@startuml Hockey Editor Class Diagram
+title Hockey Editor Core Architecture Class Diagram
+
+package "Core Components" as Core {
+    class VideoController {
+        +markers: List<Marker>
+        +current_frame: int
+        +total_frames: int
+        +fps: float
+
+        +load_video(path: str): bool
+        +play(): void
+        +pause(): void
+        +seek_frame(frame: int): void
+        +on_hotkey_pressed(event_type: EventType): bool
+        +save_project(path: str): void
+        +load_project(path: str): void
+        +undo(): void
+        +redo(): void
+    }
+
+    class VideoProcessor {
+        -cap: cv2.VideoCapture
+        -frame_cache: Dict[int, np.ndarray]
+
+        +open_video(path: str): bool
+        +get_frame(frame_num: int): np.ndarray
+        +get_total_frames(): int
+        +get_fps(): float
+        +close(): void
+    }
+
+    class EventCreationController {
+        -state: RecordingState
+        -current_event_type: EventType
+        -recording_start_frame: int
+        -config: EventCreationConfig
+
+        +on_hotkey_pressed(event_type: EventType): bool
+        +cancel_recording(): void
+        +update_recording_frame(frame: int): void
+    }
+
+    class ProjectManager {
+        +save_project(markers: List<Marker>, path: str): void
+        +load_project(path: str): Tuple[List<Marker>, str]
+        +get_recent_projects(): List[str]
+    }
+
+    class Exporter {
+        +export_segments(markers: List<Marker>, video_path: str, output_path: str): void
+        +export_to_csv(markers: List<Marker>, path: str): void
+    }
+}
+
+package "UI Components" as UI {
+    class MainWindow {
+        -video_widget: VideoWindow
+        -timeline: TimelineGraphicsView
+        -preview_window: PreviewWindow
+
+        +keyPressEvent(event: QKeyEvent): void
+        +on_recording_started(event_type: EventType, frame: int): void
+        +on_recording_finished(marker: Marker): void
+    }
+
+    class TimelineGraphicsView {
+        -scene: QGraphicsScene
+        -playhead: QGraphicsLineItem
+        -segments: List<QGraphicsRectItem>
+
+        +update_timeline(current_frame: int): void
+        +add_segment(marker: Marker): void
+        +zoom(factor: float): void
+        +pan(delta: QPointF): void
+    }
+
+    class PreviewWindow {
+        -segment_list: QListWidget
+        -filter_checkboxes: Dict[EventType, QCheckBox]
+
+        +update_segments(markers: List<Marker>): void
+        +play_segment(marker: Marker): void
+        +filter_segments(event_types: List[EventType]): void
+    }
+
+    class EditSegmentDialog {
+        -start_spinbox: QSpinBox
+        -end_spinbox: QSpinBox
+        -note_edit: QTextEdit
+
+        +set_marker(marker: Marker): void
+        +get_marker(): Marker
+    }
+
+    class ExportDialog {
+        -codec_combo: QComboBox
+        -quality_slider: QSlider
+        -progress_bar: QProgressBar
+
+        +start_export(): void
+        +cancel_export(): void
+    }
+}
+
+package "Models" as Models {
+    class Marker {
+        +start_frame: int
+        +end_frame: int
+        +type: EventType
+        +note: str
+
+        +duration_frames(): int
+        +duration_seconds(fps: float): float
+    }
+
+    enum EventType {
+        ATTACK
+        DEFENSE
+        SHIFT
+    }
+}
+
+package "Utils" as Utils {
+    class SettingsManager {
+        +save_hotkeys(hotkeys: Dict[str, str]): void
+        +load_hotkeys(): Dict[str, str]
+        +save_recording_mode(mode: str): void
+        +save_recent_projects(projects: List[str]): void
+    }
+
+    class ShortcutManager {
+        -shortcuts: Dict[str, QShortcut]
+
+        +register_shortcut(key: str, callback: Callable): void
+        +update_shortcut(old_key: str, new_key: str): void
+    }
+
+    class UndoRedoManager {
+        -stack: QUndoStack
+
+        +push(command: QUndoCommand): void
+        +undo(): void
+        +redo(): void
+        +can_undo(): bool
+        +can_redo(): bool
+    }
+
+    class AutosaveManager {
+        -timer: QTimer
+        -recovery_dir: str
+
+        +start_autosave(interval_ms: int): void
+        +stop_autosave(): void
+        +perform_autosave(): void
+        +recover_from_crash(): List[str]
+    }
+}
+
+' Relationships
+VideoController --> VideoProcessor : uses
+VideoController --> EventCreationController : manages
+VideoController --> ProjectManager : uses
+VideoController --> Exporter : uses
+VideoController --> UndoRedoManager : uses
+VideoController --> AutosaveManager : uses
+VideoController --> SettingsManager : uses
+
+MainWindow --> VideoController : controls
+MainWindow --> TimelineGraphicsView : contains
+MainWindow --> PreviewWindow : manages
+MainWindow --> EditSegmentDialog : shows
+MainWindow --> ExportDialog : shows
+
+TimelineGraphicsView --> Marker : displays
+PreviewWindow --> Marker : displays
+EditSegmentDialog --> Marker : edits
+
+EventCreationController --> Marker : creates
+ProjectManager --> Marker : serializes
+Exporter --> Marker : processes
+
+ShortcutManager --> SettingsManager : persists
+AutosaveManager --> ProjectManager : uses for saving
+
+note as N1
+  **Key Relationships:**
+  • VideoController is the central hub
+  • UI components observe VideoController
+  • Utils provide supporting functionality
+  • Models define data structures
+end note
+
+@enduml

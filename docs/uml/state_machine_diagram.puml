@@ -1,0 +1,33 @@
+@startuml Event Creation State Machine
+title Event Creation State Machine (EventCreationController)
+
+[*] --> IDLE
+
+state IDLE as "IDLE\n• No active recording\n• Waiting for hotkey press"
+state RECORDING as "RECORDING\n• Event type captured\n• Start frame recorded\n• Pre-roll applied\n• Recording active"
+state RECORDED as "RECORDED\n• Marker created\n• Video seeked to start\n• Temporary state"
+
+IDLE --> RECORDING : on_hotkey_pressed(event_type)\n[First press of A/D/S]
+note right : _start_recording()\n• Set current_event_type\n• Record start_frame\n• Calculate pre-roll\n• Emit recording_started
+
+RECORDING --> RECORDING : update_recording_frame()\n[Video playback continues]
+note right : recording_updated signal\nemitted continuously
+
+RECORDING --> RECORDED : on_hotkey_pressed(event_type)\n[Same key pressed again]
+note right : _finish_recording()\n• Calculate end frame\n• Apply post-roll\n• Create Marker\n• Seek to start frame\n• Emit recording_finished
+
+RECORDING --> IDLE : cancel_recording()\n[ESC pressed or error]
+note right : _reset_state()\ncalled immediately
+
+RECORDED --> IDLE : Timer (500ms)\n[Automatic transition]
+note right : _reset_state()\ncalled via QTimer.singleShot
+
+note as N1
+  **State Transitions:**
+  • IDLE → RECORDING: User initiates event marking
+  • RECORDING → RECORDED: User completes event marking
+  • RECORDED → IDLE: Automatic cleanup
+  • RECORDING → IDLE: Cancellation
+end note
+
+@enduml

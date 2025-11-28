@@ -1,0 +1,97 @@
+@startuml Hockey Editor Component Diagram
+title Hockey Editor System Component Diagram
+
+package "hockey_editor" as HE {
+
+    package "core" as Core {
+        [VideoController] as VC
+        [VideoProcessor] as VP
+        [EventCreationController] as ECC
+        [ProjectManager] as PM
+        [Exporter] as EXP
+    }
+
+    package "ui" as UI {
+        [MainWindow] as MW
+        [TimelineGraphicsView] as TGV
+        [PreviewWindow] as PW
+        [EditSegmentDialog] as ESD
+        [ExportDialog] as ED
+        [SettingsDialog] as SD
+        [VideoWindow] as VW
+    }
+
+    package "models" as Models {
+        [Marker] as M
+        [EventType] as ET
+    }
+
+    package "utils" as Utils {
+        [SettingsManager] as SM
+        [ShortcutManager] as SCM
+        [UndoRedoManager] as URM
+        [AutosaveManager] as AM
+        [TimeUtils] as TU
+    }
+}
+
+' External Dependencies
+[OpenCV] as CV
+[PySide6] as PS6
+[FFmpeg] as FF
+[MPV] as MPV
+
+' Data Flow and Dependencies
+VC --> VP : video I/O operations
+VC --> ECC : event creation management
+VC --> PM : project persistence
+VC --> EXP : segment export
+VC --> URM : undo/redo operations
+VC --> AM : autosave functionality
+
+MW --> VC : user commands
+MW --> TGV : timeline updates
+MW --> PW : segment preview
+MW --> ESD : segment editing
+MW --> ED : export operations
+MW --> SD : settings management
+
+TGV --> M : marker display
+PW --> M : marker filtering/playback
+ESD --> M : marker editing
+PM --> M : marker serialization
+
+ECC --> M : marker creation
+EXP --> M : marker processing
+
+SCM --> SM : shortcut persistence
+AM --> PM : recovery snapshots
+
+' External Dependencies
+VP --> CV : computer vision
+VP --> MPV : video playback
+EXP --> FF : video encoding
+UI --> PS6 : GUI framework
+
+' Signal/Slot Communications (Qt)
+VC ..> MW : signals (markers_changed,\nrecording_status_changed)
+ECC ..> VC : signals (recording_started,\nrecording_finished)
+ECC ..> MW : signals (state_changed)
+AM ..> VC : signals (autosave_completed)
+
+note as N1
+  **Component Responsibilities:**
+  • **Core**: Business logic, video processing, data management
+  • **UI**: User interface, event handling, visualization
+  • **Models**: Data structures, domain objects
+  • **Utils**: Cross-cutting concerns, utilities
+end note
+
+note as N2
+  **Communication Patterns:**
+  • Direct method calls for synchronous operations
+  • Qt signals/slots for asynchronous events
+  • Dependency injection for testability
+end note
+
+@enduml
