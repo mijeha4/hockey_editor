@@ -28,6 +28,36 @@ This directory contains formal UML diagrams for the Hockey Editor Pro applicatio
 - **Use cases**: Event marking, timeline review, export, project management
 - **Relationships**: Include/extend relationships showing dependencies
 
+### 5. Context Class Diagram (`context_class_diagram.puml`)
+**Purpose**: High-level system architecture overview
+- **Components**: MainWindow, VideoController, VideoProcessor, ProjectManager
+- **Focus**: Main system components and their high-level relationships
+- **Scope**: Core system architecture without implementation details
+
+### 6. Extended State Machine Diagram (`extended_state_machine_diagram.puml`)
+**Purpose**: Comprehensive state modeling for markers and video playback
+- **States**: Video playback (Stopped/Playing/Paused/Frame-by-frame)
+- **States**: Marker lifecycle (Created/Visible/Selected/Edited/Deleted)
+- **Coordination**: Interplay between video states and marker operations
+
+### 7. Activity Diagram (`activity_diagram.puml`)
+**Purpose**: Business process modeling for event marking workflow
+- **Process**: Complete event marking scenario during video playback
+- **Modes**: Dynamic and Fixed Length recording modes
+- **Signals**: Qt signal emissions and UI updates
+
+### 8. Package Diagram (`package_diagram.puml`)
+**Purpose**: 4-layer architectural structure representation
+- **Layers**: Presentation, Application Logic, Domain Logic, Data Model
+- **Dependencies**: Layer interaction patterns and direction
+- **Principles**: Separation of concerns and architectural guidelines
+
+### 9. Deployment Diagram (`deployment_diagram.puml`)
+**Purpose**: System deployment and runtime environment
+- **Target**: Desktop application deployment on Windows/Linux/macOS
+- **Components**: Application modules and external dependencies
+- **Requirements**: System requirements and deployment options
+
 ## File Format
 
 All diagrams are created using **PlantUML** syntax (.puml files):
@@ -66,12 +96,25 @@ These diagrams complement the textual descriptions in:
 - `README_PROFESSIONAL.md` - Architecture overview
 - `README.md` - High-level descriptions
 - Source code comments - Implementation details
+- `diagrams_description.md` - Comprehensive diagram explanations
+
+## Detailed Documentation
+
+For comprehensive descriptions of all diagrams, including explanations of elements, relationships, and business logic, see **[diagrams_description.md](diagrams_description.md)**.
+
+This document provides:
+- Detailed explanation of each diagram's purpose and scope
+- Description of all elements, actors, and components
+- Analysis of relationships and interactions
+- Business logic explanations and workflows
+- Technical implementation details
+- Architectural principles and patterns
 
 ## Maintenance Guidelines
 
 - **Keep diagrams in sync**: Update diagrams when architecture changes
 - **Use consistent naming**: Follow existing naming conventions
-- **Document changes**: Update this README when adding new diagrams
+- **Document changes**: Update this README and `diagrams_description.md` when adding new diagrams
 - **Version control**: Commit diagram changes with related code changes
 
 ## Benefits of Formal UML Diagrams
