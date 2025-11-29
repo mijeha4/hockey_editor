@@ -1,119 +1,85 @@
 @startuml
+!theme plain
 title Архитектура ядра Hockey Editor - Диаграмма классов
 
-package "Основные компоненты" as Core {
-    class VideoController {
-        +маркеры: List<Marker>
-        +текущий_кадр: int
-        +всего_кадров: int
-        +кадров_в_секунду: float
+' 1. Задаем глобальное направление (решает проблему расположения)
+top to bottom direction
 
-        +загрузить_видео(путь: str): bool
+' 2. Настройки линий
+skinparam linetype polyline
+skinparam nodesep 60
+skinparam ranksep 80
+skinparam classAttributeIconSize 0
+
+' ======================= 1. UI =======================
+package "Компоненты интерфейса (UI)" as UIPackage #E3F2FD {
+    class MainWindow {
+        +обработка_нажатия_клавиши(): void
+        +при_начале_записи(): void
+    }
+    class TimelineGraphicsView {
+        +обновить_таймлайн(): void
+        +добавить_сегмент(): void
+    }
+    class PreviewWindow {
+        +обновить_сегменты(): void
+        +воспроизвести_сегмент(): void
+    }
+    class EditSegmentDialog {
+        +установить_маркер(): void
+    }
+    class ExportDialog {
+        +начать_экспорт(): void
+    }
+}
+
+' ======================= 2. CORE =======================
+package "Основные компоненты (Core)" as CorePackage #FFE5E5 {
+    class VideoController {
+        +загрузить_видео(): bool
         +воспроизвести(): void
         +пауза(): void
-        +перейти_к_кадру(кадр: int): void
-        +при_нажатии_горячей_клавиши(тип_события: EventType): bool
-        +сохранить_проект(путь: str): void
-        +загрузить_проект(путь: str): void
-        +отменить(): void
-        +вернуть(): void
+        +сохранить_проект(): void
     }
-
     class VideoProcessor {
-        -захват: cv2.VideoCapture
-        -кэш_кадров: Dict<int, np.ndarray>
-
-        +открыть_видео(путь: str): bool
-        +получить_кадр(номер_кадра: int): np.ndarray
-        +получить_всего_кадров(): int
-        +получить_кадров_в_секунду(): float
-        +закрыть(): void
+        +получить_кадр(): np.ndarray
     }
-
     class EventCreationController {
-        -состояние: RecordingState
-        -текущий_тип_события: EventType
-        -кадр_начала_записи: int
-        -конфигурация: EventCreationConfig
-
-        +при_нажатии_горячей_клавиши(тип_события: EventType): bool
-        +отменить_запись(): void
-        +обновить_кадр_записи(кадр: int): void
+        +при_нажатии_горячей_клавиши(): bool
     }
-
     class ProjectManager {
-        +сохранить_проект(маркеры: List<Marker>, путь: str): void
-        +загрузить_проект(путь: str): Tuple<List<Marker>, str>
-        +получить_последние_проекты(): List[str]
+        +сохранить_проект(): void
     }
-
     class Exporter {
-        +экспортировать_сегменты(маркеры: List<Marker>, путь_к_видео: str, путь_выгрузки: str): void
-        +экспортировать_в_csv(маркеры: List<Marker>, путь: str): void
+        +экспортировать_сегменты(): void
     }
 }
 
-package "Компоненты интерфейса" as UI {
-    class MainWindow {
-        -видео_виджет: VideoWindow
-        -таймлайн: TimelineGraphicsView
-        -окно_предпросмотра: PreviewWindow
-
-        +обработка_нажатия_клавиши(событие: QKeyEvent): void
-        +при_начале_записи(тип_события: EventType, кадр: int): void
-        +при_завершении_записи(маркер: Marker): void
+' ======================= 3. UTILS =======================
+package "Вспомогательные утилиты" as UtilsPackage #E8F5E8 {
+    class SettingsManager {
+        +сохранить_горячие_клавиши(): void
     }
-
-    class TimelineGraphicsView {
-        -сцена: QGraphicsScene
-        -указатель_воспроизведения: QGraphicsLineItem
-        -сегменты: List<QGraphicsRectItem>
-
-        +обновить_таймлайн(текущий_кадр: int): void
-        +добавить_сегмент(маркер: Marker): void
-        +масштабировать(коэффициент: float): void
-        +панорамировать(смещение: QPointF): void
+    class UndoRedoManager {
+        +добавить(): void
+        +отменить(): void
     }
-
-    class PreviewWindow {
-        -список_сегментов: QListWidget
-        -фильтры: Dict<EventType, QCheckBox>
-
-        +обновить_сегменты(маркеры: List<Marker>): void
-        +воспроизвести_сегмент(маркер: Marker): void
-        +фильтровать_сегменты(типы_событий: List<EventType>): void
+    class AutosaveManager {
+        +запустить_автосохранение(): void
     }
-
-    class EditSegmentDialog {
-        -поле_начала: QSpinBox
-        -поле_окончания: QSpinBox
-        -поле_примечания: QTextEdit
-
-        +установить_маркер(маркер: Marker): void
-        +получить_маркер(): Marker
-    }
-
-    class ExportDialog {
-        -выбор_кодека: QComboBox
-        -качество: QSlider
-        -прогресс: QProgressBar
-
-        +начать_экспорт(): void
-        +отменить_экспорт(): void
+    class ShortcutManager {
+        +зарегистрировать_сочетание(): void
     }
 }
 
-package "Модели данных" as Models {
+' ======================= 4. MODELS =======================
+package "Модели данных" as ModelsPackage #FFF8E5 {
     class Marker {
         +кадр_начала: int
         +кадр_окончания: int
         +тип: EventType
         +примечание: str
-
-        +длительность_в_кадрах(): int
-        +длительность_в_секундах(кадров_в_секунду: float): float
     }
-
     enum EventType {
         АТАКА
         ЗАЩИТА
@@ -121,80 +87,41 @@ package "Модели данных" as Models {
     }
 }
 
-package "Вспомогательные утилиты" as Utils {
-    class SettingsManager {
-        +сохранить_горячие_клавиши(клавиши: Dict<str, str>): void
-        +загрузить_горячие_клавиши(): Dict<str, str>
-        +сохранить_режим_записи(режим: str): void
-        +сохранить_последние_проекты(проекты: List<str>): void
-    }
+' ======================= ВЫРАВНИВАНИЕ =======================
+' Исправленный синтаксис: используем простое [hidden]
+' Благодаря "top to bottom direction" они и так встанут друг под другом
+UIPackage -[hidden]-> CorePackage
+CorePackage -[hidden]-> ModelsPackage
+CorePackage -[hidden]-> UtilsPackage
 
-    class ShortcutManager {
-        -сочетания_клавиш: Dict<str, QShortcut>
+' ======================= СВЯЗИ =======================
 
-        +зарегистрировать_сочетание(клавиша: str, обработчик: Callable): void
-        +обновить_сочетание(старая_клавиша: str, новая_клавиша: str): void
-    }
-
-    class UndoRedoManager {
-        -стек: QUndoStack
-
-        +добавить(команда: QUndoCommand): void
-        +отменить(): void
-        +вернуть(): void
-        +может_отменить(): bool
-        +может_вернуть(): bool
-    }
-
-    class AutosaveManager {
-        -таймер: QTimer
-        -папка_восстановления: str
-
-        +запустить_автосохранение(интервал_мс: int): void
-        +остановить_автосохранение(): void
-        +выполнить_автосохранение(): void
-        +восстановить_после_сбоя(): List<str>
-    }
-}
-
-' Связи между компонентами
-VideoController --> VideoProcessor : использует
-VideoController --> EventCreationController : управляет
-VideoController --> ProjectManager : использует
-VideoController --> Exporter : использует
-VideoController --> UndoRedoManager : использует
-VideoController --> AutosaveManager : использует
-VideoController --> SettingsManager : использует
-
+' UI -> Core
 MainWindow --> VideoController : управляет
 MainWindow --> TimelineGraphicsView : содержит
-MainWindow --> PreviewWindow : управляет
-MainWindow --> EditSegmentDialog : отображает
-MainWindow --> ExportDialog : отображает
+MainWindow --> PreviewWindow : содержит
+MainWindow --> EditSegmentDialog : вызывает
+MainWindow --> ExportDialog : вызывает
 
-TimelineGraphicsView --> Marker : отображает
-PreviewWindow --> Marker : отображает
-EditSegmentDialog --> Marker : редактирует
+' Core Internal
+VideoController --> VideoProcessor : использует
+VideoController --> EventCreationController : управляет
+VideoController --> ProjectManager : сохранение
+VideoController --> Exporter : экспорт
 
-EventCreationController --> Marker : создает
-ProjectManager --> Marker : сериализует
-Exporter --> Marker : обрабатывает
+' Core -> Utils
+VideoController --> UndoRedoManager : история
+VideoController --> AutosaveManager : автосейв
+VideoController --> SettingsManager : настройки
 
-ShortcutManager --> SettingsManager : сохраняет_настройки
-AutosaveManager --> ProjectManager : использует_для_сохранения
+' Models Usage
+TimelineGraphicsView ..> Marker
+PreviewWindow ..> Marker
+ProjectManager ..> Marker
+EventCreationController ..> Marker
 
-note right of VideoController
-  **Центральный контроллер:**
-  • Управляет воспроизведением видео
-  • Обрабатывает горячие клавиши
-  • Координирует работу компонентов
-end note
-
-note right of Marker
-  **Модель данных:**
-  • Представляет размеченный сегмент
-  • Содержит временные метки
-  • Имеет тип события и примечание
-end note
+' Utils Usage
+AutosaveManager ..> ProjectManager
+ShortcutManager ..> SettingsManager
 
 @enduml

@@ -1,0 +1,105 @@
+@startuml
+!theme plain
+title Модульная структура проекта (Исходный код)
+
+' Используем polyline, чтобы стрелки могли огибать блоки
+skinparam linetype polyline
+skinparam packageStyle folder
+
+' Увеличиваем отступы, чтобы подписи помещались на линиях
+skinparam nodesep 80
+skinparam ranksep 80
+
+package "hockey_editor (root)" as Root {
+
+    file "main.py" as EntryPoint
+
+    ' ================== ПАКЕТ UI ==================
+    package "ui" {
+        file "main_window.py" as Main_py
+        file "timeline_view.py" as Timeline_py
+        file "video_widget.py" as VideoWidget_py
+        
+        folder "dialogs" as Dialogs_folder {
+           file "export_dialog.py"
+           file "settings_dialog.py"
+           file "edit_segment_dialog.py"
+        }
+        
+        file "ui/__init__.py" as UI_init
+    }
+
+    ' ================== ПАКЕТ CORE ==================
+    package "core" {
+        file "video_controller.py" as VC_py
+        file "video_processor.py" as VP_py
+        file "video_reader_thread.py" as VRT_py
+        file "event_creation_controller.py" as ECC_py
+        file "project_manager.py" as PM_py
+        file "exporter.py" as EXP_py
+        file "core/__init__.py" as Core_init
+    }
+
+    ' ================== ПАКЕТЫ MODELS и UTILS ==================
+    ' Располагаем их рядом внизу
+    package "models" {
+        file "marker.py" as Marker_py
+        file "event_type.py" as Event_py
+        file "project.py" as Proj_py
+        file "models/__init__.py" as Models_init
+    }
+
+    package "utils" {
+        file "settings_manager.py" as Settings_py
+        file "undo_redo.py" as Undo_py
+        file "custom_events.py" as Events_py
+        file "time_utils.py" as Time_py
+        file "autosave_manager.py" as Auto_py
+        file "utils/__init__.py" as Utils_init
+    }
+}
+
+' ================== ВЫРАВНИВАНИЕ (HIDDEN) ==================
+' Невидимые связи для построения этажей: Main -> UI -> Core -> Models/Utils
+EntryPoint -[hidden]-> Main_py
+Main_py -[hidden]-> VC_py
+VC_py -[hidden]-> Marker_py
+VC_py -[hidden]-> Settings_py
+
+' ================== ЗАВИСИМОСТИ ИМПОРТА (IMPORTS) ==================
+
+' Entry Point imports
+EntryPoint ..> Main_py : запускает
+
+' UI imports Core & Utils
+Main_py ..> VC_py : import VideoController
+Main_py ..> Settings_py : import
+Main_py ..> Events_py : import
+
+' Core Internal Imports
+VC_py ..> VP_py : import
+VC_py ..> PM_py : import
+VC_py ..> ECC_py : import
+VC_py ..> EXP_py : import
+VP_py ..> VRT_py : import
+
+' Core imports Models & Utils
+VC_py ..> Marker_py : import
+VC_py ..> Settings_py : import
+VC_py ..> Undo_py : import
+PM_py ..> Marker_py : import
+PM_py ..> Proj_py : import
+ECC_py ..> Marker_py : import
+EXP_py ..> Marker_py : import
+
+' Utils imports
+Events_py ..> Settings_py : import
+
+note right of Root
+  **Легенда:**
+  • Папки = Python Packages
+  • Файлы = Python Modules (.py)
+  • Стрелки = Импорты (from ... import ...)
+end note
+
+@enduml
