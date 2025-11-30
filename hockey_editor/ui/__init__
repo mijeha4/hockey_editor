@@ -1,4 +1,4 @@
 from .main_window import MainWindow
-from .segment_editor import SegmentEditor
+from .edit_segment_dialog import EditSegmentDialog
 
-__all__ = ["MainWindow", "SegmentEditor"]
+__all__ = ["MainWindow", "EditSegmentDialog"]
