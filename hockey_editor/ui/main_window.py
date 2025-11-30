@@ -11,6 +11,7 @@ from pathlib import Path
 from .timeline_graphics import TimelineWidget
 from .edit_segment_dialog import EditSegmentDialog
 from .settings_dialog import SettingsDialog
+from .event_shortcut_list_widget import EventShortcutListWidget
 from ..models.marker import EventType
 from ..utils.settings_manager import get_settings_manager
 from ..utils.custom_events import get_custom_event_manager
@@ -180,15 +181,13 @@ class MainWindow(QMainWindow):
         # 3. Добавляем виджет на форму
         main_layout.addWidget(self.timeline_widget)
         
-        # ===== КНОПКИ СОБЫТИЙ (динамические) И НАСТРОЙКИ =====
+        # ===== СПИСОК СОБЫТИЙ С ГОЯЧИМИ КЛАВИШАМИ =====
         event_layout = QHBoxLayout()
 
-        # Контейнер для динамических кнопок событий
-        self.event_buttons_layout = QHBoxLayout()
-        event_layout.addLayout(self.event_buttons_layout)
-
-        # Обновить кнопки из event_manager
-        self._update_event_buttons()
+        # Новый виджет списка событий с горячими клавишами
+        self.event_shortcut_list_widget = EventShortcutListWidget()
+        self.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
+        event_layout.addWidget(self.event_shortcut_list_widget)
 
         event_layout.addStretch()
         
@@ -238,32 +237,7 @@ class MainWindow(QMainWindow):
         # Подключить сигнал frame_ready для обновления видео
         self.controller.frame_ready.connect(self._on_frame_ready)
 
-    def _create_event_button(self, text: str, color: str) -> QPushButton:
-        """Создать кнопку события."""
-        btn = QPushButton(text)
-        btn.setMinimumSize(120, 90)
-        btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                border: 2px solid {color};
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{
-                background-color: {self._lighten_color(color)};
-            }}
-            QPushButton:pressed {{
-                border: 3px solid yellow;
-                background-color: {self._lighten_color(color)};
-            }}
-        """)
-        return btn
 
-    def _lighten_color(self, color_hex: str) -> str:
-        """Светлая версия цвета для hover."""
-        # Простая реализация
-        return color_hex.replace("00", "33").replace("8b", "bb")
 
     def connect_signals(self):
         """Подключить сигналы контроллера."""
@@ -436,8 +410,7 @@ class MainWindow(QMainWindow):
     # ИСПРАВЛЕНО: удален дублированный метод _setup_shortcuts с EventType
 
     def _on_events_changed(self):
-        """Обработка изменения событий - обновить кнопки и shortcuts."""
-        self._update_event_buttons()
+        """Обработка изменения событий - обновить shortcuts."""
         self._setup_event_shortcuts()
 
     def _on_events_changed_timeline(self):
@@ -445,22 +418,7 @@ class MainWindow(QMainWindow):
         if hasattr(self.timeline_widget, 'scene_obj'):
             self.timeline_widget.scene_obj.update_scene()
 
-    def _update_event_buttons(self):
-        """Обновить кнопки событий на основе CustomEventManager."""
-        # Очистить существующие кнопки
-        for i in reversed(range(self.event_buttons_layout.count())):
-            widget = self.event_buttons_layout.itemAt(i).widget()
-            if widget:
-                widget.setParent(None)
 
-        # Создать новые кнопки для каждого события
-        events = self.event_manager.get_all_events()
-        for event in events:
-            text = f"{event.shortcut.upper()}\n{event.name}"
-            btn = self._create_event_button(text, event.color)
-            btn.clicked.connect(lambda checked, e=event.name: self._on_event_btn_clicked(e))
-            btn.setToolTip(f"Add {event.name} event ({event.shortcut.upper()})")
-            self.event_buttons_layout.addWidget(btn)
 
     def _setup_shortcuts(self):
         """Инициализировать горячие клавиши через ShortcutManager."""
@@ -511,27 +469,7 @@ class MainWindow(QMainWindow):
         self.controller.cancel_recording()
         self._update_play_btn_text()
 
-    def _on_selection_changed(self) -> None:
-        """Handle event selection change."""
-        selected = self.event_list.selectedItems()
-        has_selection = len(selected) > 0
-        
-        self.edit_btn.setEnabled(has_selection)
-        
-        # Can only delete non-default events
-        if has_selection:
-            event_name = selected[0].data(Qt.UserRole) 
-            event = self.manager.get_event(event_name)
-            
-            # Проверка на None
-            if event is None:
-                self.delete_btn.setEnabled(False)
-                return
-            
-            is_default = event.name in {e.name for e in self.manager.DEFAULT_EVENTS}
-            self.delete_btn.setEnabled(has_selection and not is_default)
-        else:
-            self.delete_btn.setEnabled(False)
+
 
     def _update_video_frame(self):
         """Обновить видео кадр на экране (через сигнал frame_ready)."""

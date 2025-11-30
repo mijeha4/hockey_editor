@@ -122,35 +122,43 @@ class CustomEventManager(QObject):
         return self._custom_events.get(name)
     
     def add_event(self, event: CustomEventType) -> bool:
-        """Add new custom event. Returns False if name already exists."""
+        """Add new custom event. Returns False if name already exists or shortcut conflicts."""
         if event.name in self._custom_events:
             return False
-        
+
         # Validate color
         if not event.get_qcolor().isValid():
             return False
-        
+
+        # Validate exclusive shortcut
+        if event.shortcut and not self._is_shortcut_available(event.shortcut, exclude_event=event.name):
+            return False
+
         self._custom_events[event.name] = event
         self._save_events()
         return True
     
     def update_event(self, old_name: str, new_event: CustomEventType) -> bool:
-        """Update existing event. Returns False if new name already exists (and differs from old)."""
+        """Update existing event. Returns False if new name already exists (and differs from old) or shortcut conflicts."""
         if old_name not in self._custom_events:
             return False
-        
+
         # Check if trying to rename to existing name
         if old_name != new_event.name and new_event.name in self._custom_events:
             return False
-        
+
         # Validate color
         if not new_event.get_qcolor().isValid():
             return False
-        
+
+        # Validate exclusive shortcut
+        if new_event.shortcut and not self._is_shortcut_available(new_event.shortcut, exclude_event=old_name):
+            return False
+
         # Remove old entry if renaming
         if old_name != new_event.name:
             del self._custom_events[old_name]
-        
+
         self._custom_events[new_event.name] = new_event
         self._save_events()
         return True
@@ -179,6 +187,16 @@ class CustomEventManager(QObject):
         events_data = [event.to_dict() for event in self.get_all_events()]
         self.settings.save_custom_events(events_data)
         self.events_changed.emit()  # Уведомить UI об изменениях
+
+    def _is_shortcut_available(self, shortcut: str, exclude_event: str = "") -> bool:
+        """Check if a shortcut is available (not used by other events)."""
+        if not shortcut:
+            return True
+
+        for event in self._custom_events.values():
+            if event.name != exclude_event and event.shortcut.upper() == shortcut.upper():
+                return False
+        return True
 
     def get_event_by_hotkey(self, hotkey: str) -> Optional[CustomEventType]:
         """Get event by keyboard shortcut."""
