@@ -353,21 +353,12 @@ class MainWindow(QMainWindow):
 
     def _on_marker_double_clicked(self, item: QListWidgetItem):
         """Двойной клик на отрезок = редактирование."""
-        idx = self.markers_list.row(item)
-        marker = self.controller.markers[idx]
+        marker_idx = item.data(Qt.ItemDataRole.UserRole)
+        marker = self.controller.markers[marker_idx]
         dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
         if dialog.exec():
             new_marker = dialog.get_marker()
-            # Применить изменения через undo/redo систему
-            from ..utils.undo_redo import ModifyMarkerCommand
-            command = ModifyMarkerCommand(
-                self.controller.markers,
-                idx,
-                marker,
-                new_marker
-            )
-            from ..utils.undo_redo import UndoRedoManager
-            self.controller.undo_redo.push_command(command)
+            self.controller.markers[marker_idx] = new_marker
             self.controller.markers_changed.emit()
             self.controller.timeline_update.emit()
 
@@ -375,7 +366,8 @@ class MainWindow(QMainWindow):
         """Удалить выбранный отрезок."""
         current_idx = self.markers_list.currentRow()
         if current_idx >= 0:
-            self.controller.delete_marker(current_idx)
+            marker_idx = self.markers_list.item(current_idx).data(Qt.ItemDataRole.UserRole)
+            self.controller.delete_marker(marker_idx)
 
     def _on_clear_markers(self):
         """Удалить все отрезки."""
@@ -410,8 +402,10 @@ class MainWindow(QMainWindow):
             start_time = self._format_time_single(marker.start_frame / fps if fps > 0 else 0)
             end_time = self._format_time_single(marker.end_frame / fps if fps > 0 else 0)
             text = f"{idx+1}. {marker.event_name} ({start_time}–{end_time})"
-            self.markers_list.addItem(text)
-        
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, idx)  # Сохранить оригинальный индекс маркера
+            self.markers_list.addItem(item)
+
         # Обновить расширенный статус-бар
         self._update_status_bar()
 
@@ -725,16 +719,7 @@ class MainWindow(QMainWindow):
             dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
             if dialog.exec():
                 new_marker = dialog.get_marker()
-                # Применить изменения через undo/redo систему
-                from ..utils.undo_redo import ModifyMarkerCommand
-                command = ModifyMarkerCommand(
-                    self.controller.markers,
-                    marker_idx,
-                    marker,
-                    new_marker
-                )
-                from ..utils.undo_redo import UndoRedoManager
-                self.controller.undo_redo.push_command(command)
+                self.controller.markers[marker_idx] = new_marker
                 self.controller.markers_changed.emit()
                 self.controller.timeline_update.emit()
     
