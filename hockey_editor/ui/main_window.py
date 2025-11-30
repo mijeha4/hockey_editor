@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from .timeline_graphics import TimelineWidget
-from .segment_editor import SegmentEditorDialog
+from .edit_segment_dialog import EditSegmentDialog
 from .settings_dialog import SettingsDialog
 from ..models.marker import EventType
 from ..utils.settings_manager import get_settings_manager
@@ -354,8 +354,22 @@ class MainWindow(QMainWindow):
     def _on_marker_double_clicked(self, item: QListWidgetItem):
         """Двойной клик на отрезок = редактирование."""
         idx = self.markers_list.row(item)
-        dialog = SegmentEditorDialog(self.controller, idx, self)
-        dialog.exec()
+        marker = self.controller.markers[idx]
+        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+        if dialog.exec():
+            new_marker = dialog.get_marker()
+            # Применить изменения через undo/redo систему
+            from ..utils.undo_redo import ModifyMarkerCommand
+            command = ModifyMarkerCommand(
+                self.controller.markers,
+                idx,
+                marker,
+                new_marker
+            )
+            from ..utils.undo_redo import UndoRedoManager
+            self.controller.undo_redo.push_command(command)
+            self.controller.markers_changed.emit()
+            self.controller.timeline_update.emit()
 
     def _on_delete_marker(self):
         """Удалить выбранный отрезок."""
@@ -707,8 +721,22 @@ class MainWindow(QMainWindow):
     def open_segment_editor(self, marker_idx: int):
         """Открыть редактор сегмента (вызывается из timeline при double-click)."""
         if 0 <= marker_idx < len(self.controller.markers):
-            dialog = SegmentEditorDialog(self.controller, marker_idx, self)
-            dialog.exec()
+            marker = self.controller.markers[marker_idx]
+            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+            if dialog.exec():
+                new_marker = dialog.get_marker()
+                # Применить изменения через undo/redo систему
+                from ..utils.undo_redo import ModifyMarkerCommand
+                command = ModifyMarkerCommand(
+                    self.controller.markers,
+                    marker_idx,
+                    marker,
+                    new_marker
+                )
+                from ..utils.undo_redo import UndoRedoManager
+                self.controller.undo_redo.push_command(command)
+                self.controller.markers_changed.emit()
+                self.controller.timeline_update.emit()
     
     def _update_status_bar(self):
         """Обновить расширенный статус-бар с подробной информацией."""
