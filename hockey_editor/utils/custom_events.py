@@ -55,8 +55,39 @@ class CustomEventManager(QObject):
 
     # Default event types (always available)
     DEFAULT_EVENTS = [
-        CustomEventType(name='Attack', color='#EF5350', shortcut='A', description='Offensive play'),
-        CustomEventType(name='Defense', color='#42A5F5', shortcut='D', description='Defensive play'),
+        # Goals and shots
+        CustomEventType(name='Goal', color='#D32F2F', shortcut='G', description='Goal scored'),
+        CustomEventType(name='Shot', color='#F44336', shortcut='H', description='Shot on goal'),
+        CustomEventType(name='Save', color='#E57373', shortcut='V', description='Goaltender save'),
+        CustomEventType(name='Missed Shot', color='#EF5350', shortcut='M', description='Shot missed the net'),
+        CustomEventType(name='Blocked Shot', color='#FF8A65', shortcut='B', description='Shot blocked'),
+
+        # Faceoffs
+        CustomEventType(name='Faceoff Win', color='#FFEB3B', shortcut='F', description='Faceoff won'),
+        CustomEventType(name='Faceoff Loss', color='#FBC02D', shortcut='L', description='Faceoff lost'),
+
+        # Penalties and special teams
+        CustomEventType(name='Penalty', color='#FF9800', shortcut='P', description='Penalty called'),
+        CustomEventType(name='Power Play Start', color='#9C27B0', shortcut='Q', description='Power play begins'),
+        CustomEventType(name='Power Play End', color='#BA68C8', shortcut='W', description='Power play ends'),
+        CustomEventType(name='Penalty Kill Start', color='#7B1FA2', shortcut='E', description='Penalty kill begins'),
+        CustomEventType(name='Penalty Kill End', color='#AB47BC', shortcut='R', description='Penalty kill ends'),
+
+        # Game actions
+        CustomEventType(name='Hit', color='#2196F3', shortcut='I', description='Body check/hit'),
+        CustomEventType(name='Turnover', color='#03A9F4', shortcut='U', description='Puck turnover'),
+        CustomEventType(name='Possession Gain', color='#00BCD4', shortcut='O', description='Puck possession gained'),
+        CustomEventType(name='Check', color='#0097A7', shortcut='C', description='Stick check or block'),
+
+        # Goaltending
+        CustomEventType(name='Goalie Change', color='#4CAF50', shortcut='Y', description='Goaltender change'),
+        CustomEventType(name='Empty Net', color='#81C784', shortcut='N', description='Empty net situation'),
+
+        # Game periods
+        CustomEventType(name='Period Start', color='#8BC34A', shortcut='1', description='Period begins'),
+        CustomEventType(name='Period End', color='#689F38', shortcut='2', description='Period ends'),
+
+        # Line changes
         CustomEventType(name='Shift', color='#66BB6A', shortcut='S', description='Line change/shift'),
     ]
     

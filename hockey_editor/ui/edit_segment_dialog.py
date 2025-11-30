@@ -3,14 +3,14 @@
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QPushButton,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from ..models.marker import Marker
 from ..utils.custom_events import get_custom_event_manager
-from ..utils.time_utils import format_time
+from ..utils.time_utils import format_time, frames_to_time, time_to_frames, validate_time_format
 
 
 class EditSegmentDialog(QDialog):
@@ -55,33 +55,31 @@ class EditSegmentDialog(QDialog):
         
         # Начало отрезка
         start_layout = QHBoxLayout()
-        start_layout.addWidget(QLabel("Start Frame:"))
-        self.start_frame_box = QSpinBox()
-        self.start_frame_box.setMinimum(0)
-        self.start_frame_box.setMaximum(1000000)
-        self.start_frame_box.setValue(self.marker.start_frame)
-        self.start_frame_box.valueChanged.connect(self._update_start_time_display)
-        start_layout.addWidget(self.start_frame_box)
-        
-        self.start_time_display = QLabel(self._format_frame_time(self.marker.start_frame))
-        self.start_time_display.setMinimumWidth(80)
-        start_layout.addWidget(self.start_time_display)
+        start_layout.addWidget(QLabel("Start Time:"))
+        self.start_time_edit = QLineEdit()
+        self.start_time_edit.setText(frames_to_time(self.marker.start_frame, self.fps))
+        self.start_time_edit.textChanged.connect(self._update_start_frame_display)
+        self.start_time_edit.editingFinished.connect(self._validate_start_time)
+        start_layout.addWidget(self.start_time_edit)
+
+        self.start_frame_display = QLabel(f"({self.marker.start_frame} frames)")
+        self.start_frame_display.setMinimumWidth(100)
+        start_layout.addWidget(self.start_frame_display)
         start_layout.addStretch()
         layout.addLayout(start_layout)
-        
+
         # Конец отрезка
         end_layout = QHBoxLayout()
-        end_layout.addWidget(QLabel("End Frame:"))
-        self.end_frame_box = QSpinBox()
-        self.end_frame_box.setMinimum(0)
-        self.end_frame_box.setMaximum(1000000)
-        self.end_frame_box.setValue(self.marker.end_frame)
-        self.end_frame_box.valueChanged.connect(self._update_end_time_display)
-        end_layout.addWidget(self.end_frame_box)
-        
-        self.end_time_display = QLabel(self._format_frame_time(self.marker.end_frame))
-        self.end_time_display.setMinimumWidth(80)
-        end_layout.addWidget(self.end_time_display)
+        end_layout.addWidget(QLabel("End Time:"))
+        self.end_time_edit = QLineEdit()
+        self.end_time_edit.setText(frames_to_time(self.marker.end_frame, self.fps))
+        self.end_time_edit.textChanged.connect(self._update_end_frame_display)
+        self.end_time_edit.editingFinished.connect(self._validate_end_time)
+        end_layout.addWidget(self.end_time_edit)
+
+        self.end_frame_display = QLabel(f"({self.marker.end_frame} frames)")
+        self.end_frame_display.setMinimumWidth(100)
+        end_layout.addWidget(self.end_frame_display)
         end_layout.addStretch()
         layout.addLayout(end_layout)
         
@@ -121,46 +119,57 @@ class EditSegmentDialog(QDialog):
         
         layout.addLayout(button_layout)
 
-    def _format_frame_time(self, frame_idx: int) -> str:
-        """Форматировать время кадра в MM:SS.FF."""
-        if self.fps <= 0:
-            return "00:00.00"
-        
-        total_secs = frame_idx / self.fps
-        minutes = int(total_secs) // 60
-        seconds = int(total_secs) % 60
-        frames = frame_idx % int(self.fps)
-        return f"{minutes:02d}:{seconds:02d}.{frames:02d}"
-
     def _format_duration(self) -> str:
         """Получить продолжительность отрезка."""
-        duration_frames = self.end_frame_box.value() - self.start_frame_box.value()
+        start_frames = time_to_frames(self.start_time_edit.text(), self.fps)
+        end_frames = time_to_frames(self.end_time_edit.text(), self.fps)
+        duration_frames = max(0, end_frames - start_frames)
+
         if self.fps <= 0:
             return "00:00"
-        
+
         duration_secs = duration_frames / self.fps
         minutes = int(duration_secs) // 60
         seconds = int(duration_secs) % 60
         return f"{minutes:02d}:{seconds:02d} ({duration_frames} frames)"
 
-    def _update_start_time_display(self):
-        """Обновить отображение начального времени."""
-        frame = self.start_frame_box.value()
-        self.start_time_display.setText(self._format_frame_time(frame))
+    def _update_start_frame_display(self):
+        """Обновить отображение начального кадра."""
+        frames = time_to_frames(self.start_time_edit.text(), self.fps)
+        self.start_frame_display.setText(f"({frames} frames)")
         self.duration_label.setText(self._format_duration())
 
-    def _update_end_time_display(self):
-        """Обновить отображение конечного времени."""
-        frame = self.end_frame_box.value()
-        self.end_time_display.setText(self._format_frame_time(frame))
+    def _update_end_frame_display(self):
+        """Обновить отображение конечного кадра."""
+        frames = time_to_frames(self.end_time_edit.text(), self.fps)
+        self.end_frame_display.setText(f"({frames} frames)")
         self.duration_label.setText(self._format_duration())
+
+    def _validate_start_time(self):
+        """Валидация времени начала."""
+        time_str = self.start_time_edit.text()
+        if not validate_time_format(time_str):
+            # Reset to previous valid value
+            self.start_time_edit.setText(frames_to_time(self.marker.start_frame, self.fps))
+        self._update_start_frame_display()
+
+    def _validate_end_time(self):
+        """Валидация времени конца."""
+        time_str = self.end_time_edit.text()
+        if not validate_time_format(time_str):
+            # Reset to previous valid value
+            self.end_time_edit.setText(frames_to_time(self.marker.end_frame, self.fps))
+        self._update_end_frame_display()
 
     def get_marker(self) -> Marker:
         """Получить отредактированный маркер."""
-        # ИСПРАВЛЕНО: использовать event_name вместо type
+        # Конвертировать время в кадры
+        start_frames = time_to_frames(self.start_time_edit.text(), self.fps)
+        end_frames = time_to_frames(self.end_time_edit.text(), self.fps)
+
         return Marker(
-            start_frame=self.start_frame_box.value(),
-            end_frame=self.end_frame_box.value(),
+            start_frame=start_frames,
+            end_frame=end_frames,
             event_name=self.type_combo.currentData(),
             note=self.note_edit.text()
         )
