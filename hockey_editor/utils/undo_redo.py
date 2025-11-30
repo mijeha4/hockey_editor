@@ -134,6 +134,9 @@ class UndoRedoManager(QObject):
         self.history.append(command)
         self.current_index += 1
 
+        # Выполнить команду (как в стандартном Qt QUndoStack)
+        command.redo()
+
         # Ограничить размер истории
         if len(self.history) > self.max_history:
             self.history.pop(0)
