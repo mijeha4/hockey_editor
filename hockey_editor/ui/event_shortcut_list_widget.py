@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QInputDialog, QSizePolicy
 )
 from ..utils.custom_events import get_custom_event_manager
+from ..utils.localization_manager import get_localization_manager
 
 
 class EventShortcutListWidget(QWidget):
@@ -24,6 +25,7 @@ class EventShortcutListWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.event_manager = get_custom_event_manager()
+        self.localization = get_localization_manager()
         self.is_collapsed = False
 
         self.setup_ui()
@@ -136,6 +138,7 @@ class EventShortcutListWidget(QWidget):
     def connect_signals(self):
         """Подключение сигналов."""
         self.event_manager.events_changed.connect(self.update_event_list)
+        self.localization.language_changed.connect(self.retranslate_ui)
 
     def update_event_list(self):
         """Обновление списка событий."""
@@ -146,11 +149,12 @@ class EventShortcutListWidget(QWidget):
 
         for event in events:
             # Создание элемента списка
-            item_text = f"{event.name}"
+            localized_name = event.get_localized_name()
+            item_text = f"{localized_name}"
             if event.shortcut:
                 item_text += f" [{event.shortcut.upper()}]"
             else:
-                item_text += " [No Key]"
+                item_text += f" {self.localization.tr('status_no_key')}"
 
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, event.name)  # Сохранить имя события
@@ -162,14 +166,15 @@ class EventShortcutListWidget(QWidget):
             icon = QIcon(pixmap)
             item.setIcon(icon)
 
-            # Tooltip с описанием
-            tooltip = event.name
-            if event.description:
-                tooltip += f"\n{event.description}"
+            # Tooltip с локализованным описанием
+            localized_desc = event.get_localized_description()
+            tooltip = localized_name
+            if localized_desc:
+                tooltip += f"\n{localized_desc}"
             if event.shortcut:
                 tooltip += f"\nShortcut: {event.shortcut.upper()}"
             else:
-                tooltip += "\nNo shortcut assigned"
+                tooltip += f"\n{self.localization.tr('status_no_key').replace('[', '').replace(']', '').strip()}"
             item.setToolTip(tooltip)
 
             self.event_list.addItem(item)
@@ -219,9 +224,10 @@ class EventShortcutListWidget(QWidget):
 
         # Диалог для ввода нового shortcut'а
         current_shortcut = event.shortcut if event.shortcut else ""
+        localized_name = event.get_localized_name()
         new_shortcut, ok = QInputDialog.getText(
-            self, "Edit Shortcut",
-            f"Enter new shortcut for '{event_name}':\n(Leave empty to remove shortcut)",
+            self, self.localization.tr("dialog_edit_shortcut"),
+            self.localization.tr("dialog_shortcut_prompt").format(event_name=localized_name),
             text=current_shortcut
         )
 
@@ -232,9 +238,9 @@ class EventShortcutListWidget(QWidget):
             if not new_shortcut:
                 event.shortcut = ""
                 if self.event_manager.update_event(event_name, event):
-                    QMessageBox.information(self, "Success", f"Shortcut removed from '{event_name}'")
+                    QMessageBox.information(self, self.localization.tr("dialog_shortcut_removed").format(event_name=localized_name))
                 else:
-                    QMessageBox.warning(self, "Error", "Failed to remove shortcut")
+                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
                 return
 
             # Проверка доступности shortcut'а
@@ -247,10 +253,14 @@ class EventShortcutListWidget(QWidget):
                         break
 
                 if conflicting_event:
+                    conflicting_localized = conflicting_event.get_localized_name()
                     reply = QMessageBox.question(
-                        self, "Shortcut Conflict",
-                        f"Shortcut '{new_shortcut}' is already used by '{conflicting_event.name}'.\n\n"
-                        "Do you want to reassign it to '{event_name}' instead?",
+                        self, self.localization.tr("dialog_shortcut_conflict"),
+                        self.localization.tr("dialog_shortcut_conflict_msg").format(
+                            shortcut=new_shortcut,
+                            existing_event=conflicting_localized,
+                            new_event=localized_name
+                        ),
                         QMessageBox.Yes | QMessageBox.No
                     )
 
@@ -262,20 +272,33 @@ class EventShortcutListWidget(QWidget):
                         # Присвоить shortcut новому событию
                         event.shortcut = new_shortcut
                         if self.event_manager.update_event(event_name, event):
-                            QMessageBox.information(self, "Success",
-                                f"Shortcut '{new_shortcut}' reassigned from '{conflicting_event.name}' to '{event_name}'")
+                            QMessageBox.information(self, self.localization.tr("dialog_shortcut_reassigned").format(
+                                shortcut=new_shortcut,
+                                old_event=conflicting_localized,
+                                new_event=localized_name
+                            ))
                         else:
-                            QMessageBox.warning(self, "Error", "Failed to reassign shortcut")
+                            QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
                     # Если No - ничего не делаем
                 else:
-                    QMessageBox.warning(self, "Error", f"Shortcut '{new_shortcut}' is not available")
+                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_not_available").format(shortcut=new_shortcut))
             else:
                 # Shortcut доступен, присваиваем
                 event.shortcut = new_shortcut
                 if self.event_manager.update_event(event_name, event):
-                    QMessageBox.information(self, "Success", f"Shortcut '{new_shortcut}' assigned to '{event_name}'")
+                    QMessageBox.information(self, self.localization.tr("dialog_shortcut_assigned").format(
+                        shortcut=new_shortcut,
+                        event_name=localized_name
+                    ))
                 else:
-                    QMessageBox.warning(self, "Error", "Failed to assign shortcut")
+                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
+
+    def retranslate_ui(self):
+        """Перевести интерфейс виджета."""
+        self.title_label.setText(self.localization.tr("widget_event_shortcuts"))
+        self.toggle_button.setToolTip(self.localization.tr("widget_toggle_hide") if self.is_collapsed else self.localization.tr("widget_toggle_show"))
+        # Обновить все элементы списка с новыми переводами
+        self.update_event_list()
 
     def get_preferred_height(self) -> int:
         """Получение предпочтительной высоты виджета."""

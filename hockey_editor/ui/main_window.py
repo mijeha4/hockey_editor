@@ -3,7 +3,7 @@ from PySide6.QtGui import QPixmap, QImage, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider,
     QLabel, QListWidget, QListWidgetItem, QFileDialog, QComboBox, QSpinBox,
-    QMessageBox, QSpinBox
+    QMessageBox, QSpinBox, QMenu
 )
 import cv2
 import numpy as np
@@ -16,6 +16,7 @@ from ..models.marker import EventType
 from ..utils.settings_manager import get_settings_manager
 from ..utils.custom_events import get_custom_event_manager
 from ..utils.shortcut_manager import ShortcutManager
+from ..utils.localization_manager import get_localization_manager
 
 
 
@@ -29,62 +30,71 @@ class MainWindow(QMainWindow):
         self.event_manager = get_custom_event_manager()
         self.event_manager.setParent(self)  # Ensure proper Qt object ownership
         self.shortcut_manager = ShortcutManager(self)
-        
+        self.localization = get_localization_manager()
+
         # Автосохранение
         from ..utils.autosave import AutosaveManager
         self.autosave_manager = AutosaveManager(controller)
         self.autosave_manager.autosave_completed.connect(self._on_autosave_completed)
-        
-        self.setWindowTitle("Hockey Editor Pro - Professional Video Analysis")
+
+        self.setWindowTitle(self.localization.tr("window_title"))
         self.setGeometry(0, 0, 1800, 1000)
         self.setStyleSheet(self._get_dark_stylesheet())
-        
+
         # Поддержка drag-drop для видео
         self.setAcceptDrops(True)
-        
+
         self.setup_ui()
         self.connect_signals()
         self._setup_shortcuts()
         self._create_menu()
 
+        # Подключить сигнал изменения языка
+        self.localization.language_changed.connect(self.retranslate_ui)
+
+        # Инициализировать интерфейс на правильном языке
+        self.retranslate_ui()
+
     def _create_menu(self):
-        """Создать меню приложения."""
-        menubar = self.menuBar()
+        """Создать меню приложения и сохранить ссылки на действия."""
+        self.menubar = self.menuBar()
+        self.menubar.clear() # Очистка на всякий случай
+
+        # === File Menu ===
+        self.file_menu = self.menubar.addMenu("") # Текст установим в retranslate
         
-        # File menu
-        file_menu = menubar.addMenu("File")
-        
-        new_action = file_menu.addAction("New Project")
-        new_action.setShortcut("Ctrl+N")
-        new_action.triggered.connect(self._on_new_project)
-        
-        open_action = file_menu.addAction("Open Project")
-        open_action.setShortcut("Ctrl+O")
-        open_action.triggered.connect(self._on_open_project)
-        
-        save_action = file_menu.addAction("Save Project")
-        save_action.setShortcut("Ctrl+S")
-        save_action.triggered.connect(self._on_save_project)
-        
-        save_as_action = file_menu.addAction("Save Project As...")
-        save_as_action.setShortcut("Ctrl+Shift+S")
-        save_as_action.triggered.connect(self._on_save_project_as)
-        
-        file_menu.addSeparator()
-        
-        # Recent projects
-        self.recent_menu = file_menu.addMenu("Recent Projects")
+        self.action_new = self.file_menu.addAction("")
+        self.action_new.setShortcut("Ctrl+N")
+        self.action_new.triggered.connect(self._on_new_project)
+
+        self.action_open = self.file_menu.addAction("")
+        self.action_open.setShortcut("Ctrl+O")
+        self.action_open.triggered.connect(self._on_open_project)
+
+        self.action_save = self.file_menu.addAction("")
+        self.action_save.setShortcut("Ctrl+S")
+        self.action_save.triggered.connect(self._on_save_project)
+
+        self.action_save_as = self.file_menu.addAction("")
+        self.action_save_as.setShortcut("Ctrl+Shift+S")
+        self.action_save_as.triggered.connect(self._on_save_project_as)
+
+        self.file_menu.addSeparator()
+
+        # Recent Projects
+        self.recent_menu = self.file_menu.addMenu("")
         self._update_recent_menu()
+
+        self.file_menu.addSeparator()
+
+        self.action_exit = self.file_menu.addAction("")
+        self.action_exit.triggered.connect(self.close)
+
+        # === Help Menu ===
+        self.help_menu = self.menubar.addMenu("")
         
-        file_menu.addSeparator()
-        
-        exit_action = file_menu.addAction("Exit")
-        exit_action.triggered.connect(self.close)
-        
-        # Help menu
-        help_menu = menubar.addMenu("Help")
-        about_action = help_menu.addAction("About")
-        about_action.triggered.connect(self._on_about)
+        self.action_about = self.help_menu.addAction("")
+        self.action_about.triggered.connect(self._on_about)
 
     def setup_ui(self):
         """Создать UI."""
@@ -666,21 +676,146 @@ class MainWindow(QMainWindow):
         fps = self.controller.get_fps()
         current_frame = self.controller.get_current_frame_idx()
         total_frames = self.controller.get_total_frames()
-        
+
         if fps > 0 and total_frames > 0:
             current_time = self._format_time_single(current_frame / fps)
             total_time = self._format_time_single(total_frames / fps)
             segment_count = len(self.controller.markers)
-            
+
             status = f"{current_time}/{total_time} | {segment_count} segments | FPS: {fps:.2f}"
-            
+
             # Если воспроизведение, добавить индикатор
             if self.controller.playing:
                 status = "▶ " + status
-            
+
             self.status_label.setText(status)
         else:
-            self.status_label.setText("Ready")
+            self.status_label.setText(self.localization.tr("status_ready"))
+
+    def retranslate_ui(self):
+        """Перевести весь интерфейс на новый язык."""
+        # Заголовок окна
+        if hasattr(self, 'current_project_path') and self.current_project_path:
+            project_name = Path(self.current_project_path).name
+            title = self.localization.tr("window_title_with_project").format(project_name=project_name)
+        else:
+            title = self.localization.tr("window_title")
+        self.setWindowTitle(title)
+
+        # Меню
+        self._retranslate_menu()
+
+        # Кнопки и элементы управления
+        self._update_play_btn_text()
+        self.play_btn.setToolTip(self.localization.tr("tooltip_play_pause"))
+        self.progress_slider.setToolTip(self.localization.tr("tooltip_progress"))
+        self.time_label.setToolTip(self.localization.tr("tooltip_time"))
+
+        # Кнопки управления
+        # Найти кнопку открытия видео и обновить её текст
+        for i in range(self.play_btn.parent().layout().count()):
+            item = self.play_btn.parent().layout().itemAt(i)
+            if item and item.widget() and hasattr(item.widget(), 'text'):
+                btn = item.widget()
+                if "📁" in btn.text() or btn.toolTip() == self.localization.tr("tooltip_open_video", "Open video file (Ctrl+O)"):
+                    btn.setText(f"📁 {self.localization.tr('btn_open_video')}")
+                    btn.setToolTip(self.localization.tr("tooltip_open_video"))
+
+        # Метки и кнопки в списке сегментов
+        segments_label = None
+        for i in range(self.centralWidget().layout().count()):
+            item = self.centralWidget().layout().itemAt(i)
+            if item and isinstance(item, QHBoxLayout):
+                # Проверить, является ли это верхним layout с видео и списком
+                for j in range(item.count()):
+                    sub_item = item.itemAt(j)
+                    if sub_item and isinstance(sub_item, QVBoxLayout):
+                        # Проверить, есть ли в этом layout QLabel с "Segments:"
+                        for k in range(sub_item.count()):
+                            widget_item = sub_item.itemAt(k)
+                            if widget_item and widget_item.widget() and isinstance(widget_item.widget(), QLabel):
+                                label = widget_item.widget()
+                                if "Segments:" in label.text() or label.text() == self.localization.tr("lbl_segments", "Segments:"):
+                                    label.setText(self.localization.tr("lbl_segments"))
+                                    segments_label = label
+                                    break
+
+        # Кнопки удаления
+        for btn in self.findChildren(QPushButton):
+            if "🗑️ Delete" in btn.text() or btn.text() == self.localization.tr("btn_delete", "Delete"):
+                btn.setText(f"🗑️ {self.localization.tr('btn_delete')}")
+            elif "🗑️ Clear All" in btn.text() or btn.text() == self.localization.tr("btn_clear_all", "Clear All"):
+                btn.setText(f"🗑️ {self.localization.tr('btn_clear_all')}")
+            elif "↶ Undo" in btn.text() or btn.text() == self.localization.tr("btn_undo", "Undo"):
+                btn.setText(f"↶ {self.localization.tr('btn_undo')}")
+                btn.setToolTip(self.localization.tr("tooltip_undo"))
+            elif "↷ Redo" in btn.text() or btn.text() == self.localization.tr("btn_redo", "Redo"):
+                btn.setText(f"↷ {self.localization.tr('btn_redo')}")
+                btn.setToolTip(self.localization.tr("tooltip_redo"))
+            elif "👁️ Preview" in btn.text() or btn.text() == self.localization.tr("btn_preview", "Preview"):
+                btn.setText(f"👁️ {self.localization.tr('btn_preview')}")
+                btn.setToolTip(self.localization.tr("tooltip_preview"))
+            elif "⚙️ Settings" in btn.text() or btn.text() == self.localization.tr("btn_settings", "Settings"):
+                btn.setText(f"⚙️ {self.localization.tr('btn_settings')}")
+                btn.setToolTip(self.localization.tr("tooltip_settings"))
+            elif "💾 Export" in btn.text() or btn.text() == self.localization.tr("btn_export", "Export"):
+                btn.setText(f"💾 {self.localization.tr('btn_export')}")
+                btn.setToolTip(self.localization.tr("tooltip_export"))
+
+        # Метка таймлайна
+        for label in self.findChildren(QLabel):
+            if "Timeline:" in label.text() or label.text() == self.localization.tr("lbl_timeline", "Timeline:"):
+                label.setText(self.localization.tr("lbl_timeline"))
+                break
+
+        # Обновить статус-бар
+        self._update_status_bar()
+
+    def _retranslate_menu(self):
+        """Перевести меню."""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.findChild(QMenu, "file_menu")
+        if not file_menu:
+            # Найти меню по индексу или названию
+            for action in menubar.actions():
+                if action.menu() and ("File" in action.text() or action.text() == self.localization.tr("menu_file", "File")):
+                    file_menu = action.menu()
+                    break
+
+        if file_menu:
+            file_menu.setTitle(self.localization.tr("menu_file"))
+
+            # Обновить действия меню
+            for action in file_menu.actions():
+                if action.text() == "New Project" or action.text() == self.localization.tr("menu_new_project", "New Project"):
+                    action.setText(self.localization.tr("menu_new_project"))
+                elif action.text() == "Open Project" or action.text() == self.localization.tr("menu_open_project", "Open Project"):
+                    action.setText(self.localization.tr("menu_open_project"))
+                elif action.text() == "Save Project" or action.text() == self.localization.tr("menu_save_project", "Save Project"):
+                    action.setText(self.localization.tr("menu_save_project"))
+                elif action.text() == "Save Project As..." or action.text() == self.localization.tr("menu_save_project_as", "Save Project As..."):
+                    action.setText(self.localization.tr("menu_save_project_as"))
+                elif action.text() == "Recent Projects" or action.text() == self.localization.tr("menu_recent_projects", "Recent Projects"):
+                    action.setText(self.localization.tr("menu_recent_projects"))
+                elif action.text() == "Exit" or action.text() == self.localization.tr("menu_exit", "Exit"):
+                    action.setText(self.localization.tr("menu_exit"))
+
+        # Help menu
+        help_menu = menubar.findChild(QMenu, "help_menu")
+        if not help_menu:
+            for action in menubar.actions():
+                if action.menu() and ("Help" in action.text() or action.text() == self.localization.tr("menu_help", "Help")):
+                    help_menu = action.menu()
+                    break
+
+        if help_menu:
+            help_menu.setTitle(self.localization.tr("menu_help"))
+
+            for action in help_menu.actions():
+                if action.text() == "About" or action.text() == self.localization.tr("menu_about", "About"):
+                    action.setText(self.localization.tr("menu_about"))
 
     def closeEvent(self, event):
         """Закрытие окна."""

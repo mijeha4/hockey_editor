@@ -206,6 +206,16 @@ class SettingsManager:
         """Очистить все настройки."""
         self.settings.clear()
     
+    # ============= ЯЗЫК =============
+
+    def save_language(self, language: str) -> None:
+        """Сохранить выбранный язык (например, 'en' или 'ru')."""
+        self.settings.setValue("ui/language", language)
+
+    def load_language(self) -> str:
+        """Загрузить выбранный язык (по умолчанию 'ru')."""
+        return self.settings.value("ui/language", "ru")
+
     def sync(self) -> None:
         """Синхронизировать настройки с хранилищем."""
         self.settings.sync()

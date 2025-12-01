@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFrame, QLabel, QSizePolicy
 )
 from ..utils.custom_events import get_custom_event_manager
+from ..utils.localization_manager import get_localization_manager
 
 
 class CompactEventButton(QPushButton):
@@ -34,12 +35,15 @@ class CompactEventButton(QPushButton):
         self.setPalette(palette)
         self.setAutoFillBackground(True)
 
-        # Tooltip с полным названием и горячей клавишей
-        tooltip = event_obj.name
+        # Tooltip с локализованным названием и горячей клавишей
+        localized_name = event_obj.get_localized_name()
+        localized_desc = event_obj.get_localized_description()
+
+        tooltip = localized_name
         if event_obj.shortcut:
             tooltip += " (" + event_obj.shortcut.upper() + ")"
-        if event_obj.description:
-            tooltip += "\n" + event_obj.description
+        if localized_desc:
+            tooltip += "\n" + localized_desc
         self.setToolTip(tooltip)
 
     def _lighten_color(self, color_hex: str) -> str:
@@ -70,6 +74,7 @@ class EventLabelsWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.event_manager = get_custom_event_manager()
+        self.localization = get_localization_manager()
         self.is_collapsed = False
         self.button_size = 42  # Размер кнопки
         self.button_spacing = 6  # Расстояние между кнопками
@@ -91,7 +96,7 @@ class EventLabelsWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.title_label = QLabel("Event Labels")
+        self.title_label = QLabel("")
         self.title_label.setStyleSheet("""
             QLabel {
                 color: #ffffff;
@@ -160,6 +165,7 @@ class EventLabelsWidget(QWidget):
     def connect_signals(self):
         """Подключение сигналов."""
         self.event_manager.events_changed.connect(self.update_event_buttons)
+        self.localization.language_changed.connect(self.retranslate_ui)
 
     def update_event_buttons(self):
         """Обновление кнопок событий."""
@@ -254,6 +260,13 @@ class EventLabelsWidget(QWidget):
             rows_count = (events_count + self.max_buttons_per_row - 1) // self.max_buttons_per_row
             row_height = self.button_size + 4  # Высота ряда с учетом spacing
             return 25 + min(rows_count * row_height, 200)  # Заголовок + ряды (с ограничением)
+
+    def retranslate_ui(self):
+        """Перевести интерфейс виджета."""
+        self.title_label.setText(self.localization.tr("widget_event_labels"))
+        self.toggle_button.setToolTip(self.localization.tr("widget_toggle_hide") if self.is_collapsed else self.localization.tr("widget_toggle_show"))
+        # Обновить все кнопки событий с новыми переводами
+        self.update_event_buttons()
 
     def resizeEvent(self, event):
         """Обработка изменения размера виджета."""

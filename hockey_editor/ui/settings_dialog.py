@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 from enum import Enum
 from ..utils.settings_manager import get_settings_manager
+from ..utils.localization_manager import get_localization_manager
 from .custom_event_dialog import CustomEventManagerDialog
 
 
@@ -17,10 +18,15 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.controller = controller
         self.settings_manager = get_settings_manager()
-        
-        self.setWindowTitle("Settings")
+        self.localization = get_localization_manager()
+
+        self.setWindowTitle(self.localization.tr("dialog_title_settings"))
         self.setGeometry(200, 200, 500, 400)
         self.setup_ui()
+        self.retranslate_ui()
+
+        # Подключить сигнал изменения языка
+        self.localization.language_changed.connect(self.retranslate_ui)
 
     def setup_ui(self):
         """Создать UI с вкладками."""
@@ -35,12 +41,12 @@ class SettingsDialog(QDialog):
         # Вкладка 2: Горячие клавиши
         tabs.addTab(self._create_hotkeys_tab(), "Hotkeys")
         
-        # Вкладка 3: Визуализация
-        tabs.addTab(self._create_colors_tab(), "Colors")
-        
-        # Вкладка 4: Автосохранение
+        # Вкладка 3: Автосохранение
         tabs.addTab(self._create_autosave_tab(), "Autosave")
-        
+
+        # Вкладка 4 : Язык
+        tabs.addTab(self._create_language_tab(), "Language")
+
         layout.addWidget(tabs)
 
         # Кнопка управления пользовательскими событиями
@@ -112,45 +118,17 @@ class SettingsDialog(QDialog):
 
         # Статусная информация
         info_text = """
-Hotkey System:
-• A/D/S keys for quick event marking during video playback
-• Custom shortcuts for user-defined events
-• Works globally even when timeline or other controls are focused
-• Space bar for Play/Pause video
-• Ctrl+E for Export, Ctrl+S for Save Project
-"""
+            Hotkey System:
+            • Custom shortcuts for user-defined events
+            • Works globally even when timeline or other controls are focused
+            • Space bar for Play/Pause video
+            • Ctrl+E for Export, Ctrl+S for Save Project
+            """
         info_label = QLabel(info_text)
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #cccccc; font-size: 11px;")
         widget.addWidget(info_label)
 
-        widget.addStretch()
-        return self._wrap_widget(widget)
-
-    def _create_colors_tab(self):
-        """Вкладка цветов."""
-        widget = QVBoxLayout()
-        
-        widget.addWidget(QLabel("Event Colors:"))
-        
-        self.color_buttons = {}
-        colors = {
-            'ATTACK': '#8b0000',
-            'DEFENSE': '#000080',
-            'SHIFT': '#006400',
-        }
-        
-        for event_type, color_hex in colors.items():
-            layout = QHBoxLayout()
-            layout.addWidget(QLabel(event_type + ":"))
-            
-            btn = QPushButton()
-            btn.setStyleSheet(f"background-color: {color_hex}; width: 100px;")
-            btn.clicked.connect(lambda checked, e=event_type: self._choose_color(e))
-            self.color_buttons[event_type] = (btn, color_hex)
-            layout.addWidget(btn)
-            widget.addLayout(layout)
-        
         widget.addStretch()
         return self._wrap_widget(widget)
 
@@ -174,6 +152,46 @@ Hotkey System:
 
         # Информация
         widget.addWidget(QLabel("\nMarkers are automatically saved to 'project.json'"))
+
+        widget.addStretch()
+        return self._wrap_widget(widget)
+
+    def _create_language_tab(self):
+        """Вкладка выбора языка."""
+        widget = QVBoxLayout()
+
+        # Выбор языка
+        widget.addWidget(QLabel("Language:"))
+
+        self.language_combo = QComboBox()
+        available_languages = self.localization.get_available_languages()
+        current_language = self.localization.get_current_language()
+
+        for lang_code in available_languages:
+            display_name = self.localization.get_language_display_name(lang_code)
+            self.language_combo.addItem(display_name, lang_code)
+
+        # Установить текущий выбранный язык
+        current_index = 0
+        for i in range(self.language_combo.count()):
+            if self.language_combo.itemData(i) == current_language:
+                current_index = i
+                break
+        self.language_combo.setCurrentIndex(current_index)
+
+        widget.addWidget(self.language_combo)
+
+        # Информация
+        info_text = """
+Language Settings:
+• Changes take effect immediately for most UI elements
+• Some elements may require application restart
+• Settings are saved automatically
+"""
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #cccccc; font-size: 11px;")
+        widget.addWidget(info_label)
 
         widget.addStretch()
         return self._wrap_widget(widget)
@@ -218,6 +236,11 @@ Hotkey System:
         self.settings_manager.save_autosave_enabled(self.autosave_check.isChecked())
         self.settings_manager.save_autosave_interval(self.autosave_interval_spin.value())
 
+        # Язык
+        selected_language = self.language_combo.currentData()
+        if selected_language != self.localization.get_current_language():
+            self.localization.set_language(selected_language)
+
         # Применить изменения - перезагрузить настройки
         self.settings_manager.sync()
 
@@ -226,6 +249,72 @@ Hotkey System:
                                "Restart the application for some changes to take full effect.")
 
         self.accept()
+
+    def retranslate_ui(self):
+        """Перевести интерфейс диалога настроек."""
+        self.setWindowTitle(self.localization.tr("dialog_title_settings"))
+
+        # Перевести вкладки
+        if hasattr(self, 'layout') and self.layout():
+            tabs = None
+            for i in range(self.layout().count()):
+                item = self.layout().itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), QTabWidget):
+                    tabs = item.widget()
+                    break
+
+            if tabs:
+                tabs.setTabText(0, self.localization.tr("tab_recording_mode"))
+                tabs.setTabText(1, self.localization.tr("tab_hotkeys"))
+                tabs.setTabText(3, self.localization.tr("tab_autosave"))
+                tabs.setTabText(4, self.localization.tr("tab_language"))
+
+        # Перевести кнопки
+        for btn in self.findChildren(QPushButton):
+            if "💾 Save" in btn.text() or btn.text() == self.localization.tr("btn_save", "Save"):
+                btn.setText(f"💾 {self.localization.tr('btn_save')}")
+            elif "✕ Cancel" in btn.text() or btn.text() == self.localization.tr("btn_cancel", "Cancel"):
+                btn.setText(f"✕ {self.localization.tr('btn_cancel')}")
+            elif "📝 Manage Events" in btn.text():
+                # Эта кнопка пока остается без перевода, так как нет ключа в локализации
+                pass
+
+        # Перевести метки и элементы в вкладках
+        self._retranslate_tabs()
+
+    def _retranslate_tabs(self):
+        """Перевести содержимое вкладок."""
+        # Найти все метки в диалоге и перевести их
+        for label in self.findChildren(QLabel):
+            text = label.text()
+            if "Recording Mode:" in text or text == self.localization.tr("lbl_recording_mode", "Recording Mode:"):
+                label.setText(self.localization.tr("lbl_recording_mode"))
+            elif "Fixed Duration (seconds):" in text or text == self.localization.tr("lbl_fixed_duration", "Fixed Duration (seconds):"):
+                label.setText(self.localization.tr("lbl_fixed_duration"))
+            elif "Pre-roll (seconds):" in text or text == self.localization.tr("lbl_pre_roll", "Pre-roll (seconds):"):
+                label.setText(self.localization.tr("lbl_pre_roll"))
+            elif "Post-roll (seconds):" in text or text == self.localization.tr("lbl_post_roll", "Post-roll (seconds):"):
+                label.setText(self.localization.tr("lbl_post_roll"))
+            elif "Hotkeys Settings:" in text or text == self.localization.tr("lbl_hotkeys", "Hotkeys Settings:"):
+                label.setText(self.localization.tr("lbl_hotkeys"))
+            elif "Autosave Settings:" in text or text == self.localization.tr("lbl_autosave", "Autosave Settings:"):
+                label.setText(self.localization.tr("lbl_autosave"))
+            elif "Language:" in text or text == self.localization.tr("lbl_language", "Language:"):
+                label.setText(self.localization.tr("lbl_language"))
+
+        # Обновить комбо-боксы
+        if hasattr(self, 'mode_combo'):
+            current_idx = self.mode_combo.currentIndex()
+            self.mode_combo.clear()
+            self.mode_combo.addItem(self.localization.tr("combo_dynamic"), "dynamic")
+            self.mode_combo.addItem(self.localization.tr("combo_fixed"), "fixed_length")
+            self.mode_combo.setCurrentIndex(current_idx)
+
+        # Обновить чекбокс автосохранения
+        for checkbox in self.findChildren(QCheckBox):
+            if "Enable autosave" in checkbox.text():
+                # Пока оставим без перевода, так как нет ключа
+                pass
 
     def _manage_events(self):
         """Открыть диалог управления событиями."""

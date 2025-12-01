@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtGui import QColor
 from .settings_manager import get_settings_manager
+from .localization_manager import get_localization_manager
 
 
 @dataclass
@@ -45,6 +46,82 @@ class CustomEventType:
         """Get Qt color object."""
         color = QColor(self.color)
         return color if color.isValid() else QColor('#CCCCCC')
+
+    def get_localized_name(self) -> str:
+        """Get localized name for the event."""
+        localization = get_localization_manager()
+        # Convert event name to localization key format
+        key_map = {
+            'Goal': 'event_goal',
+            'Shot': 'event_shot',
+            'Save': 'event_save',
+            'Missed Shot': 'event_missed_shot',
+            'Blocked Shot': 'event_blocked_shot',
+            'Faceoff Win': 'event_faceoff_win',
+            'Faceoff Loss': 'event_faceoff_loss',
+            'Penalty': 'event_penalty',
+            'Power Play Start': 'event_power_play_start',
+            'Power Play End': 'event_power_play_end',
+            'Penalty Kill Start': 'event_penalty_kill_start',
+            'Penalty Kill End': 'event_penalty_kill_end',
+            'Hit': 'event_hit',
+            'Turnover': 'event_turnover',
+            'Possession Gain': 'event_possession_gain',
+            'Check': 'event_check',
+            'Goalie Change': 'event_goalie_change',
+            'Empty Net': 'event_empty_net',
+            'Period Start': 'event_period_start',
+            'Period End': 'event_period_end',
+            'Shift': 'event_shift'
+        }
+
+        key = key_map.get(self.name)
+        if key:
+            localized_name = localization.tr(key)
+            # If translation exists and is different from key, return it
+            if localized_name != key:
+                return localized_name
+
+        # Return original name if no translation found (for custom events)
+        return self.name
+
+    def get_localized_description(self) -> str:
+        """Get localized description for the event."""
+        localization = get_localization_manager()
+        # Convert event name to description key format
+        desc_key_map = {
+            'Goal': 'event_goal_desc',
+            'Shot': 'event_shot_desc',
+            'Save': 'event_save_desc',
+            'Missed Shot': 'event_missed_shot_desc',
+            'Blocked Shot': 'event_blocked_shot_desc',
+            'Faceoff Win': 'event_faceoff_win_desc',
+            'Faceoff Loss': 'event_faceoff_loss_desc',
+            'Penalty': 'event_penalty_desc',
+            'Power Play Start': 'event_power_play_start_desc',
+            'Power Play End': 'event_power_play_end_desc',
+            'Penalty Kill Start': 'event_penalty_kill_start_desc',
+            'Penalty Kill End': 'event_penalty_kill_end_desc',
+            'Hit': 'event_hit_desc',
+            'Turnover': 'event_turnover_desc',
+            'Possession Gain': 'event_possession_gain_desc',
+            'Check': 'event_check_desc',
+            'Goalie Change': 'event_goalie_change_desc',
+            'Empty Net': 'event_empty_net_desc',
+            'Period Start': 'event_period_start_desc',
+            'Period End': 'event_period_end_desc',
+            'Shift': 'event_shift_desc'
+        }
+
+        desc_key = desc_key_map.get(self.name)
+        if desc_key:
+            localized_desc = localization.tr(desc_key)
+            # If translation exists and is different from key, return it
+            if localized_desc != desc_key:
+                return localized_desc
+
+        # Return original description if no translation found
+        return self.description
 
 
 class CustomEventManager(QObject):
