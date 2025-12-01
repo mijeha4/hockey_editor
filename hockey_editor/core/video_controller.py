@@ -300,10 +300,10 @@ class VideoController(QObject):
     def save_project(self, file_path: str) -> bool:
         """Сохранить проект в файл."""
         from .project_manager import ProjectManager, Project
-        
+
         project = Project(
-            name=self.processor.filename or "Untitled",
-            video_path=self.processor.path,
+            name=os.path.basename(self.processor.video_path) if self.processor.video_path else "Untitled",
+            video_path=self.processor.video_path,
             fps=self.get_fps()
         )
         project.markers = self.markers.copy()

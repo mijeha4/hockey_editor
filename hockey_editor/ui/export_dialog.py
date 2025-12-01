@@ -20,10 +20,10 @@ class ExportWorker(QThread):
     progress = Signal(int)  # 0-100
     finished = Signal(bool, str)  # (success, message)
     
-    def __init__(self, video_path: str, markers: List[Marker], 
+    def __init__(self, video_path: str, markers: List[Marker],
                  output_path: str, fps: float, codec: str, quality: int,
                  resolution: str = "source", include_audio: bool = True,
-                 merge_segments: bool = False):
+                 merge_segments: bool = False, total_frames: int = 1000):
         super().__init__()
         self.video_path = video_path
         self.markers = markers
@@ -34,6 +34,7 @@ class ExportWorker(QThread):
         self.resolution = resolution
         self.include_audio = include_audio
         self.merge_segments = merge_segments
+        self.total_frames = total_frames
         self.is_cancelled = False
 
     def run(self):
@@ -54,10 +55,14 @@ class ExportWorker(QThread):
             VideoExporter.export(
                 self.video_path,
                 self.markers,
-                fps=self.fps,
-                output_path=self.output_path,
+                self.total_frames,
+                self.fps,
+                self.output_path,
                 codec=self.codec,
-                quality=self.quality
+                quality=self.quality,
+                resolution=self.resolution,
+                include_audio=self.include_audio,
+                merge_segments=self.merge_segments
             )
             
             self.progress.emit(100)
@@ -381,8 +386,10 @@ class ExportDialog(QDialog):
         include_audio = self.audio_check.isChecked()
         merge_segments = self.merge_check.isChecked()
         
+        # Получить общее количество кадров
+        total_frames = getattr(self.controller, 'get_total_frames', lambda: 1000)()
+
         # Запустить экспорт в отдельном потоке
-        # ИСПРАВЛЕНО: использовать video_path вместо path
         self.export_worker = ExportWorker(
             self.controller.processor.video_path,
             selected_markers,
@@ -392,7 +399,8 @@ class ExportDialog(QDialog):
             crf_value,
             resolution,
             include_audio,
-            merge_segments
+            merge_segments,
+            total_frames
         )
         
         self.export_worker.progress.connect(self._on_progress_update)

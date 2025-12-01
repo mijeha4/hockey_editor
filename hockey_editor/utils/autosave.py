@@ -49,7 +49,7 @@ class AutosaveManager(QObject):
 
     def _on_autosave_tick(self):
         """Таймер автосохранения."""
-        if self.controller.processor.path:
+        if self.controller.processor.video_path:
             self.perform_autosave()
 
     def perform_autosave(self) -> bool:
