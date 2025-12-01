@@ -2,11 +2,11 @@
 # Финальная стабильная версия — всё работает идеально
 
 from PySide6.QtWidgets import (
-    QGraphicsRectItem, QGraphicsLineItem, QGraphicsScene, QGraphicsView,
-    QGraphicsTextItem, QScrollArea, QWidget, QVBoxLayout
+    QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem, QGraphicsTextItem,
+    QScrollArea, QWidget, QVBoxLayout, QMenu
 )
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter
+from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction
 from ..utils.custom_events import get_custom_event_manager
 
 
@@ -175,3 +175,28 @@ class TimelineWidget(QWidget):
             frame = max(0, min(frame, self.controller.get_total_frames() - 1))
             self.controller.seek_frame(frame)
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Обработка правого клика - показ контекстного меню."""
+        if not hasattr(self.scene, 'main_window') or not self.scene.main_window:
+            return
+
+        menu = QMenu(self)
+
+        # Действия контекстного меню
+        save_action = QAction("Сохранить проект", self)
+        save_action.triggered.connect(self.scene.main_window._on_save_project)
+
+        open_action = QAction("Открыть проект", self)
+        open_action.triggered.connect(self.scene.main_window._on_open_project)
+
+        new_action = QAction("Новый проект", self)
+        new_action.triggered.connect(self.scene.main_window._on_new_project)
+
+        menu.addAction(save_action)
+        menu.addAction(open_action)
+        menu.addSeparator()
+        menu.addAction(new_action)
+
+        # Показываем меню в позиции курсора
+        menu.exec(event.globalPos())

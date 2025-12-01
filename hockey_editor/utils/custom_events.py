@@ -53,26 +53,18 @@ class CustomEventType:
         # Convert event name to localization key format
         key_map = {
             'Goal': 'event_goal',
-            'Shot': 'event_shot',
-            'Save': 'event_save',
+            'Shot on Goal': 'event_shot_on_goal',
             'Missed Shot': 'event_missed_shot',
             'Blocked Shot': 'event_blocked_shot',
+            'Zone Entry': 'event_zone_entry',
+            'Zone Exit': 'event_zone_exit',
+            'Dump In': 'event_dump_in',
+            'Turnover': 'event_turnover',
+            'Takeaway': 'event_takeaway',
             'Faceoff Win': 'event_faceoff_win',
             'Faceoff Loss': 'event_faceoff_loss',
-            'Penalty': 'event_penalty',
-            'Power Play Start': 'event_power_play_start',
-            'Power Play End': 'event_power_play_end',
-            'Penalty Kill Start': 'event_penalty_kill_start',
-            'Penalty Kill End': 'event_penalty_kill_end',
-            'Hit': 'event_hit',
-            'Turnover': 'event_turnover',
-            'Possession Gain': 'event_possession_gain',
-            'Check': 'event_check',
-            'Goalie Change': 'event_goalie_change',
-            'Empty Net': 'event_empty_net',
-            'Period Start': 'event_period_start',
-            'Period End': 'event_period_end',
-            'Shift': 'event_shift'
+            'Defensive Block': 'event_defensive_block',
+            'Penalty': 'event_penalty'
         }
 
         key = key_map.get(self.name)
@@ -91,26 +83,18 @@ class CustomEventType:
         # Convert event name to description key format
         desc_key_map = {
             'Goal': 'event_goal_desc',
-            'Shot': 'event_shot_desc',
-            'Save': 'event_save_desc',
+            'Shot on Goal': 'event_shot_on_goal_desc',
             'Missed Shot': 'event_missed_shot_desc',
             'Blocked Shot': 'event_blocked_shot_desc',
+            'Zone Entry': 'event_zone_entry_desc',
+            'Zone Exit': 'event_zone_exit_desc',
+            'Dump In': 'event_dump_in_desc',
+            'Turnover': 'event_turnover_desc',
+            'Takeaway': 'event_takeaway_desc',
             'Faceoff Win': 'event_faceoff_win_desc',
             'Faceoff Loss': 'event_faceoff_loss_desc',
-            'Penalty': 'event_penalty_desc',
-            'Power Play Start': 'event_power_play_start_desc',
-            'Power Play End': 'event_power_play_end_desc',
-            'Penalty Kill Start': 'event_penalty_kill_start_desc',
-            'Penalty Kill End': 'event_penalty_kill_end_desc',
-            'Hit': 'event_hit_desc',
-            'Turnover': 'event_turnover_desc',
-            'Possession Gain': 'event_possession_gain_desc',
-            'Check': 'event_check_desc',
-            'Goalie Change': 'event_goalie_change_desc',
-            'Empty Net': 'event_empty_net_desc',
-            'Period Start': 'event_period_start_desc',
-            'Period End': 'event_period_end_desc',
-            'Shift': 'event_shift_desc'
+            'Defensive Block': 'event_defensive_block_desc',
+            'Penalty': 'event_penalty_desc'
         }
 
         desc_key = desc_key_map.get(self.name)
@@ -132,40 +116,26 @@ class CustomEventManager(QObject):
 
     # Default event types (always available)
     DEFAULT_EVENTS = [
-        # Goals and shots
-        CustomEventType(name='Goal', color='#D32F2F', shortcut='G', description='Goal scored'),
-        CustomEventType(name='Shot', color='#F44336', shortcut='H', description='Shot on goal'),
-        CustomEventType(name='Save', color='#E57373', shortcut='V', description='Goaltender save'),
-        CustomEventType(name='Missed Shot', color='#EF5350', shortcut='M', description='Shot missed the net'),
-        CustomEventType(name='Blocked Shot', color='#FF8A65', shortcut='B', description='Shot blocked'),
+        # Shooting
+        CustomEventType(name='Goal', color='#FF0000', shortcut='G', description='Goal scored'),
+        CustomEventType(name='Shot on Goal', color='#FF5722', shortcut='H', description='Shot on goal'),
+        CustomEventType(name='Missed Shot', color='#FF9800', shortcut='M', description='Shot missed the net'),
+        CustomEventType(name='Blocked Shot', color='#795548', shortcut='B', description='Shot blocked'),
 
-        # Faceoffs
-        CustomEventType(name='Faceoff Win', color='#FFEB3B', shortcut='F', description='Faceoff won'),
-        CustomEventType(name='Faceoff Loss', color='#FBC02D', shortcut='L', description='Faceoff lost'),
+        # Zone Entries/Exits
+        CustomEventType(name='Zone Entry', color='#2196F3', shortcut='Z', description='Entry into offensive zone'),
+        CustomEventType(name='Zone Exit', color='#03A9F4', shortcut='X', description='Exit from defensive zone'),
+        CustomEventType(name='Dump In', color='#00BCD4', shortcut='D', description='Dump puck into zone'),
 
-        # Penalties and special teams
-        CustomEventType(name='Penalty', color='#FF9800', shortcut='P', description='Penalty called'),
-        CustomEventType(name='Power Play Start', color='#9C27B0', shortcut='Q', description='Power play begins'),
-        CustomEventType(name='Power Play End', color='#BA68C8', shortcut='W', description='Power play ends'),
-        CustomEventType(name='Penalty Kill Start', color='#7B1FA2', shortcut='E', description='Penalty kill begins'),
-        CustomEventType(name='Penalty Kill End', color='#AB47BC', shortcut='R', description='Penalty kill ends'),
+        # Possession
+        CustomEventType(name='Turnover', color='#607D8B', shortcut='T', description='Loss of puck possession'),
+        CustomEventType(name='Takeaway', color='#4CAF50', shortcut='A', description='Puck possession gained'),
+        CustomEventType(name='Faceoff Win', color='#8BC34A', shortcut='F', description='Faceoff won'),
+        CustomEventType(name='Faceoff Loss', color='#558B2F', shortcut='L', description='Faceoff lost'),
 
-        # Game actions
-        CustomEventType(name='Hit', color='#2196F3', shortcut='I', description='Body check/hit'),
-        CustomEventType(name='Turnover', color='#03A9F4', shortcut='U', description='Puck turnover'),
-        CustomEventType(name='Possession Gain', color='#00BCD4', shortcut='O', description='Puck possession gained'),
-        CustomEventType(name='Check', color='#0097A7', shortcut='C', description='Stick check or block'),
-
-        # Goaltending
-        CustomEventType(name='Goalie Change', color='#4CAF50', shortcut='Y', description='Goaltender change'),
-        CustomEventType(name='Empty Net', color='#81C784', shortcut='N', description='Empty net situation'),
-
-        # Game periods
-        CustomEventType(name='Period Start', color='#8BC34A', shortcut='1', description='Period begins'),
-        CustomEventType(name='Period End', color='#689F38', shortcut='2', description='Period ends'),
-
-        # Line changes
-        CustomEventType(name='Shift', color='#66BB6A', shortcut='S', description='Line change/shift'),
+        # Defense
+        CustomEventType(name='Defensive Block', color='#3F51B5', shortcut='K', description='Shot blocked in defense'),
+        CustomEventType(name='Penalty', color='#9C27B0', shortcut='P', description='Penalty called'),
     ]
     
     def __init__(self):
