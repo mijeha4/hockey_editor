@@ -25,7 +25,9 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         self.setBrush(QBrush(QColor(255, 255, 255, 230)))
         self.setPen(QPen(self.event_color, 4, Qt.SolidLine, Qt.RoundCap))
 
-        self.text_item = QGraphicsTextItem(marker.event_name, self)
+        # Использовать локализованное название события
+        localized_event_name = event.get_localized_name() if event else marker.event_name
+        self.text_item = QGraphicsTextItem(localized_event_name, self)
         self.text_item.setDefaultTextColor(QColor("#000000"))
         self.text_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
 
@@ -96,7 +98,7 @@ class TimelineGraphicsScene(QGraphicsScene):
             # Заголовок события
             header = self.addRect(0, y, 140, self.track_height,
                                 QPen(QColor("#1b263b")), QBrush(QColor(event.color)))
-            text = self.addText(event.name)
+            text = self.addText(event.get_localized_name())
             text.setDefaultTextColor(Qt.white)
             text.setFont(QFont("Segoe UI", 11, QFont.Bold))
             text.setPos(10, y + 15)

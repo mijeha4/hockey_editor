@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QInputDialog, QSizePolicy
 )
 from ..utils.custom_events import get_custom_event_manager
-from ..utils.localization_manager import get_localization_manager
 
 
 class EventShortcutListWidget(QWidget):
@@ -25,7 +24,6 @@ class EventShortcutListWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.event_manager = get_custom_event_manager()
-        self.localization = get_localization_manager()
         self.is_collapsed = False
 
         self.setup_ui()
@@ -44,7 +42,7 @@ class EventShortcutListWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.title_label = QLabel("Event Shortcuts")
+        self.title_label = QLabel("Горячие клавиши событий")
         self.title_label.setStyleSheet("""
             QLabel {
                 color: #ffffff;
@@ -70,7 +68,7 @@ class EventShortcutListWidget(QWidget):
                 background-color: #555555;
             }
         """)
-        self.toggle_button.setToolTip("Hide/Show event shortcuts")
+        self.toggle_button.setToolTip("Скрыть/Показать горячие клавиши событий")
         self.toggle_button.clicked.connect(self.toggle_panel)
         header_layout.addWidget(self.toggle_button)
 
@@ -138,7 +136,6 @@ class EventShortcutListWidget(QWidget):
     def connect_signals(self):
         """Подключение сигналов."""
         self.event_manager.events_changed.connect(self.update_event_list)
-        self.localization.language_changed.connect(self.retranslate_ui)
 
     def update_event_list(self):
         """Обновление списка событий."""
@@ -154,7 +151,7 @@ class EventShortcutListWidget(QWidget):
             if event.shortcut:
                 item_text += f" [{event.shortcut.upper()}]"
             else:
-                item_text += f" {self.localization.tr('status_no_key')}"
+                item_text += " [Нет клавиши]"
 
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, event.name)  # Сохранить имя события
@@ -172,9 +169,9 @@ class EventShortcutListWidget(QWidget):
             if localized_desc:
                 tooltip += f"\n{localized_desc}"
             if event.shortcut:
-                tooltip += f"\nShortcut: {event.shortcut.upper()}"
+                tooltip += f"\nКлавиша: {event.shortcut.upper()}"
             else:
-                tooltip += f"\n{self.localization.tr('status_no_key').replace('[', '').replace(']', '').strip()}"
+                tooltip += "\nНет назначенной клавиши"
             item.setToolTip(tooltip)
 
             self.event_list.addItem(item)
@@ -191,12 +188,12 @@ class EventShortcutListWidget(QWidget):
             self.animation.setStartValue(self.scroll_area.maximumHeight())
             self.animation.setEndValue(0)
             self.toggle_button.setText("▶")
-            self.toggle_button.setToolTip("Show event shortcuts")
+            self.toggle_button.setToolTip("Показать горячие клавиши событий")
         else:
             self.animation.setStartValue(0)
             self.animation.setEndValue(300)
             self.toggle_button.setText("▼")
-            self.toggle_button.setToolTip("Hide event shortcuts")
+            self.toggle_button.setToolTip("Скрыть горячие клавиши событий")
 
         self.animation.setDuration(200)
         self.animation.start()
@@ -226,8 +223,8 @@ class EventShortcutListWidget(QWidget):
         current_shortcut = event.shortcut if event.shortcut else ""
         localized_name = event.get_localized_name()
         new_shortcut, ok = QInputDialog.getText(
-            self, self.localization.tr("dialog_edit_shortcut"),
-            self.localization.tr("dialog_shortcut_prompt").format(event_name=localized_name),
+            self, "Редактировать горячую клавишу",
+            f"Введите новую клавишу для события '{localized_name}':",
             text=current_shortcut
         )
 
@@ -238,9 +235,9 @@ class EventShortcutListWidget(QWidget):
             if not new_shortcut:
                 event.shortcut = ""
                 if self.event_manager.update_event(event_name, event):
-                    QMessageBox.information(self, self.localization.tr("dialog_shortcut_removed").format(event_name=localized_name))
+                    QMessageBox.information(self, f"Горячая клавиша удалена для события '{localized_name}'")
                 else:
-                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
+                    QMessageBox.warning(self, "Не удалось удалить горячую клавишу")
                 return
 
             # Проверка доступности shortcut'а
@@ -255,12 +252,9 @@ class EventShortcutListWidget(QWidget):
                 if conflicting_event:
                     conflicting_localized = conflicting_event.get_localized_name()
                     reply = QMessageBox.question(
-                        self, self.localization.tr("dialog_shortcut_conflict"),
-                        self.localization.tr("dialog_shortcut_conflict_msg").format(
-                            shortcut=new_shortcut,
-                            existing_event=conflicting_localized,
-                            new_event=localized_name
-                        ),
+                        self, "Конфликт горячих клавиш",
+                        f"Клавиша '{new_shortcut}' уже используется событием '{conflicting_localized}'.\n\n"
+                        f"Хотите переназначить клавишу от '{conflicting_localized}' к '{localized_name}'?",
                         QMessageBox.Yes | QMessageBox.No
                     )
 
@@ -272,33 +266,21 @@ class EventShortcutListWidget(QWidget):
                         # Присвоить shortcut новому событию
                         event.shortcut = new_shortcut
                         if self.event_manager.update_event(event_name, event):
-                            QMessageBox.information(self, self.localization.tr("dialog_shortcut_reassigned").format(
-                                shortcut=new_shortcut,
-                                old_event=conflicting_localized,
-                                new_event=localized_name
-                            ))
+                            QMessageBox.information(self, f"Клавиша '{new_shortcut}' переназначена от '{conflicting_localized}' к '{localized_name}'")
                         else:
-                            QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
+                            QMessageBox.warning(self, "Не удалось переназначить горячую клавишу")
                     # Если No - ничего не делаем
                 else:
-                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_not_available").format(shortcut=new_shortcut))
+                    QMessageBox.warning(self, f"Клавиша '{new_shortcut}' недоступна")
             else:
                 # Shortcut доступен, присваиваем
                 event.shortcut = new_shortcut
                 if self.event_manager.update_event(event_name, event):
-                    QMessageBox.information(self, self.localization.tr("dialog_shortcut_assigned").format(
-                        shortcut=new_shortcut,
-                        event_name=localized_name
-                    ))
+                    QMessageBox.information(self, f"Клавиша '{new_shortcut}' назначена для события '{localized_name}'")
                 else:
-                    QMessageBox.warning(self, self.localization.tr("dialog_shortcut_failed"))
+                    QMessageBox.warning(self, "Не удалось назначить горячую клавишу")
 
-    def retranslate_ui(self):
-        """Перевести интерфейс виджета."""
-        self.title_label.setText(self.localization.tr("widget_event_shortcuts"))
-        self.toggle_button.setToolTip(self.localization.tr("widget_toggle_hide") if self.is_collapsed else self.localization.tr("widget_toggle_show"))
-        # Обновить все элементы списка с новыми переводами
-        self.update_event_list()
+
 
     def get_preferred_height(self) -> int:
         """Получение предпочтительной высоты виджета."""

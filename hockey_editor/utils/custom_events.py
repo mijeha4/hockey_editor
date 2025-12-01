@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtGui import QColor
 from .settings_manager import get_settings_manager
-from .localization_manager import get_localization_manager
 
 
 @dataclass
@@ -48,64 +47,48 @@ class CustomEventType:
         return color if color.isValid() else QColor('#CCCCCC')
 
     def get_localized_name(self) -> str:
-        """Get localized name for the event."""
-        localization = get_localization_manager()
-        # Convert event name to localization key format
-        key_map = {
-            'Goal': 'event_goal',
-            'Shot on Goal': 'event_shot_on_goal',
-            'Missed Shot': 'event_missed_shot',
-            'Blocked Shot': 'event_blocked_shot',
-            'Zone Entry': 'event_zone_entry',
-            'Zone Exit': 'event_zone_exit',
-            'Dump In': 'event_dump_in',
-            'Turnover': 'event_turnover',
-            'Takeaway': 'event_takeaway',
-            'Faceoff Win': 'event_faceoff_win',
-            'Faceoff Loss': 'event_faceoff_loss',
-            'Defensive Block': 'event_defensive_block',
-            'Penalty': 'event_penalty'
+        """Get localized name for the event (hardcoded Russian for default events)."""
+        # Hardcoded Russian translations for default events
+        name_map = {
+            'Goal': 'Гол',
+            'Shot on Goal': 'Бросок в створ',
+            'Missed Shot': 'Бросок мимо',
+            'Blocked Shot': 'Заблокированный бросок',
+            'Zone Entry': 'Вход в зону',
+            'Zone Exit': 'Выход из зоны',
+            'Dump In': 'Вброс',
+            'Turnover': 'Потеря',
+            'Takeaway': 'Перехват',
+            'Faceoff Win': 'Вбрасывание: Победа',
+            'Faceoff Loss': 'Вбрасывание: Поражение',
+            'Defensive Block': 'Блокшот в обороне',
+            'Penalty': 'Удаление'
         }
 
-        key = key_map.get(self.name)
-        if key:
-            localized_name = localization.tr(key)
-            # If translation exists and is different from key, return it
-            if localized_name != key:
-                return localized_name
-
-        # Return original name if no translation found (for custom events)
-        return self.name
+        # Return Russian name if it's a default event, otherwise return original name
+        return name_map.get(self.name, self.name)
 
     def get_localized_description(self) -> str:
-        """Get localized description for the event."""
-        localization = get_localization_manager()
-        # Convert event name to description key format
-        desc_key_map = {
-            'Goal': 'event_goal_desc',
-            'Shot on Goal': 'event_shot_on_goal_desc',
-            'Missed Shot': 'event_missed_shot_desc',
-            'Blocked Shot': 'event_blocked_shot_desc',
-            'Zone Entry': 'event_zone_entry_desc',
-            'Zone Exit': 'event_zone_exit_desc',
-            'Dump In': 'event_dump_in_desc',
-            'Turnover': 'event_turnover_desc',
-            'Takeaway': 'event_takeaway_desc',
-            'Faceoff Win': 'event_faceoff_win_desc',
-            'Faceoff Loss': 'event_faceoff_loss_desc',
-            'Defensive Block': 'event_defensive_block_desc',
-            'Penalty': 'event_penalty_desc'
+        """Get localized description for the event (hardcoded Russian for default events)."""
+        # Hardcoded Russian descriptions for default events
+        desc_map = {
+            'Goal': 'Забитый гол',
+            'Shot on Goal': 'Бросок в створ ворот',
+            'Missed Shot': 'Бросок мимо ворот',
+            'Blocked Shot': 'Бросок заблокирован',
+            'Zone Entry': 'Вход в зону атаки',
+            'Zone Exit': 'Выход из зоны защиты',
+            'Dump In': 'Вброс шайбы в зону',
+            'Turnover': 'Потеря владения шайбой',
+            'Takeaway': 'Перехват шайбы',
+            'Faceoff Win': 'Выигранное вбрасывание',
+            'Faceoff Loss': 'Проигранное вбрасывание',
+            'Defensive Block': 'Блокшот в обороне',
+            'Penalty': 'Назначенное удаление'
         }
 
-        desc_key = desc_key_map.get(self.name)
-        if desc_key:
-            localized_desc = localization.tr(desc_key)
-            # If translation exists and is different from key, return it
-            if localized_desc != desc_key:
-                return localized_desc
-
-        # Return original description if no translation found
-        return self.description
+        # Return Russian description if it's a default event, otherwise return original description
+        return desc_map.get(self.name, self.description)
 
 
 class CustomEventManager(QObject):
