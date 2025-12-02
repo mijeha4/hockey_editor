@@ -42,9 +42,10 @@ class TestVideoExporter(unittest.TestCase):
             os.remove(self.output_path)
         os.rmdir(self.temp_dir)
 
-    @patch('hockey_editor.core.exporter.VideoFileClip')
-    @patch('hockey_editor.core.exporter.concatenate_videoclips')
-    def test_export_basic_functionality(self, mock_concatenate, mock_video_clip):
+    @patch('os.path.exists')
+    @patch('moviepy.VideoFileClip')
+    @patch('moviepy.concatenate_videoclips')
+    def test_export_basic_functionality(self, mock_concatenate, mock_video_clip, mock_exists):
         """Тест базовой функциональности экспорта."""
         print("🧪 Тестирование базовой функциональности экспорта...")
 
@@ -97,8 +98,9 @@ class TestVideoExporter(unittest.TestCase):
 
         print("✅ Базовая функциональность экспорта работает корректно!")
 
-    @patch('hockey_editor.core.exporter.VideoFileClip')
-    def test_export_with_empty_markers(self, mock_video_clip):
+    @patch('os.path.exists')
+    @patch('moviepy.VideoFileClip')
+    def test_export_with_empty_markers(self, mock_video_clip, mock_exists):
         """Тест экспорта с пустым списком маркеров."""
         print("\n🧪 Тестирование экспорта с пустыми маркерами...")
 
@@ -133,9 +135,10 @@ class TestVideoExporter(unittest.TestCase):
 
         print("✅ Экспорт с пустыми маркерами обрабатывается корректно!")
 
-    @patch('hockey_editor.core.exporter.VideoFileClip')
-    @patch('hockey_editor.core.exporter.concatenate_videoclips')
-    def test_export_marker_boundaries(self, mock_concatenate, mock_video_clip):
+    @patch('os.path.exists')
+    @patch('moviepy.VideoFileClip')
+    @patch('moviepy.concatenate_videoclips')
+    def test_export_marker_boundaries(self, mock_concatenate, mock_video_clip, mock_exists):
         """Тест правильности границ маркеров."""
         print("\n🧪 Тестирование границ маркеров...")
 
@@ -243,8 +246,9 @@ class TestExportIntegration(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    @patch('hockey_editor.core.exporter.VideoFileClip')
-    def test_export_workflow(self, mock_video_clip):
+    @patch('os.path.exists')
+    @patch('moviepy.VideoFileClip')
+    def test_export_workflow(self, mock_video_clip, mock_exists):
         """Тест полного workflow экспорта."""
         print("\n🧪 Тестирование полного workflow экспорта...")
 
@@ -261,7 +265,7 @@ class TestExportIntegration(unittest.TestCase):
         output_path = os.path.join(self.temp_dir, "workflow_test.mp4")
 
         # Имитируем успешный экспорт
-        with patch('hockey_editor.core.exporter.concatenate_videoclips') as mock_concat:
+        with patch('moviepy.concatenate_videoclips') as mock_concat:
             mock_final = MagicMock()
             mock_concat.return_value = mock_final
 

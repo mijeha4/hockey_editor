@@ -231,14 +231,16 @@ class TimelineWidget(QWidget):
         """Масштабирование колесом мыши (Ctrl+Wheel)."""
         if event.modifiers() != Qt.KeyboardModifier.ControlModifier:
             return
-        
+
         # Zoom
         delta = event.angleDelta().y()
         if delta > 0:
             self.zoom = min(self.zoom * 1.2, 10.0)
         else:
             self.zoom = max(self.zoom / 1.2, 1.0)
-        
+
+        # Заблокировать прокрутку при масштабировании
+        event.accept()
         self.update()
 
     def sizeHint(self) -> QSize:

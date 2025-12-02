@@ -10,6 +10,19 @@ from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction
 from ..utils.custom_events import get_custom_event_manager
 
 
+class TimelineScrollArea(QScrollArea):
+    """Кастомный QScrollArea, который игнорирует колесо мыши при Ctrl для масштабирования."""
+
+    def wheelEvent(self, event):
+        """Игнорировать колесо мыши при нажатом Ctrl, чтобы позволить масштабирование."""
+        if event.modifiers() & Qt.ControlModifier:
+            # Игнорируем событие при Ctrl - пусть обрабатывает родитель (TimelineWidget)
+            event.ignore()
+        else:
+            # Обычная прокрутка без Ctrl
+            super().wheelEvent(event)
+
+
 class SegmentGraphicsItem(QGraphicsRectItem):
     def __init__(self, marker, timeline_scene):
         super().__init__()
@@ -143,7 +156,7 @@ class TimelineWidget(QWidget):
         self.scene.main_window = self  # для двойного клика
         self.view.setScene(self.scene)
 
-        scroll = QScrollArea()
+        scroll = TimelineScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.view)
         layout.addWidget(scroll)
@@ -167,6 +180,9 @@ class TimelineWidget(QWidget):
             # Автоскролл к плейхеду
             current_x = self.controller.get_current_frame_idx() * self.scene.pixels_per_frame + 150
             self.view.horizontalScrollBar().setValue(int(current_x - self.view.width() // 2))
+
+            # Заблокировать прокрутку QScrollArea при масштабировании
+            event.accept()
         else:
             super().wheelEvent(event)
 
