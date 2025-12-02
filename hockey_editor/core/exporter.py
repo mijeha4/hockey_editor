@@ -221,15 +221,15 @@ class VideoExporter:
         # Разрешение
         if resolution and resolution != "source":
             if resolution == "2160p":
-                final_clip = final_clip.resize(height=2160)
+                final_clip = final_clip.resized(height=2160)
             elif resolution == "1080p":
-                final_clip = final_clip.resize(height=1080)
+                final_clip = final_clip.resized(height=1080)
             elif resolution == "720p":
-                final_clip = final_clip.resize(height=720)
+                final_clip = final_clip.resized(height=720)
             elif resolution == "480p":
-                final_clip = final_clip.resize(height=480)
+                final_clip = final_clip.resized(height=480)
             elif resolution == "360p":
-                final_clip = final_clip.resize(height=360)
+                final_clip = final_clip.resized(height=360)
 
         # Экспортируем видео
         final_clip.write_videofile(

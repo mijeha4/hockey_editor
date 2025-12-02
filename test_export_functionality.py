@@ -49,6 +49,9 @@ class TestVideoExporter(unittest.TestCase):
         """Тест базовой функциональности экспорта."""
         print("🧪 Тестирование базовой функциональности экспорта...")
 
+        # Настраиваем mock'и
+        mock_exists.return_value = True  # Файл существует
+
         # Mock объекты
         mock_video = MagicMock()
         mock_video_clip.return_value = mock_video
@@ -62,13 +65,16 @@ class TestVideoExporter(unittest.TestCase):
         mock_concatenate.return_value = mock_final
 
         # Вызываем экспорт
-        VideoExporter.export(
+        result = VideoExporter.export(
             self.video_path,
             self.markers,
             self.total_frames,
             self.fps,
             self.output_path
         )
+
+        # Проверяем результат
+        self.assertTrue(result)
 
         # Проверяем, что VideoFileClip был вызван с правильным путем
         mock_video_clip.assert_called_once_with(self.video_path)
@@ -93,8 +99,11 @@ class TestVideoExporter(unittest.TestCase):
             threads=4
         )
 
-        # Проверяем, что video.close() был вызван
+        # Проверяем, что ресурсы были освобождены
         mock_video.close.assert_called_once()
+        mock_final.close.assert_called_once()
+        for clip in [mock_clip1, mock_clip2, mock_clip3]:
+            clip.close.assert_called_once()
 
         print("✅ Базовая функциональность экспорта работает корректно!")
 
@@ -104,6 +113,9 @@ class TestVideoExporter(unittest.TestCase):
         """Тест экспорта с пустым списком маркеров."""
         print("\n🧪 Тестирование экспорта с пустыми маркерами...")
 
+        # Настраиваем mock'и
+        mock_exists.return_value = True  # Файл существует
+
         mock_video = MagicMock()
         mock_video_clip.return_value = mock_video
 
@@ -111,13 +123,16 @@ class TestVideoExporter(unittest.TestCase):
         mock_video.subclip.return_value = mock_empty_clip
 
         # Вызываем экспорт с пустым списком
-        VideoExporter.export(
+        result = VideoExporter.export(
             self.video_path,
             [],  # Пустой список маркеров
             self.total_frames,
             self.fps,
             self.output_path
         )
+
+        # Проверяем результат
+        self.assertTrue(result)
 
         # Проверяем, что VideoFileClip все равно был вызван
         mock_video_clip.assert_called_once_with(self.video_path)
@@ -133,6 +148,10 @@ class TestVideoExporter(unittest.TestCase):
             threads=4
         )
 
+        # Проверяем, что ресурсы были освобождены
+        mock_video.close.assert_called_once()
+        mock_empty_clip.close.assert_called_once()
+
         print("✅ Экспорт с пустыми маркерами обрабатывается корректно!")
 
     @patch('os.path.exists')
@@ -141,6 +160,9 @@ class TestVideoExporter(unittest.TestCase):
     def test_export_marker_boundaries(self, mock_concatenate, mock_video_clip, mock_exists):
         """Тест правильности границ маркеров."""
         print("\n🧪 Тестирование границ маркеров...")
+
+        # Настраиваем mock'и
+        mock_exists.return_value = True  # Файл существует
 
         mock_video = MagicMock()
         mock_video_clip.return_value = mock_video
@@ -158,7 +180,7 @@ class TestVideoExporter(unittest.TestCase):
         mock_final = MagicMock()
         mock_concatenate.return_value = mock_final
 
-        VideoExporter.export(
+        result = VideoExporter.export(
             self.video_path,
             boundary_markers,
             600,  # total_frames
@@ -166,12 +188,21 @@ class TestVideoExporter(unittest.TestCase):
             self.output_path
         )
 
+        # Проверяем результат
+        self.assertTrue(result)
+
         # Проверяем правильность временных границ
         expected_calls = [
             ((0.0, 50.0/30.0),),      # 0-1.67 сек
             ((550.0/30.0, 600.0/30.0),) # 18.33-20 сек
         ]
         mock_video.subclip.assert_has_calls(expected_calls, any_order=False)
+
+        # Проверяем, что ресурсы были освобождены
+        mock_video.close.assert_called_once()
+        mock_final.close.assert_called_once()
+        mock_clip1.close.assert_called_once()
+        mock_clip2.close.assert_called_once()
 
         print("✅ Границы маркеров рассчитываются правильно!")
 
@@ -252,6 +283,9 @@ class TestExportIntegration(unittest.TestCase):
         """Тест полного workflow экспорта."""
         print("\n🧪 Тестирование полного workflow экспорта...")
 
+        # Настраиваем mock'и
+        mock_exists.return_value = True  # Файл существует
+
         # Mock видео
         mock_video = MagicMock()
         mock_video_clip.return_value = mock_video
@@ -269,13 +303,16 @@ class TestExportIntegration(unittest.TestCase):
             mock_final = MagicMock()
             mock_concat.return_value = mock_final
 
-            VideoExporter.export(
+            result = VideoExporter.export(
                 "input.mp4",
                 markers,
                 300,  # total_frames
                 30.0, # fps
                 output_path
             )
+
+            # Проверяем результат
+            self.assertTrue(result)
 
             # Проверяем, что все компоненты были вызваны
             self.assertTrue(mock_video_clip.called)
