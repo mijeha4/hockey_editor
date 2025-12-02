@@ -216,6 +216,16 @@ class SettingsManager:
         """Загрузить выбранный язык (по умолчанию 'ru')."""
         return self.settings.value("ui/language", "ru")
 
+    # ============= СКОРОСТЬ ВОСПРОИЗВЕДЕНИЯ =============
+
+    def save_playback_speed(self, speed: float) -> None:
+        """Сохранить скорость воспроизведения."""
+        self.settings.setValue("playback/speed", speed)
+
+    def load_playback_speed(self) -> float:
+        """Загрузить скорость воспроизведения (по умолчанию 1.0)."""
+        return float(self.settings.value("playback/speed", 1.0))
+
     def sync(self) -> None:
         """Синхронизировать настройки с хранилищем."""
         self.settings.sync()

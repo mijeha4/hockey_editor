@@ -129,11 +129,19 @@ class MainWindow(QMainWindow):
         self.time_label.setMaximumWidth(100)
         self.time_label.setToolTip("Current time / Total duration")
         controls_layout.addWidget(self.time_label)
-        
-        # Скорость (всегда 1x)
-        speed_label = QLabel("1.0x")
-        speed_label.setMaximumWidth(40)
+
+        # Скорость воспроизведения
+        speed_label = QLabel("Speed:")
+        speed_label.setMaximumWidth(45)
         controls_layout.addWidget(speed_label)
+
+        self.speed_combo = QComboBox()
+        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
+        self.speed_combo.setCurrentText("1.0x")
+        self.speed_combo.setMaximumWidth(60)
+        self.speed_combo.setToolTip("Playback speed")
+        self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
+        controls_layout.addWidget(self.speed_combo)
         
         # Открыть видео
         open_btn = QPushButton("📁 Открыть")
@@ -283,6 +291,8 @@ class MainWindow(QMainWindow):
                 self.status_label.setText(f"✓ Loaded: {path.split('/')[-1]}")
                 self._update_play_btn_text()
                 self.progress_slider.setMaximum(self.controller.get_total_frames())
+                # Обновить комбо-бокс скорости
+                self._update_speed_combo()
             else:
                 QMessageBox.critical(self, "Error", "Failed to load video")
 
@@ -675,13 +685,14 @@ class MainWindow(QMainWindow):
         fps = self.controller.get_fps()
         current_frame = self.controller.get_current_frame_idx()
         total_frames = self.controller.get_total_frames()
+        speed = self.controller.get_playback_speed()
 
         if fps > 0 and total_frames > 0:
             current_time = self._format_time_single(current_frame / fps)
             total_time = self._format_time_single(total_frames / fps)
             segment_count = len(self.controller.markers)
 
-            status = f"{current_time}/{total_time} | {segment_count} отрезков | FPS: {fps:.2f}"
+            status = f"{current_time}/{total_time} | {segment_count} отрезков | FPS: {fps:.2f} | Speed: {speed:.2f}x"
 
             # Если воспроизведение, добавить индикатор
             if self.controller.playing:
@@ -690,6 +701,26 @@ class MainWindow(QMainWindow):
             self.status_label.setText(status)
         else:
             self.status_label.setText("Готов")
+
+    def _on_speed_changed(self):
+        """Обработка изменения скорости воспроизведения."""
+        speed_text = self.speed_combo.currentText()
+        speed = float(speed_text.replace('x', ''))
+        self.controller.set_playback_speed(speed)
+
+    def _update_speed_combo(self):
+        """Обновить комбо-бокс скорости в соответствии с текущей скоростью контроллера."""
+        current_speed = self.controller.get_playback_speed()
+        speed_text = f"{current_speed:.2f}x"
+
+        # Найти наиболее близкий вариант в списке
+        items = [self.speed_combo.itemText(i) for i in range(self.speed_combo.count())]
+        if speed_text in items:
+            self.speed_combo.setCurrentText(speed_text)
+        else:
+            # Если точного совпадения нет, выбрать наиболее близкий
+            closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - current_speed))
+            self.speed_combo.setCurrentText(closest_item)
 
 
 

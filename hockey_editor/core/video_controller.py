@@ -47,6 +47,7 @@ class VideoController(QObject):
         self.playback_timer = QTimer()
         self.playback_timer.timeout.connect(self._on_playback_tick)
         self.frame_time_ms = 33  # ~30 FPS (рассчитывается на основе FPS видео)
+        self.playback_speed = 1.0  # Скорость воспроизведения (1.0 = нормальная скорость)
 
         # Параметры расстановки отрезков (загрузить из QSettings)
         mode_str = self.settings.load_recording_mode()
@@ -54,6 +55,9 @@ class VideoController(QObject):
         self.fixed_duration_sec = self.settings.load_fixed_duration()
         self.pre_roll_sec = self.settings.load_pre_roll()
         self.post_roll_sec = self.settings.load_post_roll()
+
+        # Загрузить скорость воспроизведения
+        self.playback_speed = self.settings.load_playback_speed()
 
         # Состояние текущей записи (динамический режим)
         self.is_recording = False
@@ -64,27 +68,27 @@ class VideoController(QObject):
         """Загрузить видеофайл (ПАУЗИРОВАН!)."""
         success = self.processor.load(video_path)
         if success:
-            # Рассчитать frame_time_ms на основе FPS видео
+            # Рассчитать frame_time_ms на основе FPS видео и скорости воспроизведения
             fps = self.processor.get_fps()
             if fps > 0:
-                self.frame_time_ms = int(1000 / fps)
-            
+                self.frame_time_ms = int(1000 / (fps * self.playback_speed))
+
             # Убедиться, что видео на паузе
             self.playing = False
             self.playback_timer.stop()
-            
+
             # Обновить маркеры и UI
             self.markers = []
             self.markers_changed.emit()
             self.playback_time_changed.emit(0)
             self.current_frame_update.emit(0)
             self.timeline_update.emit()
-            
+
             # Отправить первый кадр на UI
             frame = self.processor.get_current_frame()
             if frame is not None:
                 self.frame_ready.emit(frame)
-        
+
         return success
 
     def play(self):
@@ -274,6 +278,29 @@ class VideoController(QObject):
         """Установить добавление в конец отрезка."""
         self.post_roll_sec = seconds
         self.settings.save_post_roll(seconds)
+
+    def set_playback_speed(self, speed: float):
+        """Установить скорость воспроизведения."""
+        if speed <= 0:
+            return  # Не допускаем нулевую или отрицательную скорость
+
+        self.playback_speed = speed
+
+        # Обновить frame_time_ms если видео загружено
+        fps = self.processor.get_fps()
+        if fps > 0:
+            self.frame_time_ms = int(1000 / (fps * self.playback_speed))
+
+        # Если воспроизведение активно, перезапустить таймер с новой скоростью
+        if self.playing:
+            self.playback_timer.start(self.frame_time_ms)
+
+        # Сохранить настройку
+        self.settings.save_playback_speed(speed)
+
+    def get_playback_speed(self) -> float:
+        """Получить текущую скорость воспроизведения."""
+        return self.playback_speed
 
     # Метод update_hotkeys убран - hotkeys теперь управляются через CustomEventManager
 

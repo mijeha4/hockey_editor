@@ -38,6 +38,7 @@ class PreviewWindow(QMainWindow):
         
         self._create_filter_checkboxes()
         self._setup_ui()
+        self._update_speed_combo()
         self._update_marker_list()
 
     def _create_filter_checkboxes(self):
@@ -110,11 +111,11 @@ class PreviewWindow(QMainWindow):
         speed_label = QLabel("Speed:")
         controls_layout.addWidget(speed_label)
         self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.5x", "1.0x", "2.0x"])
-        self.speed_combo.setCurrentIndex(1)
+        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
+        self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.setMaximumWidth(80)
         self.speed_combo.setToolTip("Playback speed")
-        self.speed_combo.currentIndexChanged.connect(self._update_frame_time)
+        self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
         controls_layout.addWidget(self.speed_combo)
         
         controls_layout.addStretch()
@@ -216,12 +217,18 @@ class PreviewWindow(QMainWindow):
         """Кнопка Play/Pause."""
         if not self.controller.markers:
             return
-        
+
         if self.is_playing:
             self.playback_timer.stop()
             self.is_playing = False
             self.play_btn.setText("▶ Play")
         else:
+            # Всегда брать актуальную скорость перед запуском воспроизведения
+            fps = self.controller.get_fps()
+            speed = self.controller.get_playback_speed()
+            if fps > 0:
+                self.frame_time_ms = int(1000 / (fps * speed))
+
             self.is_playing = True
             self.play_btn.setText("⏸ Pause")
             self.playback_timer.start(self.frame_time_ms)
@@ -342,13 +349,34 @@ class PreviewWindow(QMainWindow):
             end_time = marker.end_frame / fps
             self.time_label.setText(f"{self._format_time(current_time)} / {self._format_time(end_time)}")
 
-    def _update_frame_time(self):
-        """Обновить frame_time_ms в зависимости от скорости."""
+    def _on_speed_changed(self):
+        """Обработка изменения скорости воспроизведения."""
         speed_text = self.speed_combo.currentText()
-        speed = float(speed_text.replace('x', '')) 
+        speed = float(speed_text.replace('x', ''))
+        self.controller.set_playback_speed(speed)
+
+        # Обновить frame_time_ms для локального таймера
         fps = self.controller.get_fps()
         if fps > 0:
             self.frame_time_ms = int(1000 / (fps * speed))
+
+        # Если воспроизведение активно, перезапустить таймер с новой скоростью
+        if self.is_playing:
+            self.playback_timer.start(self.frame_time_ms)
+
+    def _update_speed_combo(self):
+        """Обновить комбо-бокс скорости в соответствии с текущей скоростью контроллера."""
+        current_speed = self.controller.get_playback_speed()
+        speed_text = f"{current_speed:.2f}x"
+
+        # Найти наиболее близкий вариант в списке
+        items = [self.speed_combo.itemText(i) for i in range(self.speed_combo.count())]
+        if speed_text in items:
+            self.speed_combo.setCurrentText(speed_text)
+        else:
+            # Если точного совпадения нет, выбрать наиболее близкий
+            closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - current_speed))
+            self.speed_combo.setCurrentText(closest_item)
 
     def _format_time(self, seconds: float) -> str:
         """Форматировать время MM:SS."""
