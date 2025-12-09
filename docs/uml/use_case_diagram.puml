@@ -1,97 +1,51 @@
 @startuml Hockey Editor Use Case Diagram
 !theme plain
 left to right direction
-title Диаграмма вариантов использования Hockey Editor Pro
+title Диаграмма вариантов использования Hockey Editor
 
 actor "Хоккейный Тренер / Аналитик" as Coach
 
-rectangle "Hockey Editor Pro (System)" {
-    usecase "Load Video" as UC1
-    usecase "Mark Attack Events" as UC2
-    usecase "Mark Defense Events" as UC3
-    usecase "Mark Shift Events" as UC4
-    usecase "Review Timeline" as UC5
-    usecase "Edit Segments" as UC6
-    usecase "Preview Segments" as UC7
-    usecase "Export Segments" as UC8
-    usecase "Save Project" as UC9
-    usecase "Load Project" as UC10
-    usecase "Configure Settings" as UC11
-    usecase "Customize Hotkeys" as UC12
-    usecase "Undo/Redo Actions" as UC13
+rectangle "Hockey Editor" {
+    usecase "Загрузка видео" as UC1
+    usecase "Создание события" as UC2 
+    usecase "Редактирование событий" as UC6
+    usecase "Предпросмотр событий" as UC7
+    usecase "Экспорт списка событий" as UC8
+    usecase "Сохранить проект" as UC9
+    usecase "Загрузить проект" as UC10
+    usecase "Конфигурация настроек" as UC11
+    usecase "Управление горячими клавишами" as UC12
+    usecase "Отмена действия" as UC13
+    usecase "Экспорт видео" as UC14
 }
 
 ' ================== ПРЯМЫЕ ВЗАИМОДЕЙСТВИЯ ==================
-Coach --> UC1 : Открыть видеофайл
-Coach --> UC2 : Клавиша 'A' (2 раза)
-Coach --> UC3 : Клавиша 'D' (2 раза)
-Coach --> UC4 : Клавиша 'S' (2 раза)
-Coach --> UC5 : Работа с таймлайном
-Coach --> UC6 : Двойной клик по сегменту
-Coach --> UC7 : Кнопка Preview
-Coach --> UC8 : Кнопка Export
-Coach --> UC9 : Ctrl+S или Файл->Сохранить
-Coach --> UC10 : Файл->Открыть проект
-Coach --> UC11 : Меню Настроек
-Coach --> UC12 : Настройки -> Горячие клавиши
-Coach --> UC13 : Ctrl+Z / Ctrl+Shift+Z
+' Удалены комментарии к стрелкам
+Coach --> UC1
+Coach --> UC2
+Coach --> UC6
+Coach --> UC7
+Coach --> UC8
+Coach --> UC9
+Coach --> UC10
+Coach --> UC11
+Coach --> UC13
+Coach --> UC14
 
 ' ================== ОТНОШЕНИЯ INCLUDE (Обязательные) ==================
-' Чтобы разметить событие, видео должно быть загружено
+' Разметка требует загруженного видео
 UC2 ..> UC1 : <<include>>
-UC3 ..> UC1 : <<include>>
-UC4 ..> UC1 : <<include>>
-' Просмотр таймлайна требует загруженного видео
-UC5 ..> UC1 : <<include>>
-' Редактирование происходит на таймлайне
-UC6 ..> UC5 : <<include>>
-UC7 ..> UC5 : <<include>>
-UC8 ..> UC5 : <<include>>
-' Сохранение требует загруженного контента
-UC9 ..> UC1 : <<include>>
+
+UC6 ..> UC2 : <<include>>
+UC7 ..> UC2 : <<include>>
+UC14 ..> UC2 : <<include>>
+UC8 ..> UC2 : <<include>>
+
+UC10 ..> UC1 : <<include>>
 
 ' ================== ОТНОШЕНИЯ EXTEND (Опциональные) ==================
 ' Настройка горячих клавиш расширяет общие настройки
-UC11 ..> UC12 : <<extend>>
-' Отмена действия применима к созданию и редактированию
-UC13 ..> UC2 : <<extend>>
-UC13 ..> UC3 : <<extend>>
-UC13 ..> UC4 : <<extend>>
-UC13 ..> UC6 : <<extend>>
+UC11 <.. UC12 : <<extend>>
 
-' ================== ЗАМЕТКИ И ПОЯСНЕНИЯ ==================
-note bottom of UC2
-  **Процесс разметки событий:**
-  1. Видео воспроизводится
-  2. Нажатие хоткея (A/D/S) — начало записи
-  3. Видео продолжает играть
-  4. Повторное нажатие — конец записи
-  5. Сегмент появляется на таймлайне
-end note
-
-note bottom of UC5
-  **Функции таймлайна:**
-  • 3 цветных трека (Атака/Оборона/Смена)
-  • Поддержка зума и панорамирования
-  • Курсор воспроизведения (Playhead)
-  • Перетаскивание и растягивание
-  • Двойной клик для правки
-end note
-
-note bottom of UC8
-  **Опции экспорта:**
-  • Видеосегменты (MP4/MOV/MKV)
-  • Экспорт данных в CSV
-  • Настройки качества
-  • Пакетная обработка
-end note
-
-note as N1
-  **Основные цели пользователя:**
-  • **Разметка**: Аннотация событий в реальном времени при просмотре
-  • **Проверка**: Интерактивный таймлайн с фильтрацией
-  • **Результат**: Экспорт нарезок для анализа командой
-  • **Управление**: Сохранение работы и версионность (.hep)
-end note
 
 @enduml

@@ -89,3 +89,78 @@ note bottom of VideoController
 end note
 
 @enduml
+
+
+ДРУГАЯ Диаграмма
+@startuml
+!theme plain
+
+' === Настройки стиля ===
+hide circle
+hide empty members
+skinparam shadowing false
+
+' === Настройки линий и отступов ===
+skinparam linetype ortho
+skinparam nodesep 130
+skinparam ranksep 80
+
+' === ГЛАВНЫЙ СЕКРЕТ ОДИНАКОВОГО РАЗМЕРА ===
+' 1. Фиксируем минимальную ширину блока
+skinparam minClassWidth 190
+
+' 2. Выравниваем текст по центру
+skinparam style strictuml
+
+' =================== Определение классов ===================
+' Чтобы высота была одинаковой, стараемся использовать \n для переноса,
+' создавая 2 строки текста в каждом блоке.
+
+class "Окно\nПриложения" as MainWindow
+class "Главный\nКонтроллер" as VideoController
+class "Обработчик\nВидео" as VideoProcessor
+
+together {
+  class "Менеджер\nСобытий" as CustomEventManager
+  class "Менеджер\nПроекта" as ProjectManager
+}
+
+class "Метка\nВремени" as Marker
+
+together {
+  class "Менеджер\nОтмены/Повтора" as UndoRedoManager
+  class "Менеджер\nНастроек" as SettingsManager
+}
+
+' =================== Выстраивание СЕТКИ (Layout) ===================
+
+' Центрирование
+MainWindow -[hidden]down- VideoController
+VideoController -[hidden]down- VideoProcessor
+
+' Выравнивание левой группы
+CustomEventManager -[hidden]down- ProjectManager
+VideoController -[hidden]left- ProjectManager
+
+' Выравнивание правой группы
+UndoRedoManager -[hidden]down- SettingsManager
+VideoController -[hidden]right- SettingsManager
+
+' =================== Логические СВЯЗИ ===================
+
+' Основной поток
+MainWindow --down--> VideoController : Делегирует
+VideoController --down--> VideoProcessor : Управляет
+
+' Левая сторона
+VideoController -left-> CustomEventManager : Определяет
+VideoController -left-> ProjectManager : Сохраняет/\nЗагружает
+
+' Правая сторона
+VideoController -right-> UndoRedoManager : Использует
+VideoController -right-> SettingsManager : Читает/\nИзменяет
+
+' Тупиковая ветвь слева (чтобы не пересекать линии)
+ProjectManager -left-> Marker : Содержит
+
+@enduml
