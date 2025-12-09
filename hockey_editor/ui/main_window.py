@@ -3,7 +3,7 @@ from PySide6.QtGui import QPixmap, QImage, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider,
     QLabel, QListWidget, QListWidgetItem, QFileDialog, QComboBox, QSpinBox,
-    QMessageBox, QSpinBox, QMenu
+    QMessageBox, QSpinBox, QMenu, QCheckBox
 )
 import cv2
 import numpy as np
@@ -42,10 +42,99 @@ class MainWindow(QMainWindow):
         # Поддержка drag-drop для видео
         self.setAcceptDrops(True)
 
+        # Инициализация фильтров
+        self._init_filters()
+
         self.setup_ui()
         self.connect_signals()
         self._setup_shortcuts()
         self._create_menu()
+
+    def _init_filters(self):
+        """Инициализация состояния фильтров."""
+        self.filter_event_types = set()  # Множество выбранных типов событий
+        self.filter_has_notes = False    # Фильтр по наличию заметок
+
+    def _setup_filters(self, parent_layout):
+        """Создать элементы управления фильтрами."""
+        # Контейнер для фильтров
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(5)
+
+        # Фильтр по типу события
+        event_filter_label = QLabel("Тип:")
+        event_filter_label.setMaximumWidth(30)
+        filters_layout.addWidget(event_filter_label)
+
+        self.event_filter_combo = QComboBox()
+        self.event_filter_combo.setToolTip("Фильтр по типу события")
+        self.event_filter_combo.setMaximumWidth(120)
+        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        filters_layout.addWidget(self.event_filter_combo)
+
+        # Чекбокс для фильтра заметок
+        self.notes_filter_checkbox = QCheckBox("Заметки")
+        self.notes_filter_checkbox.setToolTip("Показывать только отрезки с заметками")
+        self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
+        filters_layout.addWidget(self.notes_filter_checkbox)
+
+        # Кнопка сброса фильтров
+        reset_btn = QPushButton("Сброс")
+        reset_btn.setMaximumWidth(50)
+        reset_btn.setToolTip("Сбросить все фильтры")
+        reset_btn.clicked.connect(self._reset_filters)
+        filters_layout.addWidget(reset_btn)
+
+        filters_layout.addStretch()
+
+        parent_layout.addLayout(filters_layout)
+
+        # Заполнить фильтр событий
+        self._update_event_filter()
+
+    def _update_event_filter(self):
+        """Обновить список доступных типов событий в фильтре."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.clear()
+
+        # Добавить опцию "Все"
+        self.event_filter_combo.addItem("Все", None)
+
+        # Добавить все доступные типы событий
+        events = self.event_manager.get_all_events()
+        for event in events:
+            localized_name = event.get_localized_name()
+            self.event_filter_combo.addItem(localized_name, event.name)
+
+        self.event_filter_combo.blockSignals(False)
+
+    def _on_event_filter_changed(self):
+        """Обработка изменения фильтра типов событий."""
+        current_data = self.event_filter_combo.currentData()
+        if current_data is None:  # "Все"
+            self.filter_event_types.clear()
+        else:
+            self.filter_event_types = {current_data}
+
+        self._on_markers_changed()
+
+    def _on_notes_filter_changed(self):
+        """Обработка изменения фильтра заметок."""
+        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
+        self._on_markers_changed()
+
+    def _reset_filters(self):
+        """Сбросить все фильтры."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.setCurrentIndex(0)  # "Все"
+        self.event_filter_combo.blockSignals(False)
+
+        self.notes_filter_checkbox.setChecked(False)
+
+        self.filter_event_types.clear()
+        self.filter_has_notes = False
+
+        self._on_markers_changed()
 
     def _create_menu(self):
         """Создать меню приложения и сохранить ссылки на действия."""
@@ -156,6 +245,9 @@ class MainWindow(QMainWindow):
         # Список отрезков (30%)
         list_layout = QVBoxLayout()
         list_layout.addWidget(QLabel("Отрезки:"))
+
+        # ===== ФИЛЬТРЫ =====
+        self._setup_filters(list_layout)
 
         self.markers_list = QListWidget()
         self.markers_list.itemDoubleClicked.connect(self._on_marker_double_clicked)
@@ -380,11 +472,15 @@ class MainWindow(QMainWindow):
         self._update_status_bar()
 
     def _on_markers_changed(self):
-        """Обновление списка отрезков."""
+        """Обновление списка отрезков с применением фильтров."""
         self.markers_list.clear()
         fps = self.controller.get_fps()
 
         for idx, marker in enumerate(self.controller.markers):
+            # Применить фильтры
+            if not self._passes_filters(marker):
+                continue
+
             start_time = self._format_time_single(marker.start_frame / fps if fps > 0 else 0)
             end_time = self._format_time_single(marker.end_frame / fps if fps > 0 else 0)
 
@@ -401,6 +497,18 @@ class MainWindow(QMainWindow):
 
         # Обновить расширенный статус-бар
         self._update_status_bar()
+
+    def _passes_filters(self, marker):
+        """Проверить, проходит ли маркер через текущие фильтры."""
+        # Фильтр по типу события
+        if self.filter_event_types and marker.event_name not in self.filter_event_types:
+            return False
+
+        # Фильтр по заметкам
+        if self.filter_has_notes and not marker.note.strip():
+            return False
+
+        return True
 
     def _on_recording_status_changed(self, event_type: str, status: str):
         """Изменение статуса записи."""
@@ -429,8 +537,9 @@ class MainWindow(QMainWindow):
     # ИСПРАВЛЕНО: удален дублированный метод _setup_shortcuts с EventType
 
     def _on_events_changed(self):
-        """Обработка изменения событий - обновить shortcuts."""
+        """Обработка изменения событий - обновить shortcuts и фильтры."""
         self._setup_event_shortcuts()
+        self._update_event_filter()
 
     def _on_events_changed_timeline(self):
         """Обработка изменения событий для таймлайна."""

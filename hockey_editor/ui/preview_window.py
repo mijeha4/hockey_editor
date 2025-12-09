@@ -7,7 +7,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage, QFont, QColor
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QListWidget, QListWidgetItem, QCheckBox, QComboBox, QGroupBox
+    QSlider, QListWidget, QListWidgetItem, QCheckBox, QComboBox, QGroupBox,
+    QSpinBox, QLineEdit
 )
 import cv2
 import numpy as np
@@ -35,36 +36,142 @@ class PreviewWindow(QMainWindow):
         self.playback_timer = QTimer()
         self.playback_timer.timeout.connect(self._on_playback_tick)
         self.frame_time_ms = 33  # ~30 FPS
-        
-        self._create_filter_checkboxes()
+
+        # Инициализация фильтров
+        self._init_filters()
+
         self._setup_ui()
         self._update_speed_combo()
         self._update_marker_list()
 
-    def _create_filter_checkboxes(self):
-        """Создать динамические checkbox для фильтрации событий."""
-        # Получить все доступные события из CustomEventManager
+        # Подключить сигнал изменения событий
+        from ..utils.custom_events import get_custom_event_manager
+        self.event_manager = get_custom_event_manager()
+        self.event_manager.events_changed.connect(self._on_events_changed)
+
+    def _init_filters(self):
+        """Инициализация состояния фильтров."""
+        self.filter_event_types = set()  # Множество выбранных типов событий
+        self.filter_has_notes = False    # Фильтр по наличию заметок
+        self.filter_min_duration = 0     # Минимальная длительность (секунды)
+        self.filter_max_duration = 0     # Максимальная длительность (секунды)
+        self.filter_notes_search = ""    # Поиск по тексту заметок
+
+    def _setup_filters(self, parent_layout):
+        """Создать элементы управления фильтрами."""
+        # Контейнер для фильтров
+        filters_layout = QVBoxLayout()
+        filters_layout.setSpacing(3)
+
+        # Первая строка: тип события + заметки
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(5)
+
+        # Фильтр по типу события
+        event_label = QLabel("Тип:")
+        event_label.setMaximumWidth(25)
+        row1_layout.addWidget(event_label)
+
+        self.event_filter_combo = QComboBox()
+        self.event_filter_combo.setToolTip("Фильтр по типу события")
+        self.event_filter_combo.setMaximumWidth(100)
+        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        row1_layout.addWidget(self.event_filter_combo)
+
+        # Чекбокс для фильтра заметок
+        self.notes_filter_checkbox = QCheckBox("Заметки")
+        self.notes_filter_checkbox.setToolTip("Показывать только отрезки с заметками")
+        self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
+        row1_layout.addWidget(self.notes_filter_checkbox)
+
+        # Кнопка сброса фильтров
+        reset_btn = QPushButton("Сброс")
+        reset_btn.setMaximumWidth(45)
+        reset_btn.setToolTip("Сбросить все фильтры")
+        reset_btn.clicked.connect(self._reset_filters)
+        row1_layout.addWidget(reset_btn)
+
+        filters_layout.addLayout(row1_layout)
+
+        # Вторая строка: поиск по заметкам
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(5)
+
+        search_label = QLabel("Поиск:")
+        search_label.setMaximumWidth(40)
+        row2_layout.addWidget(search_label)
+
+        self.notes_search_edit = QLineEdit()
+        self.notes_search_edit.setPlaceholderText("Поиск в заметках...")
+        self.notes_search_edit.setToolTip("Поиск по тексту заметок")
+        self.notes_search_edit.setMaximumWidth(120)
+        self.notes_search_edit.textChanged.connect(self._on_notes_search_changed)
+        row2_layout.addWidget(self.notes_search_edit)
+
+        row2_layout.addStretch()
+        filters_layout.addLayout(row2_layout)
+
+        parent_layout.addLayout(filters_layout)
+
+        # Заполнить фильтр событий
+        self._update_event_filter()
+
+    def _update_event_filter(self):
+        """Обновить список доступных типов событий в фильтре."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.clear()
+
+        # Добавить опцию "Все"
+        self.event_filter_combo.addItem("Все", None)
+
+        # Добавить все доступные типы событий
         from ..utils.custom_events import get_custom_event_manager
         event_manager = get_custom_event_manager()
         events = event_manager.get_all_events()
-
-        # Очистить существующие checkbox
-        self.filter_checkboxes = {}
-
         for event in events:
-            checkbox = QCheckBox(f"{event.name} ({event.shortcut})")
-            checkbox.setChecked(True)
-            checkbox.setToolTip(f"Show/hide {event.name} events")
-            checkbox.stateChanged.connect(self._update_marker_list)
+            localized_name = event.get_localized_name()
+            self.event_filter_combo.addItem(localized_name, event.name)
 
-            # Установить цвет текста как цвет события
-            checkbox.setStyleSheet(f"""
-                QCheckBox {{
-                    color: {event.color};
-                }}
-            """)
+        self.event_filter_combo.blockSignals(False)
 
-            self.filter_checkboxes[event.name] = checkbox
+    def _on_event_filter_changed(self):
+        """Обработка изменения фильтра типов событий."""
+        current_data = self.event_filter_combo.currentData()
+        if current_data is None:  # "Все"
+            self.filter_event_types.clear()
+        else:
+            self.filter_event_types = {current_data}
+
+        self._update_marker_list()
+
+    def _on_notes_filter_changed(self):
+        """Обработка изменения фильтра заметок."""
+        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
+        self._update_marker_list()
+
+    def _on_notes_search_changed(self):
+        """Обработка изменения поиска по заметкам."""
+        self.filter_notes_search = self.notes_search_edit.text().strip().lower()
+        self._update_marker_list()
+
+    def _reset_filters(self):
+        """Сбросить все фильтры."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.setCurrentIndex(0)  # "Все"
+        self.event_filter_combo.blockSignals(False)
+
+        self.notes_filter_checkbox.setChecked(False)
+        self.notes_search_edit.clear()
+
+        self.filter_event_types.clear()
+        self.filter_has_notes = False
+        self.filter_notes_search = ""
+
+        self._update_marker_list()
+
+    def _on_events_changed(self):
+        """Обработка изменения событий - обновить фильтр событий."""
+        self._update_event_filter()
 
     def _setup_ui(self):
         """Создать интерфейс."""
@@ -125,17 +232,9 @@ class PreviewWindow(QMainWindow):
         
         # ===== ПРАВАЯ ЧАСТЬ: СПИСОК ОТРЕЗКОВ (30%) =====
         list_layout = QVBoxLayout()
-        
-        # Фильтры (динамические из CustomEventManager)
-        filter_group = QGroupBox("Filter Events")
-        self.filter_layout = QVBoxLayout()
-        
-        # Добавить чекбоксы в layout
-        for event_name, checkbox in self.filter_checkboxes.items():
-            self.filter_layout.addWidget(checkbox)
-        
-        filter_group.setLayout(self.filter_layout)
-        list_layout.addWidget(filter_group)
+
+        # ===== КОМПАКТНЫЕ ФИЛЬТРЫ =====
+        self._setup_filters(list_layout)
         
         # Список отрезков
         self.markers_list = QListWidget()
@@ -168,14 +267,9 @@ class PreviewWindow(QMainWindow):
 
         fps = self.controller.get_fps()
 
-        # Получить активные фильтры
-        active_filters = {}
-        for event_name, checkbox in self.filter_checkboxes.items():
-            active_filters[event_name] = checkbox.isChecked()
-
         for idx, marker in enumerate(self.controller.markers):
-            # Фильтрация по событиям
-            if not active_filters.get(marker.event_name, True):
+            # Применить фильтры
+            if not self._passes_filters(marker):
                 continue
 
             start_time = self._format_time(marker.start_frame / fps if fps > 0 else 0)
@@ -198,6 +292,22 @@ class PreviewWindow(QMainWindow):
                 item.setForeground(QColor(150, 150, 150))  # Серый по умолчанию
 
             self.markers_list.addItem(item)
+
+    def _passes_filters(self, marker):
+        """Проверить, проходит ли маркер через текущие фильтры."""
+        # Фильтр по типу события
+        if self.filter_event_types and marker.event_name not in self.filter_event_types:
+            return False
+
+        # Фильтр по заметкам
+        if self.filter_has_notes and not marker.note.strip():
+            return False
+
+        # Фильтр по поиску в заметках
+        if self.filter_notes_search and self.filter_notes_search not in marker.note.lower():
+            return False
+
+        return True
 
     def _on_marker_selected(self, item: QListWidgetItem):
         """Клик на отрезок = воспроизведение с начала."""
@@ -260,19 +370,15 @@ class PreviewWindow(QMainWindow):
         # Найти следующий отрезок, соответствующий фильтру
         for idx in range(self.current_marker_idx + 1, len(self.controller.markers)):
             marker = self.controller.markers[idx]
-            # Получить активные фильтры
-            active_filters = {}
-            for event_name, checkbox in self.filter_checkboxes.items():
-                active_filters[event_name] = checkbox.isChecked()
-            
-            if active_filters.get(marker.event_name, True):
+
+            if self._passes_filters(marker):
                 self.current_marker_idx = idx
                 self.controller.seek_frame(marker.start_frame)
                 self.markers_list.setCurrentRow(idx)
                 self._display_current_frame()
                 self._update_slider()
                 return
-        
+
         # Конец списка
         self.is_playing = False
         self.play_btn.setText("▶ Play")
@@ -430,5 +536,12 @@ class PreviewWindow(QMainWindow):
             border-radius: 4px;
             margin-top: 8px;
             padding-top: 8px;
+        }
+        QLineEdit {
+            background-color: #333333;
+            color: #ffffff;
+            border: 1px solid #555555;
+            padding: 3px;
+            border-radius: 3px;
         }
         """
