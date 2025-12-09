@@ -3,10 +3,11 @@
 
 from PySide6.QtWidgets import (
     QGraphicsRectItem, QGraphicsScene, QGraphicsView, QGraphicsLineItem, QGraphicsTextItem,
-    QScrollArea, QWidget, QVBoxLayout, QMenu
+    QGraphicsObject, QScrollArea, QWidget, QVBoxLayout, QMenu
 )
+from PySide6.QtWidgets import QGraphicsItem
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction
+from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction, QFontMetrics
 from ..utils.custom_events import get_custom_event_manager
 
 
@@ -47,21 +48,74 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(marker.event_name)
         self.event_color = QColor(event.color) if event else QColor("#888888")
+        self.is_hovered = False
 
-        self.setBrush(QBrush(QColor(255, 255, 255, 230)))
-        self.setPen(QPen(self.event_color, 4, Qt.SolidLine, Qt.RoundCap))
+    def boundingRect(self):
+        """Возвращает bounding rect с отступами для предотвращения слипания."""
+        rect = self.rect()
+        return rect.adjusted(-2, -2, 2, 2)
 
-    def paint(self, painter: QPainter, *args):
-        super().paint(painter, *args)
+    def _get_display_text(self):
+        """Возвращает текст для отображения (note или название события)."""
+        if self.marker.note and self.marker.note.strip():
+            return self.marker.note.strip()
+        else:
+            event_manager = get_custom_event_manager()
+            event = event_manager.get_event(self.marker.event_name)
+            return event.get_localized_name() if event else self.marker.event_name
+
+    def paint(self, painter, option, widget):
+        """Отрисовка сегмента в стиле Hudl Sportscode."""
         rect = self.rect()
 
+        # Определяем цвет заливки
+        fill_color = self.event_color
+        if self.is_hovered:
+            fill_color = fill_color.lighter(120)  # Светлее при наведении
+
+        # Устанавливаем полупрозрачность
+        fill_color.setAlpha(200)
+
+        # Рисуем скругленный прямоугольник с заливкой
+        painter.setPen(Qt.NoPen)  # Без обводки
+        painter.setBrush(QBrush(fill_color))
+        painter.drawRoundedRect(rect, 4, 4)
+
+        # Рисуем белую рамку при выделении
+        if self.isSelected():
+            selection_pen = QPen(QColor(Qt.white), 2, Qt.SolidLine)
+            painter.setPen(selection_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 3, 3)
+
+        # Рисуем текст
+        painter.setPen(QPen(Qt.white))
+        font = QFont("Segoe UI", 9, QFont.Normal)
+        painter.setFont(font)
+
+        text = self._get_display_text()
+        font_metrics = QFontMetrics(font)
+        text_rect = font_metrics.boundingRect(text)
+
+        # Если текст не помещается, обрезаем его
+        if text_rect.width() > rect.width() - 8:
+            text = font_metrics.elidedText(text, Qt.ElideRight, rect.width() - 8)
+
+        # Центрируем текст
+        text_x = rect.center().x() - font_metrics.horizontalAdvance(text) / 2
+        text_y = rect.center().y() + font_metrics.ascent() / 2
+
+        painter.drawText(int(text_x), int(text_y), text)
+
     def hoverEnterEvent(self, event):
-        self.setPen(QPen(self.event_color.lighter(140), 6))
-        self.setBrush(QBrush(QColor(255, 255, 255, 255)))
+        self.is_hovered = True
+        self.update()  # Перерисовываем
+        super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        self.setPen(QPen(self.event_color, 4))
-        self.setBrush(QBrush(QColor(255, 255, 255, 230)))
+        self.is_hovered = False
+        self.update()  # Перерисовываем
+        super().hoverLeaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if self.timeline_scene.main_window:
@@ -70,6 +124,35 @@ class SegmentGraphicsItem(QGraphicsRectItem):
                 self.timeline_scene.main_window.open_segment_editor(idx)
             except ValueError:
                 pass
+
+
+class TrackHeaderItem(QGraphicsObject):
+    """Профессиональный заголовок трека с плоским дизайном."""
+
+    def __init__(self, event, track_height):
+        super().__init__()
+        self.event_data = event  # Переименовано, чтобы не конфликтовать с методом event()
+        self.track_height = track_height
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)  # Текст не искажается при зуме
+
+    def boundingRect(self):
+        """Возвращает bounding rect заголовка."""
+        return QRectF(0, 0, 140, self.track_height)
+
+    def paint(self, painter, option, widget):
+        """Отрисовка заголовка с плоским дизайном."""
+        rect = self.boundingRect()
+
+        # Темно-серый фон
+        painter.fillRect(rect, QColor("#2a2a2a"))
+
+        # Белый текст слева с отступом
+        painter.setPen(QPen(Qt.white))
+        font = QFont("Segoe UI", 11, QFont.Bold)
+        painter.setFont(font)
+
+        text = self.event_data.get_localized_name()
+        painter.drawText(10, 15, text)  # отступ 10px слева, 15px сверху
 
 
 class TimelineGraphicsScene(QGraphicsScene):
@@ -89,6 +172,102 @@ class TimelineGraphicsScene(QGraphicsScene):
 
         self.rebuild()  # первый рендер
 
+    def drawBackground(self, painter, rect):
+        """Отрисовка фона с зеброй и сеткой времени."""
+        super().drawBackground(painter, rect)
+
+        # Получить список событий для определения количества треков
+        events = get_custom_event_manager().get_all_events()
+        if not events:
+            return
+
+        # Цвета зебры
+        even_color = QColor("#1e1e1e")
+        odd_color = QColor("#232323")
+
+        # Рисуем полосы зебры только для видимой области
+        for i in range(len(events)):
+            y = i * self.track_height + 30  # +30 для линейки времени
+            track_rect = QRectF(rect.left(), y, rect.width(), self.track_height)
+
+            # Проверяем, пересекается ли полоса с видимой областью
+            if track_rect.intersects(rect):
+                color = even_color if i % 2 == 0 else odd_color
+                painter.fillRect(track_rect, color)
+
+        # Рисуем вертикальные линии сетки каждые 5 секунд
+        fps = self.controller.get_fps()
+        if fps > 0:
+            grid_pen = QPen(QColor("#333333"), 1, Qt.SolidLine)
+            painter.setPen(grid_pen)
+
+            # Рассчитываем диапазон кадров для видимой области
+            start_frame = max(0, int((rect.left() - 150) / self.pixels_per_frame))
+            end_frame = int((rect.right() - 150) / self.pixels_per_frame) + 1
+
+            # Находим первую отметку в 5 секунд до start_frame
+            first_grid_seconds = (start_frame // int(5 * fps)) * 5
+            current_seconds = first_grid_seconds
+
+            while True:
+                frame_index = int(current_seconds * fps)
+                if frame_index > end_frame:
+                    break
+
+                x = frame_index * self.pixels_per_frame + 150
+                if x >= rect.left() and x <= rect.right():
+                    painter.drawLine(x, rect.top(), x, rect.bottom())
+
+                current_seconds += 5
+
+    def drawForeground(self, painter, rect):
+        """Отрисовка линейки времени вверху."""
+        super().drawForeground(painter, rect)
+
+        # Линейка высотой 30px вверху (на Y=0)
+        ruler_rect = QRectF(rect.left(), 0, rect.width(), 30)
+
+        # Фон линейки
+        painter.fillRect(ruler_rect, QColor("#1a1a1a"))
+
+        # Рисуем засечки и время каждые 5 секунд
+        fps = self.controller.get_fps()
+        if fps > 0:
+            # Рассчитываем диапазон для видимой области
+            start_frame = max(0, int((rect.left() - 150) / self.pixels_per_frame))
+            end_frame = int((rect.right() - 150) / self.pixels_per_frame) + 1
+
+            # Находим первую отметку в 5 секунд
+            first_grid_seconds = (start_frame // int(5 * fps)) * 5
+            current_seconds = first_grid_seconds
+
+            while True:
+                frame_index = int(current_seconds * fps)
+                if frame_index > end_frame:
+                    break
+
+                x = frame_index * self.pixels_per_frame + 150
+                if x >= rect.left() and x <= rect.right():
+                    # Засечка
+                    painter.setPen(QPen(QColor("#666666"), 1, Qt.SolidLine))
+                    painter.drawLine(x, 25, x, 30)  # засечка 5px высотой
+
+                    # Время в формате MM:SS
+                    minutes = current_seconds // 60
+                    seconds = current_seconds % 60
+                    time_text = f"{minutes:02d}:{seconds:02d}"
+
+                    # Рисуем текст
+                    painter.setPen(QPen(Qt.white))
+                    font = QFont("Segoe UI", 8, QFont.Normal)
+                    painter.setFont(font)
+
+                    # Позиция текста чуть выше засечки
+                    text_x = x - 15  # центрируем относительно засечки
+                    painter.drawText(int(text_x), 20, time_text)
+
+                current_seconds += 5
+
     def rebuild(self):
         total_frames = max(self.controller.get_total_frames(), 1)
         events = get_custom_event_manager().get_all_events()
@@ -99,25 +278,18 @@ class TimelineGraphicsScene(QGraphicsScene):
                 self.removeItem(item)
 
         scene_width = total_frames * self.pixels_per_frame + 300
-        scene_height = len(events) * self.track_height + self.header_height + 50
+        scene_height = len(events) * self.track_height + self.header_height + 50 + 30  # +30 для линейки
         self.setSceneRect(0, 0, scene_width, scene_height)
 
         track_bg = QColor("#0d1b2a")
 
         for i, event in enumerate(events):
-            y = i * self.track_height
+            y = i * self.track_height + 30  # +30 для линейки времени
 
-            # Фон дорожки
-            self.addRect(0, y, scene_width, self.track_height,
-                         QPen(Qt.NoPen), QBrush(track_bg))
-
-            # Заголовок события
-            header = self.addRect(0, y, 140, self.track_height,
-                                QPen(QColor("#1b263b")), QBrush(QColor(event.color)))
-            text = self.addText(event.get_localized_name())
-            text.setDefaultTextColor(Qt.white)
-            text.setFont(QFont("Segoe UI", 11, QFont.Bold))
-            text.setPos(10, y + 15)
+            # Заголовок события с плоским дизайном
+            header = TrackHeaderItem(event, self.track_height)
+            header.setPos(0, y)
+            self.addItem(header)
 
             # Сегменты
             for marker in self.controller.markers:
