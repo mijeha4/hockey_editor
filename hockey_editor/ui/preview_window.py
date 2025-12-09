@@ -4,16 +4,17 @@ Preview Window - просмотр и воспроизведение отрезк
 """
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap, QImage, QFont, QColor
+from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QListWidget, QListWidgetItem, QCheckBox, QComboBox, QGroupBox,
-    QSpinBox, QLineEdit
+    QSpinBox, QLineEdit, QButtonGroup
 )
 import cv2
 import numpy as np
 from typing import Optional
 from ..models.marker import Marker, EventType
+from .drawing_overlay import DrawingOverlay, DrawingTool
 
 
 class PreviewWindow(QMainWindow):
@@ -41,6 +42,7 @@ class PreviewWindow(QMainWindow):
         self._init_filters()
 
         self._setup_ui()
+        self._setup_shortcuts()
         self._update_speed_combo()
         self._update_marker_list()
 
@@ -173,6 +175,151 @@ class PreviewWindow(QMainWindow):
         """Обработка изменения событий - обновить фильтр событий."""
         self._update_event_filter()
 
+    def _setup_drawing_toolbar(self, parent_layout):
+        """Создать панель инструментов рисования."""
+        toolbar_layout = QHBoxLayout()
+        toolbar_layout.setSpacing(5)
+
+        # Группа кнопок инструментов
+        self.drawing_tool_group = QButtonGroup(self)
+        self.drawing_tool_group.buttonClicked.connect(self._on_drawing_tool_changed)
+
+        # Кнопка выбора инструмента (курсор)
+        cursor_btn = QPushButton("👆")
+        cursor_btn.setMaximumWidth(35)
+        cursor_btn.setToolTip("Выбрать (отключить рисование)")
+        cursor_btn.setCheckable(True)
+        cursor_btn.setChecked(True)  # По умолчанию выбран курсор
+        self.drawing_tool_group.addButton(cursor_btn, 0)
+        toolbar_layout.addWidget(cursor_btn)
+
+        # Кнопка линии
+        line_btn = QPushButton("📏")
+        line_btn.setMaximumWidth(35)
+        line_btn.setToolTip("Линия")
+        line_btn.setCheckable(True)
+        self.drawing_tool_group.addButton(line_btn, 1)
+        toolbar_layout.addWidget(line_btn)
+
+        # Кнопка прямоугольника
+        rect_btn = QPushButton("▭")
+        rect_btn.setMaximumWidth(35)
+        rect_btn.setToolTip("Прямоугольник")
+        rect_btn.setCheckable(True)
+        self.drawing_tool_group.addButton(rect_btn, 2)
+        toolbar_layout.addWidget(rect_btn)
+
+        # Кнопка круга
+        circle_btn = QPushButton("○")
+        circle_btn.setMaximumWidth(35)
+        circle_btn.setToolTip("Круг")
+        circle_btn.setCheckable(True)
+        self.drawing_tool_group.addButton(circle_btn, 3)
+        toolbar_layout.addWidget(circle_btn)
+
+        # Кнопка стрелки
+        arrow_btn = QPushButton("➤")
+        arrow_btn.setMaximumWidth(35)
+        arrow_btn.setToolTip("Стрелка")
+        arrow_btn.setCheckable(True)
+        self.drawing_tool_group.addButton(arrow_btn, 4)
+        toolbar_layout.addWidget(arrow_btn)
+
+        toolbar_layout.addSpacing(10)
+
+        # Выбор цвета
+        color_label = QLabel("Цвет:")
+        color_label.setMaximumWidth(35)
+        toolbar_layout.addWidget(color_label)
+
+        self.color_combo = QComboBox()
+        self.color_combo.addItems(["Красный", "Зеленый", "Синий", "Желтый", "Белый", "Черный"])
+        self.color_combo.setCurrentText("Красный")
+        self.color_combo.setMaximumWidth(80)
+        self.color_combo.currentTextChanged.connect(self._on_color_changed)
+        toolbar_layout.addWidget(self.color_combo)
+
+        # Выбор толщины
+        thickness_label = QLabel("Толщ:")
+        thickness_label.setMaximumWidth(35)
+        toolbar_layout.addWidget(thickness_label)
+
+        self.thickness_combo = QComboBox()
+        self.thickness_combo.addItems(["1", "2", "3", "4", "5"])
+        self.thickness_combo.setCurrentText("2")
+        self.thickness_combo.setMaximumWidth(50)
+        self.thickness_combo.currentTextChanged.connect(self._on_thickness_changed)
+        toolbar_layout.addWidget(self.thickness_combo)
+
+        toolbar_layout.addStretch()
+
+        # Кнопка очистки
+        clear_btn = QPushButton("🗑️ Очистить")
+        clear_btn.setMaximumWidth(80)
+        clear_btn.setToolTip("Очистить все рисунки")
+        clear_btn.clicked.connect(self._on_clear_drawing)
+        toolbar_layout.addWidget(clear_btn)
+
+        parent_layout.addLayout(toolbar_layout)
+
+    def _on_drawing_tool_changed(self, button):
+        """Обработка изменения инструмента рисования."""
+        tool_id = self.drawing_tool_group.id(button)
+
+        if tool_id == 0:  # Курсор
+            self.drawing_overlay.set_tool(DrawingTool.NONE)
+        elif tool_id == 1:  # Линия
+            self.drawing_overlay.set_tool(DrawingTool.LINE)
+        elif tool_id == 2:  # Прямоугольник
+            self.drawing_overlay.set_tool(DrawingTool.RECTANGLE)
+        elif tool_id == 3:  # Круг
+            self.drawing_overlay.set_tool(DrawingTool.CIRCLE)
+        elif tool_id == 4:  # Стрелка
+            self.drawing_overlay.set_tool(DrawingTool.ARROW)
+
+    def _on_color_changed(self):
+        """Обработка изменения цвета."""
+        color_name = self.color_combo.currentText()
+        color_map = {
+            "Красный": QColor("#FF0000"),
+            "Зеленый": QColor("#00FF00"),
+            "Синий": QColor("#0000FF"),
+            "Желтый": QColor("#FFFF00"),
+            "Белый": QColor("#FFFFFF"),
+            "Черный": QColor("#000000")
+        }
+        color = color_map.get(color_name, QColor("#FF0000"))
+        self.drawing_overlay.set_color(color)
+
+    def _on_thickness_changed(self):
+        """Обработка изменения толщины."""
+        thickness = int(self.thickness_combo.currentText())
+        self.drawing_overlay.set_thickness(thickness)
+
+    def _on_clear_drawing(self):
+        """Очистить все рисунки."""
+        self.drawing_overlay.clear_drawing_with_confirmation(self)
+
+    def _setup_shortcuts(self):
+        """Настроить горячие клавиши для рисования."""
+        # Ctrl+Z - отменить последнее действие
+        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        undo_shortcut.activated.connect(self._on_undo_drawing)
+
+        # Ctrl+X - очистить все с подтверждением
+        clear_shortcut = QShortcut(QKeySequence("Ctrl+X"), self)
+        clear_shortcut.activated.connect(self._on_clear_drawing_shortcut)
+
+    def _on_undo_drawing(self):
+        """Отменить последнее действие рисования (Ctrl+Z)."""
+        if self.drawing_overlay.undo():
+            # Можно добавить уведомление, но пока оставим без него
+            pass
+
+    def _on_clear_drawing_shortcut(self):
+        """Очистить все рисунки через горячую клавишу (Ctrl+X)."""
+        self.drawing_overlay.clear_drawing_with_confirmation(self)
+
     def _setup_ui(self):
         """Создать интерфейс."""
         central = QWidget()
@@ -184,15 +331,27 @@ class PreviewWindow(QMainWindow):
         
         # ===== ЛЕВАЯ ЧАСТЬ: ВИДЕОПЛЕЕР (70%) =====
         video_layout = QVBoxLayout()
-        
+
+        # Контейнер для видео с наложением рисования
+        self.video_container = QWidget()
+        self.video_container.setMinimumSize(800, 450)
+        self.video_container.setStyleSheet("background-color: black; border: 1px solid #555555;")
+
         # Видео
-        self.video_label = QLabel()
-        self.video_label.setMinimumSize(800, 450)
-        self.video_label.setStyleSheet("background-color: black; border: 1px solid #555555;")
+        self.video_label = QLabel(self.video_container)
+        self.video_label.setGeometry(0, 0, 800, 450)
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setToolTip("Preview video player")
-        video_layout.addWidget(self.video_label)
-        
+
+        # Виджет для рисования поверх видео
+        self.drawing_overlay = DrawingOverlay(self.video_container)
+        self.drawing_overlay.setGeometry(0, 0, 800, 450)
+
+        video_layout.addWidget(self.video_container)
+
+        # Панель инструментов рисования
+        self._setup_drawing_toolbar(video_layout)
+
         # Контролы видео
         controls_layout = QHBoxLayout()
         
@@ -421,17 +580,32 @@ class PreviewWindow(QMainWindow):
         frame = self.controller.processor.get_current_frame()
         if frame is None:
             return
-        
+
         # Конвертировать BGR в RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
         qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        
+
         # Масштабировать
         pixmap = QPixmap.fromImage(qt_image)
-        pixmap = pixmap.scaledToWidth(800, Qt.TransformationMode.SmoothTransformation)
-        self.video_label.setPixmap(pixmap)
+        scaled_pixmap = pixmap.scaled(self.video_container.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+
+        # Центрировать изображение в контейнере
+        container_width = self.video_container.width()
+        container_height = self.video_container.height()
+        pixmap_width = scaled_pixmap.width()
+        pixmap_height = scaled_pixmap.height()
+
+        x = (container_width - pixmap_width) // 2
+        y = (container_height - pixmap_height) // 2
+
+        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
+        self.video_label.setPixmap(scaled_pixmap)
+
+        # Обновить размер drawing overlay
+        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
 
     def _update_slider(self):
         """Обновить ползунок и время."""
@@ -484,6 +658,13 @@ class PreviewWindow(QMainWindow):
             closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - current_speed))
             self.speed_combo.setCurrentText(closest_item)
 
+    def resizeEvent(self, event):
+        """Обработка изменения размера окна."""
+        super().resizeEvent(event)
+        # Обновить отображение кадра при изменении размера
+        if hasattr(self, 'controller') and self.controller.processor:
+            self._display_current_frame()
+
     def _format_time(self, seconds: float) -> str:
         """Форматировать время MM:SS."""
         minutes = int(seconds) // 60
@@ -506,6 +687,14 @@ class PreviewWindow(QMainWindow):
         }
         QPushButton:hover {
             background-color: #444444;
+        }
+        QPushButton:checked {
+            background-color: #ffcc00;
+            color: #000000;
+            border: 2px solid #ffaa00;
+        }
+        QPushButton:checked:hover {
+            background-color: #ffdd44;
         }
         QSlider::groove:horizontal {
             background: #333333;
