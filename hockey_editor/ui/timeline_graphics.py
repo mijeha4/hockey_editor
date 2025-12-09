@@ -10,6 +10,19 @@ from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction
 from ..utils.custom_events import get_custom_event_manager
 
 
+class TimelineGraphicsView(QGraphicsView):
+    """Кастомный QGraphicsView, который игнорирует колесо мыши при Ctrl."""
+
+    def wheelEvent(self, event):
+        """Игнорировать колесо мыши при нажатом Ctrl, передавая родителю."""
+        if event.modifiers() & Qt.ControlModifier:
+            # При Ctrl игнорируем, передаем родителю для масштабирования
+            event.ignore()
+        else:
+            # Без Ctrl обычная обработка
+            super().wheelEvent(event)
+
+
 class TimelineScrollArea(QScrollArea):
     """Кастомный QScrollArea, который игнорирует колесо мыши при Ctrl для масштабирования."""
 
@@ -38,19 +51,9 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         self.setBrush(QBrush(QColor(255, 255, 255, 230)))
         self.setPen(QPen(self.event_color, 4, Qt.SolidLine, Qt.RoundCap))
 
-        # Использовать локализованное название события
-        localized_event_name = event.get_localized_name() if event else marker.event_name
-        self.text_item = QGraphicsTextItem(localized_event_name, self)
-        self.text_item.setDefaultTextColor(QColor("#000000"))
-        self.text_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
-
     def paint(self, painter: QPainter, *args):
         super().paint(painter, *args)
         rect = self.rect()
-        text_rect = self.text_item.boundingRect()
-        x = rect.width() / 2 - text_rect.width() / 2
-        y = rect.height() / 2 - text_rect.height() / 2
-        self.text_item.setPos(x, y)
 
     def hoverEnterEvent(self, event):
         self.setPen(QPen(self.event_color.lighter(140), 6))
@@ -145,7 +148,7 @@ class TimelineWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.view = QGraphicsView()
+        self.view = TimelineGraphicsView()
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
