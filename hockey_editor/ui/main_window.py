@@ -469,7 +469,7 @@ class MainWindow(QMainWindow):
         """Двойной клик на отрезок = редактирование."""
         marker_idx = item.data(Qt.ItemDataRole.UserRole)
         marker = self.controller.markers[marker_idx]
-        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
         if dialog.exec():
             new_marker = dialog.get_marker()
             self.controller.markers[marker_idx] = new_marker
@@ -493,7 +493,7 @@ class MainWindow(QMainWindow):
         """Обработка запроса редактирования сегмента."""
         if 0 <= marker_idx < len(self.controller.markers):
             marker = self.controller.markers[marker_idx]
-            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
             if dialog.exec():
                 new_marker = dialog.get_marker()
                 self.controller.markers[marker_idx] = new_marker
@@ -837,7 +837,7 @@ class MainWindow(QMainWindow):
         """Открыть редактор сегмента (вызывается из timeline при double-click)."""
         if 0 <= marker_idx < len(self.controller.markers):
             marker = self.controller.markers[marker_idx]
-            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
             if dialog.exec():
                 new_marker = dialog.get_marker()
                 self.controller.markers[marker_idx] = new_marker

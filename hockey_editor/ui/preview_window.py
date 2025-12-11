@@ -555,11 +555,11 @@ class PreviewWindow(QMainWindow):
         current_idx = self.markers_list.currentRow()
         if current_idx < 0:
             return
-        
+
         marker_idx = self.markers_list.item(current_idx).data(Qt.ItemDataRole.UserRole)
         from .edit_segment_dialog import EditSegmentDialog
         marker = self.controller.markers[marker_idx]
-        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
         if dialog.exec():
             self.controller.markers[marker_idx] = dialog.get_marker()
             self.controller.markers_changed.emit()
