@@ -12,6 +12,7 @@ from .timeline_graphics import TimelineWidget
 from .edit_segment_dialog import EditSegmentDialog
 from .settings_dialog import SettingsDialog
 from .event_shortcut_list_widget import EventShortcutListWidget
+from .segment_list_widget import SegmentListWidget
 from ..models.marker import EventType
 from ..utils.settings_manager import get_settings_manager
 from ..utils.custom_events import get_custom_event_manager
@@ -285,27 +286,18 @@ class MainWindow(QMainWindow):
         # Список отрезков
         list_container = QWidget()
         list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(5, 5, 5, 5)  # Добавляем padding
         list_layout.addWidget(QLabel("Отрезки:"))
 
         # ===== ФИЛЬТРЫ =====
         self._setup_filters(list_layout)
 
-        self.markers_list = QListWidget()
-        self.markers_list.itemDoubleClicked.connect(self._on_marker_double_clicked)
-        list_layout.addWidget(self.markers_list)
-
-        # Кнопки управления списком
-        marker_btn_layout = QHBoxLayout()
-
-        delete_btn = QPushButton("🗑️ Удалить")
-        delete_btn.clicked.connect(self._on_delete_marker)
-        marker_btn_layout.addWidget(delete_btn)
-
-        clear_btn = QPushButton("🗑️ Очистить всё")
-        clear_btn.clicked.connect(self._on_clear_markers)
-        marker_btn_layout.addWidget(clear_btn)
-
-        list_layout.addLayout(marker_btn_layout)
+        # Новый виджет списка сегментов
+        self.segment_list_widget = SegmentListWidget()
+        self.segment_list_widget.segment_edit_requested.connect(self._on_segment_edit_requested)
+        self.segment_list_widget.segment_delete_requested.connect(self._on_segment_delete_requested)
+        self.segment_list_widget.segment_jump_requested.connect(self._on_segment_jump_requested)
+        list_layout.addWidget(self.segment_list_widget)
 
         self.top_splitter.addWidget(list_container)
 
@@ -497,6 +489,34 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self.controller.clear_markers()
 
+    def _on_segment_edit_requested(self, marker_idx: int):
+        """Обработка запроса редактирования сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self)
+            if dialog.exec():
+                new_marker = dialog.get_marker()
+                self.controller.markers[marker_idx] = new_marker
+                self.controller.markers_changed.emit()
+                self.controller.timeline_update.emit()
+
+    def _on_segment_delete_requested(self, marker_idx: int):
+        """Обработка запроса удаления сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            reply = QMessageBox.question(
+                self, "Удалить сегмент",
+                "Вы уверены, что хотите удалить этот сегмент?"
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.controller.delete_marker(marker_idx)
+
+    def _on_segment_jump_requested(self, marker_idx: int):
+        """Обработка запроса перехода к моменту времени сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+            # Перейти к началу сегмента
+            self.controller.seek_frame(marker.start_frame)
+
     def _on_playback_time_changed(self, frame_idx: int):
         """Обновление при изменении времени воспроизведения."""
         fps = self.controller.get_fps()
@@ -517,27 +537,18 @@ class MainWindow(QMainWindow):
 
     def _on_markers_changed(self):
         """Обновление списка отрезков с применением фильтров."""
-        self.markers_list.clear()
         fps = self.controller.get_fps()
+        filtered_segments = []
 
         for idx, marker in enumerate(self.controller.markers):
             # Применить фильтры
             if not self._passes_filters(marker):
                 continue
+            filtered_segments.append((idx, marker))
 
-            start_time = self._format_time_single(marker.start_frame / fps if fps > 0 else 0)
-            end_time = self._format_time_single(marker.end_frame / fps if fps > 0 else 0)
-
-            # Получить локализованное название события
-            event = self.event_manager.get_event(marker.event_name)
-            localized_event_name = event.get_localized_name() if event else marker.event_name
-
-            # Использовать hardcoded формат
-            text = f"{idx+1}. {localized_event_name} ({start_time}–{end_time})"
-
-            item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, idx)  # Сохранить оригинальный индекс маркера
-            self.markers_list.addItem(item)
+        # Обновить виджет сегментов
+        self.segment_list_widget.set_fps(fps)
+        self.segment_list_widget.set_segments(filtered_segments)
 
         # Обновить расширенный статус-бар
         self._update_status_bar()
