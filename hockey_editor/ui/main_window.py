@@ -3,7 +3,7 @@ from PySide6.QtGui import QPixmap, QImage, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider,
     QLabel, QListWidget, QListWidgetItem, QFileDialog, QComboBox, QSpinBox,
-    QMessageBox, QSpinBox, QMenu, QCheckBox
+    QMessageBox, QSpinBox, QMenu, QCheckBox, QSplitter
 )
 import cv2
 import numpy as np
@@ -187,63 +187,104 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(5)
         
         # ===== ВЕРХНЯЯ ЧАСТЬ (видео + список справа) =====
-        top_layout = QHBoxLayout()
-        
-        # Видео (70%)
-        video_layout = QVBoxLayout()
-        
+        # Используем QSplitter для возможности изменения пропорций
+        self.top_splitter = QSplitter(Qt.Horizontal)
+        self.top_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #333333;
+                border: 1px solid #555555;
+            }
+            QSplitter::handle:hover {
+                background-color: #444444;
+            }
+        """)
+
+        # Видео контейнер
+        video_container = QWidget()
+        video_container_layout = QVBoxLayout(video_container)
+        video_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Видео виджет с центрированием
+        video_widget = QWidget()
+        video_layout = QVBoxLayout(video_widget)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+
         # Видео виджет
         self.video_label = QLabel()
-        self.video_label.setMinimumSize(800, 450)
+        self.video_label.setMinimumSize(640, 360)
+        self.video_label.setMaximumSize(800, 600)  # Ограничение максимального размера
         self.video_label.setStyleSheet("background-color: black; border: 1px solid grey;")
-        video_layout.addWidget(self.video_label)
-        
-        # Контролы видео
-        controls_layout = QHBoxLayout()
-        
+        self.video_label.setAlignment(Qt.AlignCenter)  # Центрирование содержимого
+        video_layout.addWidget(self.video_label, 0, Qt.AlignCenter)
+
+        # Контролы видео - компактная вертикальная компоновка
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(5, 5, 5, 5)
+        controls_layout.setSpacing(5)
+
+        # Верхний ряд: Play + Progress slider + Time
+        top_controls = QHBoxLayout()
+        top_controls.setSpacing(5)
+
         self.play_btn = QPushButton("▶ Play")
-        self.play_btn.setMaximumWidth(80)
+        self.play_btn.setMaximumWidth(70)
         self.play_btn.setToolTip("Play/Pause video (Space)")
         self.play_btn.clicked.connect(self._on_play_pause_clicked)
-        controls_layout.addWidget(self.play_btn)
-        
+        top_controls.addWidget(self.play_btn)
+
         # Ползунок прогресса
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setToolTip("Seek to frame")
         self.progress_slider.sliderMoved.connect(self._on_progress_slider_moved)
-        controls_layout.addWidget(self.progress_slider)
-        
+        self.progress_slider.setMinimumHeight(20)
+        top_controls.addWidget(self.progress_slider, 1)  # stretch factor 1
+
         # Время
         self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setMaximumWidth(100)
+        self.time_label.setMaximumWidth(90)
+        self.time_label.setMinimumWidth(90)
         self.time_label.setToolTip("Current time / Total duration")
-        controls_layout.addWidget(self.time_label)
+        top_controls.addWidget(self.time_label)
+
+        controls_layout.addLayout(top_controls)
+
+        # Нижний ряд: Speed + Open video
+        bottom_controls = QHBoxLayout()
+        bottom_controls.setSpacing(5)
 
         # Скорость воспроизведения
         speed_label = QLabel("Speed:")
-        speed_label.setMaximumWidth(45)
-        controls_layout.addWidget(speed_label)
+        speed_label.setMaximumWidth(40)
+        bottom_controls.addWidget(speed_label)
 
         self.speed_combo = QComboBox()
         self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
         self.speed_combo.setCurrentText("1.0x")
-        self.speed_combo.setMaximumWidth(60)
+        self.speed_combo.setMaximumWidth(55)
         self.speed_combo.setToolTip("Playback speed")
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
-        controls_layout.addWidget(self.speed_combo)
-        
+        bottom_controls.addWidget(self.speed_combo)
+
+        bottom_controls.addStretch()
+
         # Открыть видео
         open_btn = QPushButton("📁 Открыть")
-        open_btn.setMaximumWidth(70)
+        open_btn.setMaximumWidth(80)
         open_btn.setToolTip("Открыть видеофайл (Ctrl+O)")
         open_btn.clicked.connect(self._on_open_video)
-        controls_layout.addWidget(open_btn)
-        
-        video_layout.addLayout(controls_layout)
-        top_layout.addLayout(video_layout, 7)
-        
-        # Список отрезков (30%)
-        list_layout = QVBoxLayout()
+        bottom_controls.addWidget(open_btn)
+
+        controls_layout.addLayout(bottom_controls)
+
+        video_layout.addWidget(controls_widget)
+
+        video_container_layout.addWidget(video_widget, 0, Qt.AlignCenter)
+        self.top_splitter.addWidget(video_container)
+
+        # Список отрезков
+        list_container = QWidget()
+        list_layout = QVBoxLayout(list_container)
         list_layout.addWidget(QLabel("Отрезки:"))
 
         # ===== ФИЛЬТРЫ =====
@@ -266,9 +307,12 @@ class MainWindow(QMainWindow):
 
         list_layout.addLayout(marker_btn_layout)
 
-        top_layout.addLayout(list_layout, 3)
+        self.top_splitter.addWidget(list_container)
 
-        main_layout.addLayout(top_layout)
+        # Установить начальные пропорции (60:40)
+        self.top_splitter.setSizes([600, 400])
+
+        main_layout.addWidget(self.top_splitter)
 
         # ===== ТАЙМЛАЙН =====
         main_layout.addWidget(QLabel("Таймлайн:"))
