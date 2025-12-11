@@ -50,6 +50,9 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         self.event_color = QColor(event.color) if event else QColor("#888888")
         self.is_hovered = False
 
+        # Устанавливаем tooltip с полным текстом
+        self.setToolTip(self._get_full_text())
+
     def boundingRect(self):
         """Возвращает bounding rect с отступами для предотвращения слипания."""
         rect = self.rect()
@@ -63,6 +66,17 @@ class SegmentGraphicsItem(QGraphicsRectItem):
             event_manager = get_custom_event_manager()
             event = event_manager.get_event(self.marker.event_name)
             return event.get_localized_name() if event else self.marker.event_name
+
+    def _get_full_text(self):
+        """Возвращает полный текст для tooltip (включая и заметку и название события)."""
+        event_manager = get_custom_event_manager()
+        event = event_manager.get_event(self.marker.event_name)
+        event_name = event.get_localized_name() if event else self.marker.event_name
+
+        if self.marker.note and self.marker.note.strip():
+            return f"{self.marker.note.strip()}\n({event_name})"
+        else:
+            return event_name
 
     def paint(self, painter, option, widget):
         """Отрисовка сегмента в стиле Hudl Sportscode."""
@@ -95,14 +109,14 @@ class SegmentGraphicsItem(QGraphicsRectItem):
 
         text = self._get_display_text()
         font_metrics = QFontMetrics(font)
-        text_rect = font_metrics.boundingRect(text)
 
         # Если текст не помещается, обрезаем его
-        if text_rect.width() > rect.width() - 8:
-            text = font_metrics.elidedText(text, Qt.ElideRight, rect.width() - 8)
+        available_width = rect.width() - 8
+        if font_metrics.horizontalAdvance(text) > available_width:
+            text = font_metrics.elidedText(text, Qt.ElideRight, available_width)
 
-        # Центрируем текст
-        text_x = rect.center().x() - font_metrics.horizontalAdvance(text) / 2
+        # Выравниваем текст по левому краю с отступом, но не выходим за границы
+        text_x = rect.left() + 4
         text_y = rect.center().y() + font_metrics.ascent() / 2
 
         painter.drawText(int(text_x), int(text_y), text)
@@ -129,15 +143,20 @@ class SegmentGraphicsItem(QGraphicsRectItem):
 class TrackHeaderItem(QGraphicsObject):
     """Профессиональный заголовок трека с плоским дизайном."""
 
+    HEADER_WIDTH = 140  # Фиксированная ширина заголовка
+
     def __init__(self, event, track_height):
         super().__init__()
         self.event_data = event  # Переименовано, чтобы не конфликтовать с методом event()
         self.track_height = track_height
         self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)  # Текст не искажается при зуме
 
+        # Устанавливаем tooltip с полным названием события
+        self.setToolTip(self.event_data.get_localized_name())
+
     def boundingRect(self):
         """Возвращает bounding rect заголовка."""
-        return QRectF(0, 0, 140, self.track_height)
+        return QRectF(0, 0, self.HEADER_WIDTH, self.track_height)
 
     def paint(self, painter, option, widget):
         """Отрисовка заголовка с плоским дизайном."""
@@ -152,6 +171,13 @@ class TrackHeaderItem(QGraphicsObject):
         painter.setFont(font)
 
         text = self.event_data.get_localized_name()
+        font_metrics = QFontMetrics(font)
+
+        # Если текст не помещается, обрезаем его
+        available_width = self.HEADER_WIDTH - 20  # -20 для отступов (10px слева + 10px справа)
+        if font_metrics.horizontalAdvance(text) > available_width:
+            text = font_metrics.elidedText(text, Qt.ElideRight, available_width)
+
         painter.drawText(10, 15, text)  # отступ 10px слева, 15px сверху
 
 
@@ -169,6 +195,19 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.playhead.setPen(QPen(QColor("#FFFF00"), 4, Qt.SolidLine, Qt.RoundCap))
         self.playhead.setZValue(1000)
         self.addItem(self.playhead)  # добавляем навсегда
+
+        # Линия конца видео с подписью
+        self.video_end_line = QGraphicsLineItem()
+        self.video_end_line.setPen(QPen(QColor("#FF0000"), 3, Qt.SolidLine, Qt.RoundCap))
+        self.video_end_line.setZValue(900)
+        self.addItem(self.video_end_line)
+
+        self.video_end_label = QGraphicsTextItem("Конец видео")
+        self.video_end_label.setDefaultTextColor(QColor("#FF0000"))
+        font = QFont("Segoe UI", 10, QFont.Bold)
+        self.video_end_label.setFont(font)
+        self.video_end_label.setZValue(900)
+        self.addItem(self.video_end_label)
 
         self.rebuild()  # первый рендер
 
@@ -272,14 +311,19 @@ class TimelineGraphicsScene(QGraphicsScene):
         total_frames = max(self.controller.get_total_frames(), 1)
         events = get_custom_event_manager().get_all_events()
 
-        # Очищаем всё КРОМЕ playhead
+        # Очищаем всё КРОМЕ playhead, video_end_line и video_end_label
         for item in self.items():
-            if item is not self.playhead:
+            if item not in (self.playhead, self.video_end_line, self.video_end_label):
                 self.removeItem(item)
 
         scene_width = total_frames * self.pixels_per_frame + 300
         scene_height = len(events) * self.track_height + self.header_height + 50 + 30  # +30 для линейки
         self.setSceneRect(0, 0, scene_width, scene_height)
+
+        # Позиционируем линию конца видео и подпись
+        end_x = (total_frames - 1) * self.pixels_per_frame + 150
+        self.video_end_line.setLine(end_x, 0, end_x, scene_height)
+        self.video_end_label.setPos(end_x - 35, -5)  # Подпись чуть выше линии
 
         track_bg = QColor("#0d1b2a")
 
@@ -310,6 +354,12 @@ class TimelineGraphicsScene(QGraphicsScene):
             return
         x = frame_idx * self.pixels_per_frame + 150
         self.playhead.setLine(x, 0, x, self.sceneRect().height())
+
+        # Также обновляем позицию линии конца видео
+        total_frames = max(self.controller.get_total_frames(), 1)
+        end_x = (total_frames - 1) * self.pixels_per_frame + 150
+        self.video_end_line.setLine(end_x, 0, end_x, self.sceneRect().height())
+        self.video_end_label.setPos(end_x - 35, -5)
 
 
 class TimelineWidget(QWidget):
