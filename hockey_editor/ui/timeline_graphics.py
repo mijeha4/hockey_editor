@@ -167,7 +167,7 @@ class TrackHeaderItem(QGraphicsObject):
 
         # Белый текст слева с отступом
         painter.setPen(QPen(Qt.white))
-        font = QFont("Segoe UI", 11, QFont.Bold)
+        font = QFont("Segoe UI", 10, QFont.Bold)
         painter.setFont(font)
 
         text = self.event_data.get_localized_name()
@@ -178,7 +178,11 @@ class TrackHeaderItem(QGraphicsObject):
         if font_metrics.horizontalAdvance(text) > available_width:
             text = font_metrics.elidedText(text, Qt.ElideRight, available_width)
 
-        painter.drawText(10, 15, text)  # отступ 10px слева, 15px сверху
+        # Центрируем текст вертикально
+        text_x = 10
+        text_y = rect.center().y() + font_metrics.ascent() / 2
+
+        painter.drawText(int(text_x), int(text_y), text)
 
 
 class TimelineGraphicsScene(QGraphicsScene):
@@ -187,7 +191,7 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.controller = controller
         self.main_window = None
         self.pixels_per_frame = 0.8
-        self.track_height = 60
+        self.track_height = 45
         self.header_height = 40
 
         # Playhead создаём один раз и больше НИКОГДА не удаляем!
