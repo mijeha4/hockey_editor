@@ -1,10 +1,9 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
-    QComboBox, QDoubleSpinBox, QSpinBox, QPushButton, QColorDialog,
+    QComboBox, QDoubleSpinBox, QSpinBox, QPushButton,
     QLineEdit, QCheckBox, QWidget, QMessageBox
 )
-from PySide6.QtGui import QColor
 from enum import Enum
 from ..utils.settings_manager import get_settings_manager
 from .custom_event_dialog import CustomEventManagerDialog
@@ -156,14 +155,7 @@ class SettingsDialog(QDialog):
         widget.setLayout(layout)
         return widget
 
-    def _choose_color(self, event_type: str):
-        """Выбрать цвет."""
-        btn, current_color = self.color_buttons[event_type]
-        color = QColorDialog.getColor(QColor(current_color), self, f"Choose color for {event_type}")
-        if color.isValid():
-            hex_color = color.name()
-            btn.setStyleSheet(f"background-color: {hex_color}; width: 100px;")
-            self.color_buttons[event_type] = (btn, hex_color)
+
 
     def save_and_close(self):
         """Сохранить настройки и закрыть."""
@@ -178,12 +170,6 @@ class SettingsDialog(QDialog):
         # Pre-roll и Post-roll
         self.controller.set_pre_roll(self.pre_roll_spin.value())
         self.controller.set_post_roll(self.post_roll_spin.value())
-
-        # Цвета дорожек (сохранить в QSettings)
-        colors = {}
-        for event_type, (_, color_hex) in self.color_buttons.items():
-            colors[event_type] = color_hex
-        self.settings_manager.save_track_colors(colors)
 
         # Автосохранение
         self.settings_manager.save_autosave_enabled(self.autosave_check.isChecked())
