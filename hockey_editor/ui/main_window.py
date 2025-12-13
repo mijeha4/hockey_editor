@@ -176,6 +176,19 @@ class MainWindow(QMainWindow):
         self.action_exit = self.file_menu.addAction("Выход")
         self.action_exit.triggered.connect(self.close)
 
+        # === Action buttons in menu bar ===
+        self.action_preview = self.menubar.addAction("Предпросмотр")
+        self.action_preview.setShortcut("Ctrl+P")
+        self.action_preview.triggered.connect(self._on_preview_clicked)
+
+        self.action_settings = self.menubar.addAction("Настройки")
+        self.action_settings.setShortcut("Ctrl+,")
+        self.action_settings.triggered.connect(self._on_settings_clicked)
+
+        self.action_export = self.menubar.addAction("Экспорт")
+        self.action_export.setShortcut("Ctrl+E")
+        self.action_export.triggered.connect(self._on_export_clicked)
+
         # === Help Menu ===
         self.help_menu = self.menubar.addMenu("Справка")
 
@@ -204,40 +217,35 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        # Видео контейнер
+        # Видео контейнер с интегрированными элементами управления
         video_container = QWidget()
         video_container_layout = QVBoxLayout(video_container)
         video_container_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Видео виджет с центрированием
-        video_widget = QWidget()
-        video_layout = QVBoxLayout(video_widget)
-        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_container_layout.setSpacing(0)  # Убираем промежутки между элементами
 
         # Видео виджет
         self.video_label = QLabel()
         self.video_label.setMinimumSize(640, 360)
-        self.video_label.setMaximumSize(800, 600)  # Ограничение максимального размера
+        # Убрано ограничение максимального размера для занятия всей доступной высоты верхней половины экрана
         self.video_label.setStyleSheet("background-color: black; border: 1px solid grey;")
         self.video_label.setAlignment(Qt.AlignCenter)  # Центрирование содержимого
-        video_layout.addWidget(self.video_label, 0, Qt.AlignCenter)
+        video_container_layout.addWidget(self.video_label, 1)  # stretch factor 1 для занятия основного пространства
 
-        # Профессиональная панель управления
+        # Профессиональная панель управления (интегрирована в нижнюю часть видео-фрейма)
         self.player_controls = PlayerControls()
         self.player_controls.playClicked.connect(self._on_play_pause_clicked)
         self.player_controls.speedStepChanged.connect(self._on_speed_step_changed)
         self.player_controls.skipSeconds.connect(self._on_skip_seconds)
         self.player_controls.speedChanged.connect(self._on_speed_changed)
         self.player_controls.fullscreenClicked.connect(self._on_fullscreen_clicked)
-        video_layout.addWidget(self.player_controls)
+        video_container_layout.addWidget(self.player_controls, 0, Qt.AlignBottom)  # Приклеена к нижней части
 
-        video_container_layout.addWidget(video_widget, 0, Qt.AlignCenter)
         self.top_splitter.addWidget(video_container)
 
         # Список отрезков
         list_container = QWidget()
         list_layout = QVBoxLayout(list_container)
-        list_layout.setContentsMargins(5, 5, 5, 5)  # Добавляем padding
+        list_layout.setContentsMargins(0, 0, 0, 0)  # Убираем отступы для плотного прилегания
         list_layout.addWidget(QLabel("Отрезки:"))
 
         # ===== ФИЛЬТРЫ =====
@@ -270,56 +278,24 @@ class MainWindow(QMainWindow):
         # 3. Добавляем виджет на форму
         main_layout.addWidget(self.timeline_widget)
 
-        # ===== СПИСОК СОБЫТИЙ С ГОЯЧИМИ КЛАВИШАМИ =====
-        event_layout = QHBoxLayout()
+        # ===== НИЖНЯЯ ЧАСТЬ: СПИСОК СОБЫТИЙ И СТАТУС-БАР =====
+        bottom_layout = QHBoxLayout()
 
-        # Новый виджет списка событий с горячими клавишами
+        # Виджет списка событий с горячими клавишами
         self.event_shortcut_list_widget = EventShortcutListWidget()
         self.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
-        event_layout.addWidget(self.event_shortcut_list_widget)
+        bottom_layout.addWidget(self.event_shortcut_list_widget)
 
-        event_layout.addStretch()
-        
-        # Кнопки undo/redo
-        undo_btn = QPushButton("↶ Отменить")
-        undo_btn.setMaximumWidth(80)
-        undo_btn.setToolTip("Отменить последнюю операцию (Ctrl+Z)")
-        undo_btn.clicked.connect(self._on_undo_clicked)
-        event_layout.addWidget(undo_btn)
+        bottom_layout.addStretch()
 
-        redo_btn = QPushButton("↷ Повторить")
-        redo_btn.setMaximumWidth(80)
-        redo_btn.setToolTip("Повторить последнюю операцию (Ctrl+Shift+Z)")
-        redo_btn.clicked.connect(self._on_redo_clicked)
-        event_layout.addWidget(redo_btn)
-
-        # Кнопка просмотра
-        preview_btn = QPushButton("👁️ Предпросмотр")
-        preview_btn.setToolTip("Предпросмотр и фильтрация отрезков")
-        preview_btn.clicked.connect(self._on_preview_clicked)
-        event_layout.addWidget(preview_btn)
-
-        # Кнопка настроек
-        settings_btn = QPushButton("⚙️ Настройки")
-        settings_btn.setToolTip("Открыть диалог настроек (Ctrl+,)")
-        settings_btn.clicked.connect(self._on_settings_clicked)
-        event_layout.addWidget(settings_btn)
-
-        # Кнопка экспорта
-        export_btn = QPushButton("💾 Экспорт")
-        export_btn.setToolTip("Экспортировать отрезки в видео (Ctrl+E)")
-        export_btn.clicked.connect(self._on_export_clicked)
-        event_layout.addWidget(export_btn)
-        
-        event_layout.addStretch()
-        
-        # Расширенный статус-бар
-        self.status_label = QLabel("Ready")
+        # Статус-бар с фиксированной высотой
+        self.status_label = QLabel("Готов")
         self.status_label.setStyleSheet("color: #ffcc00;")
         self.status_label.setMinimumWidth(400)
-        event_layout.addWidget(self.status_label)
-        
-        main_layout.addLayout(event_layout)
+        self.status_label.setFixedHeight(22)  # Фиксированная высота 20-24px
+        bottom_layout.addWidget(self.status_label)
+
+        main_layout.addLayout(bottom_layout)
         
         central.setLayout(main_layout)
         
@@ -609,8 +585,7 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.register_shortcut('PLAY_PAUSE', 'Space', self._on_play_pause_clicked)
         self.shortcut_manager.register_shortcut('OPEN_VIDEO', 'Ctrl+O', self._on_open_video)
         self.shortcut_manager.register_shortcut('CANCEL', 'Escape', self._on_cancel_recording)
-        self.shortcut_manager.register_shortcut('SETTINGS', 'Ctrl+Comma', self._on_settings_clicked)
-        self.shortcut_manager.register_shortcut('EXPORT', 'Ctrl+E', self._on_export_clicked)
+        # SETTINGS, EXPORT, PREVIEW теперь обрабатываются через меню
         self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z', self._on_undo_clicked)
         self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z', self._on_redo_clicked)
 

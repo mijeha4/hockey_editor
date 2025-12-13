@@ -1,175 +1,27 @@
 """
-Segment List Widget - displays video segments in a card-based list format.
+Segment List Widget - displays video segments in a data grid format.
 
-Replaces the simple QListWidget with interactive cards showing:
-- Segment number
-- Event name (bold, colored)
-- Time range (dimmed)
-- Action icons on hover (delete, edit, jump to moment)
+Data Grid with columns:
+- ID: Segment number
+- Название: Event name (colored)
+- Начало: Start time (monospace, right-aligned)
+- Конец: End time (monospace, right-aligned)
+- Длительность: Duration (monospace, right-aligned)
+- Действия: Action buttons (edit, delete, jump)
 """
 
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint
-from PySide6.QtGui import QFont, QColor, QPainter, QPen, QPixmap, QIcon
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFrame, QLabel,
-    QPushButton, QSizePolicy, QGraphicsDropShadowEffect
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QHeaderView, QPushButton, QHBoxLayout, QStyle
 )
 from ..models.marker import Marker
 from ..utils.custom_events import get_custom_event_manager
 
 
-class SegmentCard(QFrame):
-    """Individual segment card widget."""
-
-    # Signals
-    edit_requested = Signal(int)  # marker_idx
-    delete_requested = Signal(int)  # marker_idx
-    jump_requested = Signal(int)  # marker_idx
-
-    def __init__(self, marker_idx: int, marker: Marker, fps: float, parent=None):
-        super().__init__(parent)
-        self.marker_idx = marker_idx
-        self.marker = marker
-        self.fps = fps
-        self.event_manager = get_custom_event_manager()
-        self.is_hovered = False
-
-        self.setup_ui()
-        self.setup_shadow()
-
-    def setup_ui(self):
-        """Create the card UI."""
-        self.setFixedHeight(50)
-        self.setStyleSheet("""
-            SegmentCard {
-                background-color: #2a2a2a;
-                border: 1px solid #444444;
-                border-radius: 6px;
-            }
-            SegmentCard:hover {
-                background-color: #333333;
-                border-color: #666666;
-            }
-        """)
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
-
-        # Segment number (small, dimmed)
-        self.number_label = QLabel(f"#{self.marker_idx + 1}")
-        self.number_label.setStyleSheet("color: #888888; font-size: 10px;")
-        self.number_label.setFixedWidth(25)
-        layout.addWidget(self.number_label)
-
-        # Event name (bold, colored)
-        event = self.event_manager.get_event(self.marker.event_name)
-        event_name = event.get_localized_name() if event else self.marker.event_name
-        event_color = event.get_qcolor().name() if event else "#ffffff"
-
-        self.event_label = QLabel(event_name)
-        self.event_label.setStyleSheet(f"""
-            QLabel {{
-                color: {event_color};
-                font-weight: bold;
-                font-size: 12px;
-            }}
-        """)
-        layout.addWidget(self.event_label, 1)  # stretch factor 1
-
-        # Time range (dimmed)
-        start_time = self._format_time(self.marker.start_frame / self.fps)
-        end_time = self._format_time(self.marker.end_frame / self.fps)
-        time_text = f"{start_time}–{end_time}"
-
-        self.time_label = QLabel(time_text)
-        self.time_label.setStyleSheet("color: #888888; font-size: 11px;")
-        self.time_label.setFixedWidth(80)
-        layout.addWidget(self.time_label)
-
-        # Action buttons container (initially hidden)
-        self.actions_container = QWidget()
-        actions_layout = QHBoxLayout(self.actions_container)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(2)
-
-        # Jump to moment button
-        self.jump_btn = QPushButton("🎯")
-        self.jump_btn.setFixedSize(24, 24)
-        self.jump_btn.setToolTip("Перейти к моменту")
-        self.jump_btn.setStyleSheet(self._get_action_button_style())
-        self.jump_btn.clicked.connect(lambda: self.jump_requested.emit(self.marker_idx))
-        actions_layout.addWidget(self.jump_btn)
-
-        # Edit button
-        self.edit_btn = QPushButton("✏️")
-        self.edit_btn.setFixedSize(24, 24)
-        self.edit_btn.setToolTip("Редактировать")
-        self.edit_btn.setStyleSheet(self._get_action_button_style())
-        self.edit_btn.clicked.connect(lambda: self.edit_requested.emit(self.marker_idx))
-        actions_layout.addWidget(self.edit_btn)
-
-        # Delete button
-        self.delete_btn = QPushButton("🗑️")
-        self.delete_btn.setFixedSize(24, 24)
-        self.delete_btn.setToolTip("Удалить")
-        self.delete_btn.setStyleSheet(self._get_action_button_style())
-        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.marker_idx))
-        actions_layout.addWidget(self.delete_btn)
-
-        layout.addWidget(self.actions_container)
-
-        # Initially hide action buttons
-        self.actions_container.setVisible(False)
-
-    def setup_shadow(self):
-        """Add subtle shadow effect."""
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(8)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        shadow.setOffset(0, 2)
-        self.setGraphicsEffect(shadow)
-
-    def enterEvent(self, event):
-        """Show action buttons on hover."""
-        self.is_hovered = True
-        self.actions_container.setVisible(True)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        """Hide action buttons when not hovering."""
-        self.is_hovered = False
-        self.actions_container.setVisible(False)
-        super().leaveEvent(event)
-
-    def _format_time(self, seconds: float) -> str:
-        """Format time as MM:SS."""
-        minutes = int(seconds) // 60
-        secs = int(seconds) % 60
-        return f"{minutes:02d}:{secs:02d}"
-
-    def _get_action_button_style(self) -> str:
-        """Get consistent style for action buttons."""
-        return """
-            QPushButton {
-                background-color: transparent;
-                border: none;
-                color: #cccccc;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #444444;
-                border-radius: 3px;
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background-color: #555555;
-            }
-        """
-
-
 class SegmentListWidget(QWidget):
-    """Widget for displaying segments in a card-based list."""
+    """Widget for displaying segments in a data grid."""
 
     # Signals
     segment_edit_requested = Signal(int)  # marker_idx
@@ -180,6 +32,7 @@ class SegmentListWidget(QWidget):
         super().__init__(parent)
         self.fps = 30.0  # default, will be updated
         self.segments = []  # list of (marker_idx, marker) tuples
+        self.event_manager = get_custom_event_manager()
 
         self.setup_ui()
 
@@ -187,41 +40,76 @@ class SegmentListWidget(QWidget):
         """Create the main UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
-        # Scroll area for segments
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
+        # Create table widget
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["ID", "Название", "Начало", "Конец", "Длительность", ""])
+
+        # Configure table appearance
+        self.table.setStyleSheet("""
+            QTableWidget {
                 background-color: #2a2a2a;
-                width: 8px;
-                border-radius: 4px;
+                color: #ffffff;
+                border: 1px solid #444444;
+                gridline-color: #444444;
+                selection-background-color: #444444;
             }
-            QScrollBar::handle:vertical {
-                background-color: #666666;
-                border-radius: 4px;
+            QTableWidget::item {
+                padding: 2px;
+                border-bottom: 1px solid #333333;
             }
-            QScrollBar::handle:vertical:hover {
-                background-color: #888888;
+            QTableWidget::item:selected {
+                background-color: #444444;
+            }
+            QHeaderView::section {
+                background-color: #333333;
+                color: #ffffff;
+                padding: 4px;
+                border: 1px solid #555555;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QTableWidget QTableCornerButton::section {
+                background-color: #333333;
+                border: 1px solid #555555;
             }
         """)
 
-        # Container for segment cards
-        self.cards_container = QWidget()
-        self.cards_layout = QVBoxLayout(self.cards_container)
-        self.cards_layout.setContentsMargins(0, 0, 0, 0)
-        self.cards_layout.setSpacing(4)
-        self.cards_layout.addStretch()  # Push cards to top
+        # Configure headers
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # ID
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Название
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)  # Начало
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Конец
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # Длительность
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)  # Действия
 
-        self.scroll_area.setWidget(self.cards_container)
-        layout.addWidget(self.scroll_area)
+        # Set column widths
+        self.table.setColumnWidth(0, 30)   # ID
+        self.table.setColumnWidth(2, 60)   # Начало
+        self.table.setColumnWidth(3, 60)   # Конец
+        self.table.setColumnWidth(4, 70)   # Длительность
+        self.table.setColumnWidth(5, 90)   # Действия
+
+        # Configure table behavior
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        # Set row height to 25 pixels (half of original 50)
+        self.table.verticalHeader().setDefaultSectionSize(25)
+        self.table.verticalHeader().setVisible(False)
+
+        # Connect signals
+        self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu_requested)
+
+        layout.addWidget(self.table)
 
     def set_fps(self, fps: float):
         """Update FPS for time formatting."""
@@ -238,25 +126,158 @@ class SegmentListWidget(QWidget):
         self.refresh_segments()
 
     def refresh_segments(self):
-        """Refresh all segment cards."""
-        # Clear existing cards
-        while self.cards_layout.count() > 1:  # Keep the stretch at the end
-            item = self.cards_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        """Refresh all table rows."""
+        self.table.setRowCount(0)  # Clear table
 
-        # Create new cards
         for marker_idx, marker in self.segments:
-            card = SegmentCard(marker_idx, marker, self.fps)
+            row = self.table.rowCount()
+            self.table.insertRow(row)
 
-            # Connect signals
-            card.edit_requested.connect(self.segment_edit_requested)
-            card.delete_requested.connect(self.segment_delete_requested)
-            card.jump_requested.connect(self.segment_jump_requested)
+            # Column 0: ID
+            id_item = QTableWidgetItem(str(marker_idx + 1))
+            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            id_item.setFont(self._get_compact_font())
+            self.table.setItem(row, 0, id_item)
 
-            self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)  # Insert before stretch
+            # Column 1: Название (Event name)
+            event = self.event_manager.get_event(marker.event_name)
+            event_name = event.get_localized_name() if event else marker.event_name
+            event_color = event.get_qcolor().name() if event else "#ffffff"
+
+            name_item = QTableWidgetItem(event_name)
+            name_item.setForeground(QColor(event_color))
+            name_item.setFont(self._get_compact_font())
+            name_item.setFont(self._get_bold_font())
+            self.table.setItem(row, 1, name_item)
+
+            # Column 2: Начало (Start time)
+            start_time = self._format_time(marker.start_frame / self.fps)
+            start_item = QTableWidgetItem(start_time)
+            start_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            start_item.setFont(self._get_monospace_font())
+            self.table.setItem(row, 2, start_item)
+
+            # Column 3: Конец (End time)
+            end_time = self._format_time(marker.end_frame / self.fps)
+            end_item = QTableWidgetItem(end_time)
+            end_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            end_item.setFont(self._get_monospace_font())
+            self.table.setItem(row, 3, end_item)
+
+            # Column 4: Длительность (Duration)
+            duration_frames = marker.end_frame - marker.start_frame
+            duration_time = self._format_time(duration_frames / self.fps)
+            duration_item = QTableWidgetItem(duration_time)
+            duration_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            duration_item.setFont(self._get_monospace_font())
+            self.table.setItem(row, 4, duration_item)
+
+            # Column 5: Действия (Action buttons)
+            actions_widget = self._create_actions_widget(marker_idx)
+            self.table.setCellWidget(row, 5, actions_widget)
+
+            # Store marker_idx in the row for context menu
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, marker_idx)
+
+    def _create_actions_widget(self, marker_idx: int) -> QWidget:
+        """Create action buttons widget for a row."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+
+        # Jump button
+        jump_btn = QPushButton()
+        jump_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight))
+        jump_btn.setFixedSize(20, 20)
+        jump_btn.setToolTip("Перейти к началу сегмента")
+        jump_btn.setStyleSheet(self._get_action_button_style())
+        jump_btn.clicked.connect(lambda: self.segment_jump_requested.emit(marker_idx))
+        layout.addWidget(jump_btn)
+
+        # Edit button
+        edit_btn = QPushButton()
+        edit_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView))
+        edit_btn.setFixedSize(20, 20)
+        edit_btn.setToolTip("Редактировать сегмент")
+        edit_btn.setStyleSheet(self._get_action_button_style())
+        edit_btn.clicked.connect(lambda: self.segment_edit_requested.emit(marker_idx))
+        layout.addWidget(edit_btn)
+
+        # Delete button
+        delete_btn = QPushButton()
+        delete_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
+        delete_btn.setFixedSize(20, 20)
+        delete_btn.setToolTip("Удалить сегмент")
+        delete_btn.setStyleSheet(self._get_action_button_style())
+        delete_btn.clicked.connect(lambda: self.segment_delete_requested.emit(marker_idx))
+        layout.addWidget(delete_btn)
+
+        layout.addStretch()
+        return widget
+
+    def _get_compact_font(self) -> QFont:
+        """Get compact font for table cells."""
+        font = QFont()
+        font.setPointSize(9)
+        font.setFamily("Segoe UI")
+        return font
+
+    def _get_bold_font(self) -> QFont:
+        """Get bold font for event names."""
+        font = self._get_compact_font()
+        font.setBold(True)
+        return font
+
+    def _get_monospace_font(self) -> QFont:
+        """Get monospace font for time codes."""
+        font = QFont()
+        font.setPointSize(9)
+        font.setFamily("Consolas, 'Courier New', monospace")
+        return font
+
+    def _get_action_button_style(self) -> str:
+        """Get consistent style for action buttons."""
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #cccccc;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+                border-radius: 3px;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #555555;
+            }
+        """
+
+    def _format_time(self, seconds: float) -> str:
+        """Format time as MM:SS."""
+        minutes = int(seconds) // 60
+        secs = int(seconds) % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _on_item_double_clicked(self, item):
+        """Handle double-click on table item."""
+        if item:
+            marker_idx = item.data(Qt.ItemDataRole.UserRole)
+            if marker_idx is not None:
+                self.segment_edit_requested.emit(marker_idx)
+
+    def _on_context_menu_requested(self, pos):
+        """Handle right-click context menu."""
+        item = self.table.itemAt(pos)
+        if item:
+            marker_idx = item.data(Qt.ItemDataRole.UserRole)
+            if marker_idx is not None:
+                # Could implement context menu here if needed
+                pass
 
     def clear_segments(self):
         """Clear all segments."""
         self.segments = []
-        self.refresh_segments()
+        self.table.setRowCount(0)

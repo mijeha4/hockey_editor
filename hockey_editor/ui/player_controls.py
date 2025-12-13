@@ -23,8 +23,8 @@ class PlayerControls(QWidget):
     def _setup_ui(self):
         """Создать интерфейс панели управления."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(5, 2, 5, 2)  # Уменьшенные отступы для более плотной компоновки
+        layout.setSpacing(2)  # Уменьшенные промежутки между кнопками
 
         # Уменьшить скорость
         self.speed_down_btn = QPushButton("⏪")
