@@ -13,6 +13,7 @@ from .edit_segment_dialog import EditSegmentDialog
 from .settings_dialog import SettingsDialog
 from .event_shortcut_list_widget import EventShortcutListWidget
 from .segment_list_widget import SegmentListWidget
+from .player_controls import PlayerControls
 from ..models.marker import EventType
 from ..utils.settings_manager import get_settings_manager
 from ..utils.custom_events import get_custom_event_manager
@@ -153,6 +154,9 @@ class MainWindow(QMainWindow):
         self.action_open.setShortcut("Ctrl+O")
         self.action_open.triggered.connect(self._on_open_project)
 
+        self.action_open_video = self.file_menu.addAction("Открыть видео")
+        self.action_open_video.triggered.connect(self._on_open_video)
+
         self.action_save = self.file_menu.addAction("Сохранить проект")
         self.action_save.setShortcut("Ctrl+S")
         self.action_save.triggered.connect(self._on_save_project)
@@ -218,67 +222,14 @@ class MainWindow(QMainWindow):
         self.video_label.setAlignment(Qt.AlignCenter)  # Центрирование содержимого
         video_layout.addWidget(self.video_label, 0, Qt.AlignCenter)
 
-        # Контролы видео - компактная вертикальная компоновка
-        controls_widget = QWidget()
-        controls_layout = QVBoxLayout(controls_widget)
-        controls_layout.setContentsMargins(5, 5, 5, 5)
-        controls_layout.setSpacing(5)
-
-        # Верхний ряд: Play + Progress slider + Time
-        top_controls = QHBoxLayout()
-        top_controls.setSpacing(5)
-
-        self.play_btn = QPushButton("▶ Play")
-        self.play_btn.setMaximumWidth(70)
-        self.play_btn.setToolTip("Play/Pause video (Space)")
-        self.play_btn.clicked.connect(self._on_play_pause_clicked)
-        top_controls.addWidget(self.play_btn)
-
-        # Ползунок прогресса
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
-        self.progress_slider.setToolTip("Seek to frame")
-        self.progress_slider.sliderMoved.connect(self._on_progress_slider_moved)
-        self.progress_slider.setMinimumHeight(20)
-        top_controls.addWidget(self.progress_slider, 1)  # stretch factor 1
-
-        # Время
-        self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setMaximumWidth(90)
-        self.time_label.setMinimumWidth(90)
-        self.time_label.setToolTip("Current time / Total duration")
-        top_controls.addWidget(self.time_label)
-
-        controls_layout.addLayout(top_controls)
-
-        # Нижний ряд: Speed + Open video
-        bottom_controls = QHBoxLayout()
-        bottom_controls.setSpacing(5)
-
-        # Скорость воспроизведения
-        speed_label = QLabel("Speed:")
-        speed_label.setMaximumWidth(40)
-        bottom_controls.addWidget(speed_label)
-
-        self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
-        self.speed_combo.setCurrentText("1.0x")
-        self.speed_combo.setMaximumWidth(55)
-        self.speed_combo.setToolTip("Playback speed")
-        self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
-        bottom_controls.addWidget(self.speed_combo)
-
-        bottom_controls.addStretch()
-
-        # Открыть видео
-        open_btn = QPushButton("📁 Открыть")
-        open_btn.setMaximumWidth(80)
-        open_btn.setToolTip("Открыть видеофайл (Ctrl+O)")
-        open_btn.clicked.connect(self._on_open_video)
-        bottom_controls.addWidget(open_btn)
-
-        controls_layout.addLayout(bottom_controls)
-
-        video_layout.addWidget(controls_widget)
+        # Профессиональная панель управления
+        self.player_controls = PlayerControls()
+        self.player_controls.playClicked.connect(self._on_play_pause_clicked)
+        self.player_controls.speedStepChanged.connect(self._on_speed_step_changed)
+        self.player_controls.skipSeconds.connect(self._on_skip_seconds)
+        self.player_controls.speedChanged.connect(self._on_speed_changed)
+        self.player_controls.fullscreenClicked.connect(self._on_fullscreen_clicked)
+        video_layout.addWidget(self.player_controls)
 
         video_container_layout.addWidget(video_widget, 0, Qt.AlignCenter)
         self.top_splitter.addWidget(video_container)
@@ -308,17 +259,17 @@ class MainWindow(QMainWindow):
 
         # ===== ТАЙМЛАЙН =====
         main_layout.addWidget(QLabel("Таймлайн:"))
-        
+
         # 1. Передаем контроллер СРАЗУ в скобках
         self.timeline_widget = TimelineWidget(self.controller)
-        
+
         # 2. Настраиваем ссылку на главное окно (для двойного клика)
         # В новом коде мы обращаемся к scene внутри виджета
         self.timeline_widget.scene.main_window = self
-        
+
         # 3. Добавляем виджет на форму
         main_layout.addWidget(self.timeline_widget)
-        
+
         # ===== СПИСОК СОБЫТИЙ С ГОЯЧИМИ КЛАВИШАМИ =====
         event_layout = QHBoxLayout()
 
@@ -399,15 +350,64 @@ class MainWindow(QMainWindow):
 
     def _update_play_btn_text(self):
         """Обновить текст кнопки Play/Pause."""
-        if self.controller.playing:
-            self.play_btn.setText("⏸ Pause")
-        else:
-            self.play_btn.setText("▶ Play")
+        if hasattr(self, 'player_controls'):
+            self.player_controls.update_play_pause_button(self.controller.playing)
 
-    def _on_progress_slider_moved(self):
-        """Движение ползунка прогресса."""
-        frame_idx = self.progress_slider.value()
-        self.controller.seek_frame(frame_idx)
+    def _on_seek_frame(self, frames: int):
+        """Перемотка на кадры (±1)."""
+        current_frame = self.controller.get_current_frame_idx()
+        new_frame = max(0, min(self.controller.get_total_frames() - 1, current_frame + frames))
+        self.controller.seek_frame(new_frame)
+
+    def _on_skip_seconds(self, seconds: int):
+        """Перемотка на секунды."""
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            return
+
+        # Обработка специальных значений для начала/конца
+        if seconds == -999999:  # В начало
+            self.controller.seek_frame(0)
+            return
+        elif seconds == 999999:  # В конец
+            self.controller.seek_frame(self.controller.get_total_frames() - 1)
+            return
+
+        # Обычная перемотка
+        frames_to_skip = int(seconds * fps)
+        current_frame = self.controller.get_current_frame_idx()
+        new_frame = max(0, min(self.controller.get_total_frames() - 1, current_frame + frames_to_skip))
+        self.controller.seek_frame(new_frame)
+
+    def _on_speed_step_changed(self, step: int):
+        """Изменение скорости на шаг (±1)."""
+        current_speed = self.controller.get_playback_speed()
+        speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+        # Найти текущую скорость в списке
+        try:
+            current_idx = speeds.index(current_speed)
+        except ValueError:
+            # Если точного совпадения нет, найти ближайшую
+            current_idx = min(range(len(speeds)), key=lambda i: abs(speeds[i] - current_speed))
+
+        # Изменить индекс
+        new_idx = max(0, min(len(speeds) - 1, current_idx + step))
+        new_speed = speeds[new_idx]
+
+        # Установить новую скорость
+        self.controller.set_playback_speed(new_speed)
+
+        # Обновить отображение в PlayerControls
+        if hasattr(self, 'player_controls'):
+            self.player_controls.set_speed(new_speed)
+
+    def _on_fullscreen_clicked(self):
+        """Переключение полноэкранного режима."""
+        # Пока не реализовано - заглушка
+        pass
+
+
 
     def _on_open_video(self):
         """Открыть видео."""
@@ -418,9 +418,8 @@ class MainWindow(QMainWindow):
             if self.controller.load_video(path):
                 self.status_label.setText(f"✓ Loaded: {path.split('/')[-1]}")
                 self._update_play_btn_text()
-                self.progress_slider.setMaximum(self.controller.get_total_frames())
-                # Обновить комбо-бокс скорости
-                self._update_speed_combo()
+                # Инициализировать PlayerControls
+                self._init_player_controls()
             else:
                 QMessageBox.critical(self, "Error", "Failed to load video")
 
@@ -521,17 +520,13 @@ class MainWindow(QMainWindow):
         """Обновление при изменении времени воспроизведения."""
         fps = self.controller.get_fps()
         total_frames = self.controller.get_total_frames()
-        
-        self.progress_slider.blockSignals(True)
-        self.progress_slider.setValue(frame_idx)
-        self.progress_slider.blockSignals(False)
-        
-        # Обновить время
-        if fps > 0:
+
+        # Обновить PlayerControls
+        if hasattr(self, 'player_controls') and fps > 0:
             current_sec = frame_idx / fps
             total_sec = total_frames / fps
-            self.time_label.setText(self._format_time(current_sec, total_sec))
-        
+            self.player_controls.update_time_label(current_sec, total_sec)
+
         # Обновить расширенный статус-бар
         self._update_status_bar()
 
@@ -589,8 +584,6 @@ class MainWindow(QMainWindow):
             current_frame = self.controller.get_current_frame_idx()
             self.timeline_widget.scene_obj.update_playhead(current_frame)
 
-    # ИСПРАВЛЕНО: удален дублированный метод _setup_shortcuts с EventType
-
     def _on_events_changed(self):
         """Обработка изменения событий - обновить shortcuts и фильтры."""
         self._setup_event_shortcuts()
@@ -620,6 +613,10 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.register_shortcut('EXPORT', 'Ctrl+E', self._on_export_clicked)
         self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z', self._on_undo_clicked)
         self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z', self._on_redo_clicked)
+
+        # Добавить горячие клавиши для перемотки на 5 секунд
+        self.shortcut_manager.register_shortcut('SKIP_LEFT', 'Left', lambda: self._on_skip_seconds(-5))
+        self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right', lambda: self._on_skip_seconds(5))
 
     def _setup_event_shortcuts(self):
         """Создаёт глобальные горячие клавиши для всех событий (A, D, S и кастомные)."""
@@ -866,25 +863,28 @@ class MainWindow(QMainWindow):
         else:
             self.status_label.setText("Готов")
 
-    def _on_speed_changed(self):
-        """Обработка изменения скорости воспроизведения."""
-        speed_text = self.speed_combo.currentText()
-        speed = float(speed_text.replace('x', ''))
+    def _on_speed_changed(self, speed: float):
+        """Обработка изменения скорости из PlayerControls."""
         self.controller.set_playback_speed(speed)
 
-    def _update_speed_combo(self):
-        """Обновить комбо-бокс скорости в соответствии с текущей скоростью контроллера."""
-        current_speed = self.controller.get_playback_speed()
-        speed_text = f"{current_speed:.2f}x"
+    def _init_player_controls(self):
+        """Инициализировать PlayerControls после загрузки видео."""
+        if hasattr(self, 'player_controls'):
+            # Установить начальное состояние
+            self.player_controls.update_play_pause_button(self.controller.playing)
 
-        # Найти наиболее близкий вариант в списке
-        items = [self.speed_combo.itemText(i) for i in range(self.speed_combo.count())]
-        if speed_text in items:
-            self.speed_combo.setCurrentText(speed_text)
-        else:
-            # Если точного совпадения нет, выбрать наиболее близкий
-            closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - current_speed))
-            self.speed_combo.setCurrentText(closest_item)
+            # Установить скорость
+            current_speed = self.controller.get_playback_speed()
+            self.player_controls.set_speed(current_speed)
+
+            # Установить время
+            fps = self.controller.get_fps()
+            total_frames = self.controller.get_total_frames()
+            if fps > 0 and total_frames > 0:
+                current_frame = self.controller.get_current_frame_idx()
+                current_sec = current_frame / fps
+                total_sec = total_frames / fps
+                self.player_controls.update_time_label(current_sec, total_sec)
 
 
 
