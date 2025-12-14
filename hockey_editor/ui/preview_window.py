@@ -6,10 +6,10 @@ Preview Window - просмотр и воспроизведение отрезк
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
     QCheckBox, QComboBox, QGroupBox, QSpinBox, QLineEdit, QButtonGroup,
-    QHeaderView, QStyledItemDelegate, QStyle
+    QHeaderView, QStyledItemDelegate, QStyle, QTextEdit, QTimeEdit, QFormLayout
 )
 from PySide6.QtGui import QPainter, QPen, QBrush
 from PySide6.QtCore import Qt, QRect
@@ -235,6 +235,134 @@ class PreviewWindow(QMainWindow):
     def _on_events_changed(self):
         """Обработка изменения событий - обновить фильтр событий."""
         self._update_event_filter()
+
+    def _get_selected_marker(self):
+        """Получить выбранный маркер из таблицы.
+
+        Returns:
+            tuple: (marker_idx, marker) или (None, None) если ничего не выбрано
+        """
+        current_row = self.markers_table.currentRow()
+        if current_row < 0:
+            return None, None
+
+        # Получить ID маркера из UserRole первой колонки
+        id_item = self.markers_table.item(current_row, 0)  # Колонка "№"
+        if not id_item:
+            return None, None
+
+        marker_idx = id_item.data(Qt.ItemDataRole.UserRole)
+        if marker_idx is None or not isinstance(marker_idx, int):
+            return None, None
+
+        if 0 <= marker_idx < len(self.controller.markers):
+            return marker_idx, self.controller.markers[marker_idx]
+
+        return None, None
+
+    def keyPressEvent(self, event):
+        """Обработка горячих клавиш для быстрого редактирования маркеров."""
+        # Защита от конфликтов: не обрабатывать горячие клавиши если фокус в поле ввода
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, (QLineEdit, QTextEdit, QTimeEdit, QSpinBox)):
+            super().keyPressEvent(event)
+            return
+
+        # Получить выбранный маркер
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            super().keyPressEvent(event)
+            return
+
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            super().keyPressEvent(event)
+            return
+
+        current_frame = self.controller.get_current_frame_idx()
+        key = event.key()
+
+        # I - установить начало маркера (In-point)
+        if key == Qt.Key.Key_I:
+            marker.start_frame = current_frame
+            if marker.start_frame > marker.end_frame:
+                marker.end_frame = marker.start_frame + int(fps)  # Минимум 1 секунда
+            self.controller.markers_changed.emit()
+            self._update_marker_list()
+            event.accept()
+            return
+
+        # O - установить конец маркера (Out-point)
+        elif key == Qt.Key.Key_O:
+            marker.end_frame = current_frame
+            if marker.end_frame < marker.start_frame:
+                marker.start_frame = max(0, marker.end_frame - int(fps))  # Минимум 1 секунда
+            self.controller.markers_changed.emit()
+            self._update_marker_list()
+            event.accept()
+            return
+
+        # Delete - удалить маркер
+        elif key == Qt.Key.Key_Delete:
+            self.controller.delete_marker(marker_idx)
+            self._update_marker_list()
+            event.accept()
+            return
+
+        # Shift + стрелки - сдвиг всего маркера
+        elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            shift_frames = 0
+            if key == Qt.Key.Key_Left:
+                shift_frames = -int(fps)  # -1 секунда
+            elif key == Qt.Key.Key_Right:
+                shift_frames = int(fps)   # +1 секунда
+
+            if shift_frames != 0:
+                # Проверить границы видео
+                total_frames = self.controller.get_total_frames()
+                new_start = max(0, marker.start_frame + shift_frames)
+                new_end = min(total_frames - 1, marker.end_frame + shift_frames)
+
+                # Сдвинуть только если не выходит за границы
+                if new_start >= 0 and new_end < total_frames:
+                    marker.start_frame = new_start
+                    marker.end_frame = new_end
+                    self.controller.markers_changed.emit()
+                    self._update_marker_list()
+                event.accept()
+                return
+
+        # Передать событие дальше если не обработали
+        super().keyPressEvent(event)
+
+    def dropEvent(self, event):
+        """Обработка перетаскивания строк в таблице маркеров."""
+        # Вызвать стандартную обработку drop для QTableWidget
+        super().dropEvent(event)
+
+        # После перетаскивания пересобрать список markers в новом порядке
+        self._reorder_markers_from_table()
+
+    def _reorder_markers_from_table(self):
+        """Пересобрать список markers на основе порядка строк в таблице."""
+        # Создать новый список markers в порядке UserRole из таблицы
+        new_markers = []
+
+        # Собираем все маркеры в порядке их появления в таблице (с учётом фильтров)
+        for row in range(self.markers_table.rowCount()):
+            id_item = self.markers_table.item(row, 0)  # Колонка с ID
+            if id_item:
+                marker_idx = id_item.data(Qt.ItemDataRole.UserRole)
+                if marker_idx is not None and isinstance(marker_idx, int):
+                    if 0 <= marker_idx < len(self.controller.markers):
+                        new_markers.append(self.controller.markers[marker_idx])
+
+        # Если собрали все маркеры, обновить список
+        if len(new_markers) == len(self.controller.markers):
+            self.controller.markers = new_markers
+            self.controller.markers_changed.emit()
+            # Обновить нумерацию в таблице
+            self._update_marker_list()
 
     def _setup_drawing_toolbar(self, parent_layout):
         """Создать панель инструментов рисования."""
@@ -466,6 +594,12 @@ class PreviewWindow(QMainWindow):
         self.markers_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.markers_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
+        # Настройка Drag & Drop для перетаскивания строк
+        self.markers_table.setDragEnabled(True)
+        self.markers_table.setAcceptDrops(True)
+        self.markers_table.setDragDropMode(QTableWidget.DragDropMode.InternalMove)
+        self.markers_table.setDropIndicatorShown(True)
+
         # Настройка заголовков
         header = self.markers_table.horizontalHeader()
         header.setStretchLastSection(True)
@@ -488,25 +622,64 @@ class PreviewWindow(QMainWindow):
         self.markers_table.setItemDelegateForColumn(2, self.event_badge_delegate)  # Колонка "Событие"
 
         list_layout.addWidget(self.markers_table)
-        
-        # Кнопки
-        btn_layout = QHBoxLayout()
-        
-        edit_btn = QPushButton("✎ Edit")
-        edit_btn.setToolTip("Edit selected segment")
-        edit_btn.clicked.connect(self._on_edit_marker)
-        btn_layout.addWidget(edit_btn)
-        
-        delete_btn = QPushButton("🗑️ Delete")
-        delete_btn.setToolTip("Delete selected segment")
-        delete_btn.clicked.connect(self._on_delete_marker)
-        btn_layout.addWidget(delete_btn)
-        
-        list_layout.addLayout(btn_layout)
-        
+
+        # ===== ПАНЕЛЬ "ИНСПЕКТОР" =====
+        self._setup_inspector_panel(list_layout)
+
         main_layout.addLayout(list_layout, 3)
-        
+
         central.setLayout(main_layout)
+
+    def _setup_inspector_panel(self, parent_layout):
+        """Создать панель инспектора свойств события."""
+        # Группа "Свойства события"
+        inspector_group = QGroupBox("Свойства события")
+        inspector_layout = QVBoxLayout()
+        inspector_layout.setSpacing(5)
+
+        # Форма с полями
+        form_layout = QFormLayout()
+        form_layout.setSpacing(3)
+
+        # Тип события
+        self.event_type_combo = QComboBox()
+        self.event_type_combo.setToolTip("Тип события")
+        self.event_type_combo.currentTextChanged.connect(self._on_inspector_event_type_changed)
+        form_layout.addRow("Тип:", self.event_type_combo)
+
+        # Время начала
+        self.start_time_edit = QLineEdit()
+        self.start_time_edit.setPlaceholderText("00:00")
+        self.start_time_edit.setToolTip("Время начала события (ММ:СС)")
+        self.start_time_edit.setMaximumWidth(80)
+        self.start_time_edit.editingFinished.connect(self._on_inspector_start_time_changed)
+        form_layout.addRow("Начало:", self.start_time_edit)
+
+        # Время конца
+        self.end_time_edit = QLineEdit()
+        self.end_time_edit.setPlaceholderText("00:00")
+        self.end_time_edit.setToolTip("Время конца события (ММ:СС)")
+        self.end_time_edit.setMaximumWidth(80)
+        self.end_time_edit.editingFinished.connect(self._on_inspector_end_time_changed)
+        form_layout.addRow("Конец:", self.end_time_edit)
+
+        # Заметки
+        self.notes_edit = QLineEdit()
+        self.notes_edit.setPlaceholderText("Комментарий к событию...")
+        self.notes_edit.setToolTip("Заметки к событию")
+        self.notes_edit.editingFinished.connect(self._on_inspector_notes_changed)
+        form_layout.addRow("Заметка:", self.notes_edit)
+
+        inspector_layout.addLayout(form_layout)
+
+        # Заполнить комбо-бокс типов событий
+        self._update_inspector_event_types()
+
+        inspector_group.setLayout(inspector_layout)
+        parent_layout.addWidget(inspector_group)
+
+        # Подключить сигналы для обновления инспектора при выборе строки
+        self.markers_table.itemSelectionChanged.connect(self._on_marker_selection_changed)
 
     def _create_event_item_with_badge(self, event_name: str) -> QTableWidgetItem:
         """Создать ячейку события с цветным маркером."""
@@ -685,23 +858,30 @@ class PreviewWindow(QMainWindow):
         self._update_slider()
 
     def _on_edit_marker(self):
-        """Отредактировать выбранный отрезок."""
-        current_row = self.markers_table.currentRow()
-        if current_row < 0:
+        """Открыть окно редактирования инстанса."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
             return
 
-        item = self.markers_table.item(current_row, 0)  # Колонка с ID
-        if not item:
-            return
+        # Важно: сохраните ссылку на окно в атрибуте класса, иначе сборщик мусора его закроет
+        # Если окно уже открыто, можно закрыть старое или обновить его
+        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+             self.instance_edit_window.close()
 
-        marker_idx = int(item.data(Qt.ItemDataRole.UserRole))
-        from .edit_segment_dialog import EditSegmentDialog
-        marker = self.controller.markers[marker_idx]
-        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
-        if dialog.exec():
-            self.controller.markers[marker_idx] = dialog.get_marker()
-            self.controller.markers_changed.emit()
-        self._update_marker_list()
+        # Создаем новое окно
+        from .instance_edit_window import InstanceEditWindow
+        self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+
+        # Подключаем сигнал обновления, чтобы таблица в PreviewWindow обновлялась сразу
+        self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
+
+        self.instance_edit_window.show()
+
+    def _on_instance_updated_externally(self, marker):
+        """Вызывается, когда маркер изменен в окне Instance Editor."""
+        self.controller.markers_changed.emit()  # Сигнализируем контроллеру
+        self._update_marker_list()             # Обновляем таблицу
+        # Опционально: восстановить выделение строки
 
     def _on_delete_marker(self):
         """Удалить выбранный отрезок."""
@@ -838,6 +1018,151 @@ class PreviewWindow(QMainWindow):
         minutes = int(seconds) // 60
         secs = int(seconds) % 60
         return f"{minutes:02d}:{secs:02d}"
+
+    def _update_inspector_event_types(self):
+        """Заполнить комбо-бокс типов событий в инспекторе."""
+        self.event_type_combo.blockSignals(True)
+        self.event_type_combo.clear()
+
+        # Добавить все доступные типы событий
+        from ..utils.custom_events import get_custom_event_manager
+        event_manager = get_custom_event_manager()
+        events = event_manager.get_all_events()
+        for event in events:
+            localized_name = event.get_localized_name()
+            self.event_type_combo.addItem(localized_name, event.name)
+
+        self.event_type_combo.blockSignals(False)
+
+    def _on_marker_selection_changed(self):
+        """Обработка изменения выбора строки в таблице - обновить инспектор."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            # Очистить поля инспектора
+            self.event_type_combo.blockSignals(True)
+            self.event_type_combo.setCurrentIndex(-1)
+            self.event_type_combo.blockSignals(False)
+            self.start_time_edit.clear()
+            self.end_time_edit.clear()
+            self.notes_edit.clear()
+            return
+
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            return
+
+        # Заполнить поля данными маркера
+        self.event_type_combo.blockSignals(True)
+        # Найти индекс текущего типа события
+        for i in range(self.event_type_combo.count()):
+            if self.event_type_combo.itemData(i) == marker.event_name:
+                self.event_type_combo.setCurrentIndex(i)
+                break
+        self.event_type_combo.blockSignals(False)
+
+        # Время начала и конца
+        start_time = self._format_time(marker.start_frame / fps)
+        end_time = self._format_time(marker.end_frame / fps)
+        self.start_time_edit.setText(start_time)
+        self.end_time_edit.setText(end_time)
+
+        # Заметки
+        self.notes_edit.setText(marker.note)
+
+    def _on_inspector_event_type_changed(self):
+        """Обработка изменения типа события в инспекторе."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            return
+
+        current_data = self.event_type_combo.currentData()
+        if current_data:
+            marker.event_name = current_data
+            self.controller.markers_changed.emit()
+            self._update_marker_list()
+
+    def _on_inspector_start_time_changed(self):
+        """Обработка изменения времени начала в инспекторе."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            return
+
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            return
+
+        # Парсинг времени из формата MM:SS
+        time_text = self.start_time_edit.text().strip()
+        try:
+            if ":" in time_text:
+                minutes, seconds = map(int, time_text.split(":"))
+                total_seconds = minutes * 60 + seconds
+            else:
+                total_seconds = float(time_text)
+
+            new_start_frame = int(total_seconds * fps)
+
+            # Валидация: начало не может быть больше конца
+            if new_start_frame > marker.end_frame:
+                # Автоматически сдвинуть конец
+                marker.end_frame = max(marker.end_frame, new_start_frame + int(fps))
+
+            marker.start_frame = max(0, new_start_frame)
+            self.controller.markers_changed.emit()
+            self._update_marker_list()
+            # Обновить поле в инспекторе
+            self._on_marker_selection_changed()
+
+        except (ValueError, IndexError):
+            # Восстановить предыдущее значение
+            self._on_marker_selection_changed()
+
+    def _on_inspector_end_time_changed(self):
+        """Обработка изменения времени конца в инспекторе."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            return
+
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            return
+
+        # Парсинг времени из формата MM:SS
+        time_text = self.end_time_edit.text().strip()
+        try:
+            if ":" in time_text:
+                minutes, seconds = map(int, time_text.split(":"))
+                total_seconds = minutes * 60 + seconds
+            else:
+                total_seconds = float(time_text)
+
+            new_end_frame = int(total_seconds * fps)
+            total_frames = self.controller.get_total_frames()
+
+            # Валидация: конец не может быть меньше начала
+            if new_end_frame < marker.start_frame:
+                # Автоматически сдвинуть начало
+                marker.start_frame = max(0, new_end_frame - int(fps))
+
+            marker.end_frame = min(total_frames - 1, new_end_frame)
+            self.controller.markers_changed.emit()
+            self._update_marker_list()
+            # Обновить поле в инспекторе
+            self._on_marker_selection_changed()
+
+        except (ValueError, IndexError):
+            # Восстановить предыдущее значение
+            self._on_marker_selection_changed()
+
+    def _on_inspector_notes_changed(self):
+        """Обработка изменения заметок в инспекторе."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            return
+
+        marker.note = self.notes_edit.text().strip()
+        self.controller.markers_changed.emit()
+        self._update_marker_list()
 
     def _get_dark_stylesheet(self) -> str:
         """Тёмный стиль."""
