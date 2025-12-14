@@ -871,13 +871,15 @@ class PreviewWindow(QMainWindow):
         # Создаем новое окно
         from .instance_edit_window import InstanceEditWindow
         self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+        # Сохраняем индекс маркера для обновления
+        self.instance_edit_window._marker_idx = marker_idx
 
         # Подключаем сигнал обновления, чтобы таблица в PreviewWindow обновлялась сразу
         self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
 
         self.instance_edit_window.show()
 
-    def _on_instance_updated_externally(self, marker):
+    def _on_instance_updated_externally(self):
         """Вызывается, когда маркер изменен в окне Instance Editor."""
         self.controller.markers_changed.emit()  # Сигнализируем контроллеру
         self._update_marker_list()             # Обновляем таблицу

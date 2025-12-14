@@ -48,8 +48,17 @@ class VisualTimeline(QWidget):
         self.hover_mode = None
         self.margin_x = 15
 
+        # Фиксация масштаба для предотвращения нежелательного зума при редактировании
+        self.zoom_locked = False
+        self.locked_visible_start = 0
+        self.locked_visible_end = 0
+
     def _get_visible_range(self):
         """Вычисляет, какой диапазон кадров сейчас виден на таймлайне."""
+        if self.zoom_locked:
+            # Возвращаем зафиксированную область
+            return self.locked_visible_start, self.locked_visible_end
+
         # Центр видимой области - это центр текущего отрезка
         # Но мы динамически расширяем область, чтобы всегда видеть границы + запас
 
@@ -58,6 +67,16 @@ class VisualTimeline(QWidget):
         visible_end = min(self.total_video_frames, self.end_frame + self.padding_frames)
 
         return visible_start, visible_end
+
+    def lock_zoom(self):
+        """Зафиксировать текущую видимую область масштаба."""
+        self.locked_visible_start, self.locked_visible_end = self._get_visible_range()
+        self.zoom_locked = True
+
+    def unlock_zoom(self):
+        """Разблокировать масштаб."""
+        self.zoom_locked = False
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -89,6 +108,18 @@ class VisualTimeline(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.margin_x, bar_y, draw_w, bar_h, 4, 4)
 
+        # 1.5. Сетка времени (вертикальные линии)
+        painter.setPen(QPen(QColor("#555555"), 1, Qt.SolidLine))
+        # Рисуем линии каждые 5 секунд
+        grid_interval_seconds = 5
+        grid_interval_frames = int(grid_interval_seconds * self.fps)
+
+        start_grid_frame = (vis_start // grid_interval_frames) * grid_interval_frames
+        for frame in range(start_grid_frame, vis_end + 1, grid_interval_frames):
+            if frame >= vis_start and frame <= vis_end:
+                x = self.margin_x + ((frame - vis_start) / vis_duration) * draw_w
+                painter.drawLine(int(x), int(bar_y), int(x), int(bar_y + bar_h))
+
         # 2. Активная зона (Сам клип)
         # Ограничиваем рисование, чтобы не вылезало за margin
         rect_x = max(self.margin_x, x_start)
@@ -118,22 +149,15 @@ class VisualTimeline(QWidget):
         if x_end <= self.margin_x + draw_w:
             color = QColor("#FFFFFF") if (self.hover_mode == 'end' or self.dragging_mode == 'end') else QColor("#CCCCCC")
             painter.setBrush(QBrush(color))
-            # Рисуем правую скобку
             painter.drawRoundedRect(int(x_end), int(handle_y), 4, int(handle_h), 2, 2)
 
-        # 4. Playhead (Курсор)
+        # 4. Поплавок (Playhead) - индикатор текущей позиции воспроизведения
         if self.margin_x <= x_curr <= self.margin_x + draw_w:
-            painter.setPen(QPen(QColor("#FF4444"), 2))
-            painter.drawLine(int(x_curr), int(bar_y - 8), int(x_curr), int(bar_y + bar_h + 8))
+            painter.setPen(QPen(QColor("#FFFF00"), 3, Qt.SolidLine))  # Желтая линия толщиной 3px
+            painter.drawLine(int(x_curr), int(bar_y - 6), int(x_curr), int(bar_y + bar_h + 6))
 
-            # Треугольник сверху курсора
-            path = QPainterPath()
-            path.moveTo(x_curr, bar_y - 8)
-            path.lineTo(x_curr - 4, bar_y - 12)
-            path.lineTo(x_curr + 4, bar_y - 12)
-            path.closeSubpath()
-            painter.setBrush(QBrush(QColor("#FF4444")))
-            painter.drawPath(path)
+
+
 
     def _get_frame_from_x(self, x):
         vis_start, vis_end = self._get_visible_range()
@@ -229,7 +253,7 @@ class InstanceEditWindow(QMainWindow):
     """
 
     # Сигналы
-    marker_updated = Signal(Marker)  # Маркер изменился
+    marker_updated = Signal()        # Маркер изменился
     accepted = Signal()              # Окно принято (сохранено)
 
     def __init__(self, marker: Marker, controller, parent=None):
@@ -256,12 +280,16 @@ class InstanceEditWindow(QMainWindow):
         self.playback_timer.timeout.connect(self._on_playback_tick)
         self.loop_enabled = True
 
+        # Активная точка редактирования (IN или OUT)
+        self.active_point = 'out'  # По умолчанию OUT (соответствует текущей инициализации)
+
         self._setup_ui()
         self._setup_shortcuts()
 
-        # Инициализация
-        self.controller.seek_frame(self.marker.start_frame)
+        # Инициализация - устанавливаем playhead на конец отрезка (OUT)
+        self.controller.seek_frame(self.marker.end_frame)
         self._update_ui_from_marker()
+        self._update_active_point_visual()  # Инициализируем визуальное выделение активной точки
         self._display_current_frame()
 
     def _setup_ui(self):
@@ -458,7 +486,10 @@ class InstanceEditWindow(QMainWindow):
         self.addAction(QAction("Accept", self, shortcut=QKeySequence(Qt.Key.Key_Return), triggered=self._accept_changes))
         self.addAction(QAction("Accept Enter", self, shortcut=QKeySequence(Qt.Key.Key_Enter), triggered=self._accept_changes))
 
-        # 6. Закрытие
+        # 6. Переключение активной точки (Tab)
+        self.addAction(QAction("Toggle Active Point", self, shortcut=QKeySequence(Qt.Key.Key_Tab), triggered=self._toggle_active_point))
+
+        # 7. Закрытие
         self.addAction(QAction("Close", self, shortcut=QKeySequence(Qt.Key.Key_Escape), triggered=self.close))
         self.addAction(QAction("Close W", self, shortcut=QKeySequence("Ctrl+W"), triggered=self.close))
 
@@ -469,7 +500,7 @@ class InstanceEditWindow(QMainWindow):
         self.marker.start_frame = start
         self.marker.end_frame = end
         self._update_ui_from_marker()
-        self.marker_updated.emit(self.marker)  # Уведомляем систему
+        self.marker_updated.emit()  # Уведомляем систему
 
         # Если меняем начало - перематываем туда, чтобы видеть кадр
         if abs(self.controller.get_current_frame_idx() - start) < abs(self.controller.get_current_frame_idx() - end):
@@ -490,7 +521,7 @@ class InstanceEditWindow(QMainWindow):
             self._update_ui_from_marker()
             self.controller.seek_frame(new_start)
             self._display_current_frame()
-            self.marker_updated.emit(self.marker)
+            self.marker_updated.emit()
 
     def _nudge_out(self, delta):
         new_end = min(self.total_video_frames, self.marker.end_frame + delta)
@@ -499,42 +530,51 @@ class InstanceEditWindow(QMainWindow):
             self._update_ui_from_marker()
             self.controller.seek_frame(new_end)
             self._display_current_frame()
-            self.marker_updated.emit(self.marker)
+            self.marker_updated.emit()
 
     def _set_in_point(self):
         curr = self.controller.get_current_frame_idx()
         if curr < self.marker.end_frame:
             self.marker.start_frame = curr
             self._update_ui_from_marker()
-            self.marker_updated.emit(self.marker)
+            self.marker_updated.emit()
 
     def _set_out_point(self):
         curr = self.controller.get_current_frame_idx()
         if curr > self.marker.start_frame:
             self.marker.end_frame = curr
             self._update_ui_from_marker()
-            self.marker_updated.emit(self.marker)
+            self.marker_updated.emit()
 
     def _step_frame(self, frames):
-        """Перемещение курсора воспроизведения (Playhead) без изменения границ."""
+        """Перемещение активной точки редактирования (IN или OUT) и синхронизация playhead."""
         # Если видео играло, ставим на паузу (обычно так удобнее для покадрового)
         if self.is_playing:
             self._toggle_play()
 
-        current_frame = self.controller.get_current_frame_idx()
-        new_frame = current_frame + frames
-
-        # Ограничиваем рамками видео
-        new_frame = max(0, min(new_frame, self.total_video_frames - 1))
-
-        self.controller.seek_frame(new_frame)
-        self.timeline.set_current_frame(new_frame)
-        self._display_current_frame()
+        if self.active_point == 'in':
+            # Перемещаем IN точку
+            new_start = max(0, min(self.marker.start_frame + frames, self.marker.end_frame - 1))
+            if new_start != self.marker.start_frame:
+                self.marker.start_frame = new_start
+                self._update_ui_from_marker()
+                self.controller.seek_frame(new_start)
+                self._display_current_frame()
+                self.marker_updated.emit()
+        else:  # active_point == 'out'
+            # Перемещаем OUT точку
+            new_end = max(self.marker.start_frame + 1, min(self.marker.end_frame + frames, self.total_video_frames - 1))
+            if new_end != self.marker.end_frame:
+                self.marker.end_frame = new_end
+                self._update_ui_from_marker()
+                self.controller.seek_frame(new_end)
+                self._display_current_frame()
+                self.marker_updated.emit()
 
     def _accept_changes(self):
         """Сохранить изменения и закрыть окно."""
         # Финальное обновление маркера
-        self.marker_updated.emit(self.marker)
+        self.marker_updated.emit()
 
         # Сигнал о принятии изменений
         self.accepted.emit()
@@ -619,11 +659,45 @@ class InstanceEditWindow(QMainWindow):
             event = event_manager.get_event(current_data)
             event_display_name = event.get_localized_name() if event else current_data
             self.setWindowTitle(f"Instance Edit - {event_display_name}")
-            self.marker_updated.emit(self.marker)
+            self.marker_updated.emit()
 
     def _on_note_changed(self, text):
         self.marker.note = text
-        self.marker_updated.emit(self.marker)
+        self.marker_updated.emit()
+
+    def _toggle_active_point(self):
+        """Переключение активной точки редактирования между IN и OUT."""
+        self.active_point = 'out' if self.active_point == 'in' else 'in'
+        self._update_active_point_visual()
+
+        # Фиксируем масштаб при переключении, чтобы предотвратить нежелательное масштабирование
+        self.timeline.lock_zoom()
+
+        # Перемещаем playhead к новой активной точке
+        active_frame = self.marker.start_frame if self.active_point == 'in' else self.marker.end_frame
+        self.controller.seek_frame(active_frame)
+        self._display_current_frame()
+
+    def _update_active_point_visual(self):
+        """Обновление визуального выделения активной точки (IN или OUT)."""
+        # Найдем группы IN и OUT в layout
+        controls_layout = self.findChild(QHBoxLayout)
+        if not controls_layout:
+            return
+
+        # Найдем группы по индексам (IN - индекс 0, OUT - индекс 4)
+        in_group = controls_layout.itemAt(0).widget() if controls_layout.count() > 0 else None
+        out_group = controls_layout.itemAt(4).widget() if controls_layout.count() > 4 else None
+
+        if in_group and out_group:
+            if self.active_point == 'in':
+                # IN активна - зеленая рамка
+                in_group.setStyleSheet("background-color: #2a2a2a; border: 2px solid #00AA00; border-radius: 4px;")
+                out_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
+            else:
+                # OUT активна - зеленая рамка
+                in_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
+                out_group.setStyleSheet("background-color: #2a2a2a; border: 2px solid #00AA00; border-radius: 4px;")
 
     def closeEvent(self, event):
         self.playback_timer.stop()

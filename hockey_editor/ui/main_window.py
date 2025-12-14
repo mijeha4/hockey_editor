@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from .timeline_graphics import TimelineWidget
-from .edit_segment_dialog import EditSegmentDialog
+from .instance_edit_window import InstanceEditWindow
 from .settings_dialog import SettingsDialog
 from .event_shortcut_list_widget import EventShortcutListWidget
 from .segment_list_widget import SegmentListWidget
@@ -444,12 +444,18 @@ class MainWindow(QMainWindow):
         """Двойной клик на отрезок = редактирование."""
         marker_idx = item.data(Qt.ItemDataRole.UserRole)
         marker = self.controller.markers[marker_idx]
-        dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
-        if dialog.exec():
-            new_marker = dialog.get_marker()
-            self.controller.markers[marker_idx] = new_marker
-            self.controller.markers_changed.emit()
-            self.controller.timeline_update.emit()
+
+        # Создать InstanceEditWindow вместо EditSegmentDialog
+        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+            self.instance_edit_window.close()
+
+        self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+        # Сохраняем индекс маркера для обновления
+        self.instance_edit_window._marker_idx = marker_idx
+        self.instance_edit_window.marker_updated.connect(
+            lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+        )
+        self.instance_edit_window.show()
 
     def _on_delete_marker(self):
         """Удалить выбранный отрезок."""
@@ -468,12 +474,18 @@ class MainWindow(QMainWindow):
         """Обработка запроса редактирования сегмента."""
         if 0 <= marker_idx < len(self.controller.markers):
             marker = self.controller.markers[marker_idx]
-            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
-            if dialog.exec():
-                new_marker = dialog.get_marker()
-                self.controller.markers[marker_idx] = new_marker
-                self.controller.markers_changed.emit()
-                self.controller.timeline_update.emit()
+
+            # Создать InstanceEditWindow вместо EditSegmentDialog
+            if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+                self.instance_edit_window.close()
+
+            self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+            # Сохраняем индекс маркера для обновления
+            self.instance_edit_window._marker_idx = marker_idx
+            self.instance_edit_window.marker_updated.connect(
+                lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+            )
+            self.instance_edit_window.show()
 
     def _on_segment_delete_requested(self, marker_idx: int):
         """Обработка запроса удаления сегмента."""
@@ -809,12 +821,24 @@ class MainWindow(QMainWindow):
         """Открыть редактор сегмента (вызывается из timeline при double-click)."""
         if 0 <= marker_idx < len(self.controller.markers):
             marker = self.controller.markers[marker_idx]
-            dialog = EditSegmentDialog(marker, self.controller.get_fps(), self.controller, self)
-            if dialog.exec():
-                new_marker = dialog.get_marker()
-                self.controller.markers[marker_idx] = new_marker
-                self.controller.markers_changed.emit()
-                self.controller.timeline_update.emit()
+
+            # Создать InstanceEditWindow вместо EditSegmentDialog
+            if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+                self.instance_edit_window.close()
+
+            self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+            # Сохраняем индекс маркера для обновления
+            self.instance_edit_window._marker_idx = marker_idx
+            self.instance_edit_window.marker_updated.connect(
+                lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+            )
+            self.instance_edit_window.show()
+
+    def _on_instance_updated(self, marker_idx: int):
+        """Обработка обновления маркера из InstanceEditWindow."""
+        # Маркер уже обновлен через ссылку, просто обновить UI
+        self.controller.markers_changed.emit()
+        self.controller.timeline_update.emit()
     
     def _update_status_bar(self):
         """Обновить расширенный статус-бар с подробной информацией."""
