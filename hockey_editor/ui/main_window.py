@@ -479,7 +479,13 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
                 self.instance_edit_window.close()
 
-            self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+            # Получить отфильтрованные маркеры и найти индекс текущего маркера в фильтре
+            filtered_markers = self._get_filtered_markers()
+            current_filtered_idx = self._find_marker_in_filtered_list(marker_idx, filtered_markers)
+
+            self.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, filtered_markers, current_filtered_idx, self
+            )
             # Сохраняем индекс маркера для обновления
             self.instance_edit_window._marker_idx = marker_idx
             self.instance_edit_window.marker_updated.connect(
@@ -547,6 +553,21 @@ class MainWindow(QMainWindow):
             return False
 
         return True
+
+    def _get_filtered_markers(self):
+        """Получить список отфильтрованных маркеров в формате (original_idx, marker)."""
+        filtered_markers = []
+        for idx, marker in enumerate(self.controller.markers):
+            if self._passes_filters(marker):
+                filtered_markers.append((idx, marker))
+        return filtered_markers
+
+    def _find_marker_in_filtered_list(self, original_marker_idx: int, filtered_markers: list):
+        """Найти индекс маркера в отфильтрованном списке по оригинальному индексу."""
+        for filtered_idx, (orig_idx, marker) in enumerate(filtered_markers):
+            if orig_idx == original_marker_idx:
+                return filtered_idx
+        return 0  # По умолчанию первый, если не найден
 
     def _on_recording_status_changed(self, event_type: str, status: str):
         """Изменение статуса записи."""
@@ -826,7 +847,13 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
                 self.instance_edit_window.close()
 
-            self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+            # Получить отфильтрованные маркеры и найти индекс текущего маркера в фильтре
+            filtered_markers = self._get_filtered_markers()
+            current_filtered_idx = self._find_marker_in_filtered_list(marker_idx, filtered_markers)
+
+            self.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, filtered_markers, current_filtered_idx, self
+            )
             # Сохраняем индекс маркера для обновления
             self.instance_edit_window._marker_idx = marker_idx
             self.instance_edit_window.marker_updated.connect(

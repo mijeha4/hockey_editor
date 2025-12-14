@@ -459,12 +459,24 @@ class PreviewWindow(QMainWindow):
             self.drawing_overlay.set_tool(DrawingTool.NONE)
         elif tool_id == 1:  # Линия
             self.drawing_overlay.set_tool(DrawingTool.LINE)
+            # Автопауза при выборе инструмента рисования
+            if self.is_playing:
+                self._on_play_pause_clicked()
         elif tool_id == 2:  # Прямоугольник
             self.drawing_overlay.set_tool(DrawingTool.RECTANGLE)
+            # Автопауза при выборе инструмента рисования
+            if self.is_playing:
+                self._on_play_pause_clicked()
         elif tool_id == 3:  # Круг
             self.drawing_overlay.set_tool(DrawingTool.CIRCLE)
+            # Автопауза при выборе инструмента рисования
+            if self.is_playing:
+                self._on_play_pause_clicked()
         elif tool_id == 4:  # Стрелка
             self.drawing_overlay.set_tool(DrawingTool.ARROW)
+            # Автопауза при выборе инструмента рисования
+            if self.is_playing:
+                self._on_play_pause_clicked()
 
     def _on_color_changed(self):
         """Обработка изменения цвета."""
@@ -588,8 +600,8 @@ class PreviewWindow(QMainWindow):
         self.markers_table = QTableWidget()
         self.markers_table.setColumnCount(4)
         self.markers_table.setHorizontalHeaderLabels(["№", "Время", "Событие", "Длительность"])
-        self.markers_table.setToolTip("Click to preview segment")
-        self.markers_table.itemDoubleClicked.connect(self._on_marker_selected)
+        self.markers_table.setToolTip("Click to preview segment, Double-click to edit")
+        self.markers_table.itemDoubleClicked.connect(self._on_marker_double_clicked)
         self.markers_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.markers_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.markers_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -622,9 +634,6 @@ class PreviewWindow(QMainWindow):
         self.markers_table.setItemDelegateForColumn(2, self.event_badge_delegate)  # Колонка "Событие"
 
         list_layout.addWidget(self.markers_table)
-
-        # ===== ПАНЕЛЬ "ИНСПЕКТОР" =====
-        self._setup_inspector_panel(list_layout)
 
         main_layout.addLayout(list_layout, 3)
 
@@ -784,6 +793,41 @@ class PreviewWindow(QMainWindow):
         if not self.is_playing:
             self._on_play_pause_clicked()
 
+    def _on_marker_double_clicked(self, item):
+        """Двойной клик по строке = открыть Instance Edit Window."""
+        marker_idx, marker = self._get_selected_marker()
+        if marker is None:
+            return
+
+        # Поставить на паузу перед открытием редактора
+        if self.is_playing:
+            self._on_play_pause_clicked()
+
+        # Если окно уже открыто, закрыть старое
+        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+            self.instance_edit_window.close()
+
+        # Создать список отфильтрованных маркеров для навигации
+        filtered_markers = []
+        for idx, m in enumerate(self.controller.markers):
+            if self._passes_filters(m):
+                filtered_markers.append((idx, m))
+
+        # Найти индекс текущего маркера в отфильтрованном списке
+        current_filtered_idx = None
+        for i, (orig_idx, m) in enumerate(filtered_markers):
+            if orig_idx == marker_idx:
+                current_filtered_idx = i
+                break
+
+        # Создать новое окно редактирования
+        from .instance_edit_window import InstanceEditWindow
+        self.instance_edit_window = InstanceEditWindow(
+            marker, self.controller, filtered_markers, current_filtered_idx, self
+        )
+        self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
+        self.instance_edit_window.show()
+
     def _on_play_pause_clicked(self):
         """Кнопка Play/Pause."""
         if not self.controller.markers:
@@ -805,23 +849,47 @@ class PreviewWindow(QMainWindow):
             self.playback_timer.start(self.frame_time_ms)
 
     def _on_playback_tick(self):
-        """Таймер воспроизведения."""
-        if not self.controller.markers or self.current_marker_idx >= len(self.controller.markers):
+        """Таймер воспроизведения с логикой плейлиста."""
+        if not self.controller.markers:
             self.is_playing = False
             self.play_btn.setText("▶ Play")
             self.playback_timer.stop()
             return
-        
+
+        # Получить текущий маркер
         marker = self.controller.markers[self.current_marker_idx]
         current_frame = self.controller.processor.get_current_frame_idx()
-        
-        # Если достигли конца отрезка
+
+        # 1. Если достигли конца текущего отрезка
         if current_frame >= marker.end_frame:
-            # Переместиться на следующий отрезок (с фильтрацией)
-            self._go_to_next_marker()
+            # ---> ЛОГИКА АВТОПЕРЕХОДА <---
+
+            # Есть ли следующий маркер в отфильтрованном списке?
+            next_row = self.markers_table.currentRow() + 1
+
+            if next_row < self.markers_table.rowCount():
+                # Переключаемся на следующую строку в таблице
+                self.markers_table.selectRow(next_row)
+
+                # Получаем данные следующего маркера
+                item = self.markers_table.item(next_row, 0)
+                next_marker_idx = item.data(Qt.ItemDataRole.UserRole)
+
+                # Перематываем и продолжаем играть
+                self.current_marker_idx = next_marker_idx
+                next_marker = self.controller.markers[next_marker_idx]
+
+                # Мгновенный переход (без паузы между клипами)
+                self.controller.seek_frame(next_marker.start_frame)
+
+            else:
+                # Конец плейлиста -> Стоп
+                self.is_playing = False
+                self.play_btn.setText("▶ Play")
+                self.playback_timer.stop()
             return
-        
-        # Воспроизвести следующий кадр
+
+        # 2. Обычное воспроизведение
         self.controller.processor.advance_frame()
         self._display_current_frame()
         self._update_slider()

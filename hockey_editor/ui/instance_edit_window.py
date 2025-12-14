@@ -256,20 +256,31 @@ class InstanceEditWindow(QMainWindow):
     marker_updated = Signal()        # Маркер изменился
     accepted = Signal()              # Окно принято (сохранено)
 
-    def __init__(self, marker: Marker, controller, parent=None):
+    def __init__(self, marker: Marker, controller, filtered_markers=None, current_marker_idx=0, parent=None):
         super().__init__(parent)
         self.marker = marker  # Ссылка на редактируемый объект
         self.controller = controller
         self.fps = controller.get_fps() if controller.get_fps() > 0 else 30.0
 
+        # Навигация между маркерами
+        self.filtered_markers = filtered_markers or []  # Список (original_idx, marker) кортежей
+        self.current_marker_idx = current_marker_idx  # Индекс текущего маркера в filtered_markers
+
         # Получаем полную длительность видео для слайдера
         self.total_video_frames = controller.get_total_frames()
 
-        # Используем event_name для заголовка
+        # Используем event_name для заголовка с прогрессом
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(marker.event_name)
         event_display_name = event.get_localized_name() if event else marker.event_name
-        title = f"Instance Edit - {event_display_name}"
+
+        # Добавляем прогресс, если есть отфильтрованные маркеры
+        if filtered_markers:
+            progress = f" ({current_marker_idx + 1}/{len(filtered_markers)})"
+            title = f"Instance Edit - {event_display_name}{progress}"
+        else:
+            title = f"Instance Edit - {event_display_name}"
+
         self.setWindowTitle(title)
         self.resize(1000, 700)
         self.setStyleSheet(self._get_dark_stylesheet())
@@ -290,6 +301,7 @@ class InstanceEditWindow(QMainWindow):
         self.controller.seek_frame(self.marker.end_frame)
         self._update_ui_from_marker()
         self._update_active_point_visual()  # Инициализируем визуальное выделение активной точки
+        self._update_navigation_buttons()  # Обновляем состояние кнопок навигации
         self._display_current_frame()
 
     def _setup_ui(self):
@@ -433,7 +445,62 @@ class InstanceEditWindow(QMainWindow):
 
         # 5. Кнопки действий
         buttons_layout = QHBoxLayout()
-        buttons_layout.addStretch()
+
+        # Кнопки навигации (если есть отфильтрованные маркеры)
+        if self.filtered_markers:
+            # Предыдущий клип
+            self.btn_prev = QPushButton("◀ Предыдущий")
+            self.btn_prev.setMaximumWidth(120)
+            self.btn_prev.setStyleSheet("""
+                QPushButton {
+                    background-color: #333333;
+                    color: white;
+                    border: 1px solid #555555;
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #444444;
+                }
+                QPushButton:pressed {
+                    background-color: #222222;
+                }
+                QPushButton:disabled {
+                    background-color: #222222;
+                    color: #666666;
+                }
+            """)
+            self.btn_prev.clicked.connect(self._navigate_previous)
+            buttons_layout.addWidget(self.btn_prev)
+
+            # Следующий клип
+            self.btn_next = QPushButton("Следующий ▶")
+            self.btn_next.setMaximumWidth(120)
+            self.btn_next.setStyleSheet("""
+                QPushButton {
+                    background-color: #333333;
+                    color: white;
+                    border: 1px solid #555555;
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #444444;
+                }
+                QPushButton:pressed {
+                    background-color: #222222;
+                }
+                QPushButton:disabled {
+                    background-color: #222222;
+                    color: #666666;
+                }
+            """)
+            self.btn_next.clicked.connect(self._navigate_next)
+            buttons_layout.addWidget(self.btn_next)
+
+            buttons_layout.addStretch()
+        else:
+            buttons_layout.addStretch()
 
         # Кнопка Сохранить (зеленая, акцентная)
         self.save_btn = QPushButton("✓ Сохранить")
@@ -571,16 +638,78 @@ class InstanceEditWindow(QMainWindow):
                 self._display_current_frame()
                 self.marker_updated.emit()
 
+    def _navigate_previous(self):
+        """Перейти к предыдущему маркеру в отфильтрованном списке."""
+        if not self.filtered_markers or self.current_marker_idx <= 0:
+            return
+
+        # Автоматически сохранить текущие изменения
+        self.marker_updated.emit()
+
+        # Получить предыдущий маркер
+        prev_idx = self.current_marker_idx - 1
+        original_marker_idx, prev_marker = self.filtered_markers[prev_idx]
+
+        # Создать новое окно редактирования
+        self._open_marker_window(prev_marker, prev_idx)
+
+    def _navigate_next(self):
+        """Перейти к следующему маркеру в отфильтрованном списке."""
+        if not self.filtered_markers or self.current_marker_idx >= len(self.filtered_markers) - 1:
+            return
+
+        # Автоматически сохранить текущие изменения
+        self.marker_updated.emit()
+
+        # Получить следующий маркер
+        next_idx = self.current_marker_idx + 1
+        original_marker_idx, next_marker = self.filtered_markers[next_idx]
+
+        # Создать новое окно редактирования
+        self._open_marker_window(next_marker, next_idx)
+
+    def _open_marker_window(self, marker, marker_idx):
+        """Открыть новое окно редактирования для указанного маркера."""
+        # Закрыть текущее окно
+        self.close()
+
+        # Создать новое окно с тем же parent (main_window)
+        parent = self.parent()
+        if parent and hasattr(parent, 'instance_edit_window'):
+            # Очистить ссылку на старое окно
+            if hasattr(parent.instance_edit_window, '_marker_idx'):
+                old_marker_idx = parent.instance_edit_window._marker_idx
+                # Отключить старый сигнал
+                try:
+                    parent.instance_edit_window.marker_updated.disconnect()
+                except:
+                    pass
+
+            # Создать новое окно
+            parent.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, self.filtered_markers, marker_idx, parent
+            )
+            parent.instance_edit_window._marker_idx = marker_idx  # Для обратной совместимости
+            parent.instance_edit_window.marker_updated.connect(
+                lambda: parent._on_instance_updated(parent.instance_edit_window._marker_idx)
+            )
+            parent.instance_edit_window.show()
+
     def _accept_changes(self):
-        """Сохранить изменения и закрыть окно."""
+        """Сохранить изменения и перейти к следующему маркеру или закрыть окно."""
         # Финальное обновление маркера
         self.marker_updated.emit()
 
         # Сигнал о принятии изменений
         self.accepted.emit()
 
-        # Закрыть окно
-        self.close()
+        # Проверить, есть ли следующий маркер
+        if self.filtered_markers and self.current_marker_idx < len(self.filtered_markers) - 1:
+            # Есть следующий маркер - перейти к нему
+            self._navigate_next()
+        else:
+            # Это последний маркер - закрыть окно
+            self.close()
 
     def _update_ui_from_marker(self):
         # Обновляем слайдер
@@ -677,6 +806,17 @@ class InstanceEditWindow(QMainWindow):
         active_frame = self.marker.start_frame if self.active_point == 'in' else self.marker.end_frame
         self.controller.seek_frame(active_frame)
         self._display_current_frame()
+
+    def _update_navigation_buttons(self):
+        """Обновление состояния кнопок навигации (включены/отключены)."""
+        if not hasattr(self, 'btn_prev') or not hasattr(self, 'btn_next'):
+            return
+
+        # Кнопка "Предыдущий" активна, если есть предыдущий маркер
+        self.btn_prev.setEnabled(self.current_marker_idx > 0)
+
+        # Кнопка "Следующий" активна, если есть следующий маркер
+        self.btn_next.setEnabled(self.current_marker_idx < len(self.filtered_markers) - 1)
 
     def _update_active_point_visual(self):
         """Обновление визуального выделения активной точки (IN или OUT)."""
