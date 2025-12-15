@@ -3,79 +3,213 @@ Preview Window - просмотр и воспроизведение отрезк
 Немодальное окно с видеоплеером и списком отрезков.
 """
 
+import cv2
+import numpy as np
+from typing import Optional
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QListWidget, QListWidgetItem, QTableWidget, QTableWidgetItem,
+    QSlider, QListWidget, QListWidgetItem,
     QCheckBox, QComboBox, QGroupBox, QSpinBox, QLineEdit, QButtonGroup,
-    QHeaderView, QStyledItemDelegate, QStyle, QTextEdit, QTimeEdit, QFormLayout
+    QTextEdit, QTimeEdit, QFormLayout,
+    QFrame, QSizePolicy
 )
-from PySide6.QtGui import QPainter, QPen, QBrush
-from PySide6.QtCore import Qt, QRect
-import cv2
-import numpy as np
-from typing import Optional
 from ..models.marker import Marker, EventType
 from .drawing_overlay import DrawingOverlay, DrawingTool
 
 
-class EventBadgeDelegate(QStyledItemDelegate):
-    """Делегат для отрисовки цветных маркеров в колонке событий."""
+class EventCard(QWidget):
+    """Карточка события с информацией и кнопками действий."""
 
-    def paint(self, painter, option, index):
-        """Отрисовать ячейку с цветным маркером."""
-        # Получить цвет из data
-        color_hex = index.data(Qt.ItemDataRole.UserRole)
-        if color_hex:
-            color = QColor(color_hex)
+    # Сигналы
+    play_requested = Signal(int)  # marker_idx
+    edit_requested = Signal(int)  # marker_idx
+    delete_requested = Signal(int)  # marker_idx
+
+    def __init__(self, marker_idx: int, marker: Marker, fps: float, parent=None):
+        super().__init__(parent)
+        self.marker_idx = marker_idx
+        self.marker = marker
+        self.fps = fps
+        self.is_active = False
+
+        self.setFixedHeight(60)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self._setup_ui()
+        self._update_style()
+
+    def _setup_ui(self):
+        """Создать интерфейс карточки."""
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(8)
+
+        # Левая часть: информация о событии
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+
+        # Верхняя строка: номер + время начала
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(8)
+
+        # Номер события
+        self.id_label = QLabel(f"#{self.marker_idx + 1}")
+        self.id_label.setStyleSheet("font-weight: bold; color: #cccccc;")
+        self.id_label.setFixedWidth(30)
+        top_layout.addWidget(self.id_label)
+
+        # Время начала
+        start_time = self._format_time(self.marker.start_frame / self.fps if self.fps > 0 else 0)
+        self.time_label = QLabel(start_time)
+        self.time_label.setStyleSheet("color: #aaaaaa; font-family: monospace;")
+        top_layout.addWidget(self.time_label)
+
+        top_layout.addStretch()
+        info_layout.addLayout(top_layout)
+
+        # Нижняя строка: название события + длительность
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(8)
+
+        # Название события с цветным маркером
+        event_layout = QHBoxLayout()
+        event_layout.setSpacing(4)
+
+        # Цветной маркер
+        self.color_badge = QLabel()
+        self.color_badge.setFixedSize(10, 10)
+        self.color_badge.setStyleSheet("border-radius: 5px;")
+        event_layout.addWidget(self.color_badge)
+
+        # Название события
+        from ..utils.custom_events import get_custom_event_manager
+        event_manager = get_custom_event_manager()
+        event = event_manager.get_event(self.marker.event_name)
+        event_name = event.get_localized_name() if event else self.marker.event_name
+        self.event_label = QLabel(event_name)
+        self.event_label.setStyleSheet("font-weight: bold; color: #ffffff;")
+        event_layout.addWidget(self.event_label)
+
+        event_layout.addStretch()
+        bottom_layout.addLayout(event_layout)
+
+        # Длительность
+        duration_frames = self.marker.end_frame - self.marker.start_frame
+        duration_time = self._format_time(duration_frames / self.fps if self.fps > 0 else 0)
+        self.duration_label = QLabel(duration_time)
+        self.duration_label.setStyleSheet("color: #aaaaaa; font-family: monospace;")
+        self.duration_label.setFixedWidth(45)
+        bottom_layout.addWidget(self.duration_label)
+
+        info_layout.addLayout(bottom_layout)
+        layout.addLayout(info_layout, 1)
+
+        # Правая часть: кнопки действий
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(2)
+
+        # Кнопка редактирования
+        self.edit_btn = QPushButton("✏")
+        self.edit_btn.setFixedSize(24, 24)
+        self.edit_btn.setToolTip("Редактировать событие")
+        self.edit_btn.clicked.connect(lambda: self.edit_requested.emit(self.marker_idx))
+        buttons_layout.addWidget(self.edit_btn)
+
+        # Кнопка удаления
+        self.delete_btn = QPushButton("🗑")
+        self.delete_btn.setFixedSize(24, 24)
+        self.delete_btn.setToolTip("Удалить событие")
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.marker_idx))
+        buttons_layout.addWidget(self.delete_btn)
+
+        layout.addLayout(buttons_layout)
+
+        # Обновить цвета
+        self._update_colors()
+
+    def _update_colors(self):
+        """Обновить цвета маркера и текста."""
+        from ..utils.custom_events import get_custom_event_manager
+        event_manager = get_custom_event_manager()
+        event = event_manager.get_event(self.marker.event_name)
+
+        if event:
+            color = event.get_qcolor()
+            self.color_badge.setStyleSheet(f"""
+                background-color: {color.name()};
+                border-radius: 5px;
+                border: 1px solid {color.darker(120).name()};
+            """)
         else:
-            color = QColor("#666666")  # Серый по умолчанию
+            self.color_badge.setStyleSheet("""
+                background-color: #666666;
+                border-radius: 5px;
+                border: 1px solid #444444;
+            """)
 
-        # Отрисовать фон ячейки (учитывая выделение)
-        painter.save()
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, option.palette.midlight())
+    def _update_style(self):
+        """Обновить стиль карточки."""
+        base_style = """
+            EventCard {
+                border: 1px solid #444444;
+                border-radius: 6px;
+                background-color: #2a2a2a;
+            }
+            EventCard:hover {
+                border-color: #666666;
+                background-color: #333333;
+            }
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #cccccc;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+                border-radius: 3px;
+                color: #ffffff;
+            }
+        """
+
+        if self.is_active:
+            # Выделенная карточка (воспроизводится)
+            active_style = """
+                EventCard {
+                    border: 2px solid #ffcc00;
+                    border-radius: 6px;
+                    background-color: #3a3a2a;
+                }
+                EventCard:hover {
+                    border-color: #ffaa00;
+                    background-color: #444433;
+                }
+            """
+            self.setStyleSheet(base_style + active_style)
         else:
-            # Использовать цвет фона из data или по умолчанию
-            bg_color = index.data(Qt.ItemDataRole.UserRole + 1)
-            if bg_color:
-                painter.fillRect(option.rect, QColor(bg_color))
-            else:
-                painter.fillRect(option.rect, QColor("#2a2a2a"))
+            self.setStyleSheet(base_style)
 
-        # Отрисовать границы
-        painter.setPen(QPen(QColor("#444444"), 1))
-        painter.drawRect(option.rect.adjusted(0, 0, -1, -1))
-        painter.restore()
+    def set_active(self, active: bool):
+        """Установить статус активной карточки."""
+        if self.is_active != active:
+            self.is_active = active
+            self._update_style()
 
-        # Добавить цветной маркер слева от текста
-        badge_size = 8
-        badge_margin = 4
-        text_rect = option.rect.adjusted(badge_margin + badge_size + 2, 0, 0, 0)
+    def mouseDoubleClickEvent(self, event):
+        """Обработка двойного клика - воспроизведение."""
+        super().mouseDoubleClickEvent(event)
+        self.play_requested.emit(self.marker_idx)
 
-        # Отрисовать цветной круг
-        badge_rect = QRect(
-            option.rect.left() + badge_margin,
-            option.rect.top() + (option.rect.height() - badge_size) // 2,
-            badge_size,
-            badge_size
-        )
+    def _format_time(self, seconds: float) -> str:
+        """Форматировать время MM:SS."""
+        minutes = int(seconds) // 60
+        secs = int(seconds) % 60
+        return f"{minutes:02d}:{secs:02d}"
 
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QBrush(color))
-        painter.setPen(QPen(color.darker(120), 1))
-        painter.drawEllipse(badge_rect)
-        painter.restore()
 
-        # Отрисовать текст с отступом для маркера
-        text = index.data(Qt.ItemDataRole.DisplayRole)
-        if text:
-            painter.setPen(QPen(QColor("#ffffff")))  # Белый текст
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+
 
 
 class PreviewWindow(QMainWindow):
@@ -236,29 +370,7 @@ class PreviewWindow(QMainWindow):
         """Обработка изменения событий - обновить фильтр событий."""
         self._update_event_filter()
 
-    def _get_selected_marker(self):
-        """Получить выбранный маркер из таблицы.
 
-        Returns:
-            tuple: (marker_idx, marker) или (None, None) если ничего не выбрано
-        """
-        current_row = self.markers_table.currentRow()
-        if current_row < 0:
-            return None, None
-
-        # Получить ID маркера из UserRole первой колонки
-        id_item = self.markers_table.item(current_row, 0)  # Колонка "№"
-        if not id_item:
-            return None, None
-
-        marker_idx = id_item.data(Qt.ItemDataRole.UserRole)
-        if marker_idx is None or not isinstance(marker_idx, int):
-            return None, None
-
-        if 0 <= marker_idx < len(self.controller.markers):
-            return marker_idx, self.controller.markers[marker_idx]
-
-        return None, None
 
     def keyPressEvent(self, event):
         """Обработка горячих клавиш для быстрого редактирования маркеров."""
@@ -268,12 +380,12 @@ class PreviewWindow(QMainWindow):
             super().keyPressEvent(event)
             return
 
-        # Получить выбранный маркер
-        marker_idx, marker = self._get_selected_marker()
-        if marker is None:
+        # Для карточек используем текущий активный маркер
+        if not self.controller.markers or self.current_marker_idx >= len(self.controller.markers):
             super().keyPressEvent(event)
             return
 
+        marker = self.controller.markers[self.current_marker_idx]
         fps = self.controller.get_fps()
         if fps <= 0:
             super().keyPressEvent(event)
@@ -304,7 +416,7 @@ class PreviewWindow(QMainWindow):
 
         # Delete - удалить маркер
         elif key == Qt.Key.Key_Delete:
-            self.controller.delete_marker(marker_idx)
+            self.controller.delete_marker(self.current_marker_idx)
             self._update_marker_list()
             event.accept()
             return
@@ -335,34 +447,7 @@ class PreviewWindow(QMainWindow):
         # Передать событие дальше если не обработали
         super().keyPressEvent(event)
 
-    def dropEvent(self, event):
-        """Обработка перетаскивания строк в таблице маркеров."""
-        # Вызвать стандартную обработку drop для QTableWidget
-        super().dropEvent(event)
 
-        # После перетаскивания пересобрать список markers в новом порядке
-        self._reorder_markers_from_table()
-
-    def _reorder_markers_from_table(self):
-        """Пересобрать список markers на основе порядка строк в таблице."""
-        # Создать новый список markers в порядке UserRole из таблицы
-        new_markers = []
-
-        # Собираем все маркеры в порядке их появления в таблице (с учётом фильтров)
-        for row in range(self.markers_table.rowCount()):
-            id_item = self.markers_table.item(row, 0)  # Колонка с ID
-            if id_item:
-                marker_idx = id_item.data(Qt.ItemDataRole.UserRole)
-                if marker_idx is not None and isinstance(marker_idx, int):
-                    if 0 <= marker_idx < len(self.controller.markers):
-                        new_markers.append(self.controller.markers[marker_idx])
-
-        # Если собрали все маркеры, обновить список
-        if len(new_markers) == len(self.controller.markers):
-            self.controller.markers = new_markers
-            self.controller.markers_changed.emit()
-            # Обновить нумерацию в таблице
-            self._update_marker_list()
 
     def _setup_drawing_toolbar(self, parent_layout):
         """Создать панель инструментов рисования."""
@@ -596,124 +681,36 @@ class PreviewWindow(QMainWindow):
         # ===== КОМПАКТНЫЕ ФИЛЬТРЫ =====
         self._setup_filters(list_layout)
 
-        # Таблица отрезков
-        self.markers_table = QTableWidget()
-        self.markers_table.setColumnCount(4)
-        self.markers_table.setHorizontalHeaderLabels(["№", "Время", "Событие", "Длительность"])
-        self.markers_table.setToolTip("Click to preview segment, Double-click to edit")
-        self.markers_table.itemDoubleClicked.connect(self._on_marker_double_clicked)
-        self.markers_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.markers_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.markers_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Список карточек событий
+        self.markers_list = QListWidget()
+        self.markers_list.setStyleSheet("""
+            QListWidget {
+                background-color: #2a2a2a;
+                border: 1px solid #444444;
+                outline: none;
+            }
+            QListWidget::item {
+                border-bottom: 1px solid #333333;
+                padding: 2px;
+            }
+            QListWidget::item:selected {
+                background-color: #1a4d7a;
+            }
+        """)
+        self.markers_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.markers_list.setSpacing(2)
 
-        # Настройка Drag & Drop для перетаскивания строк
-        self.markers_table.setDragEnabled(True)
-        self.markers_table.setAcceptDrops(True)
-        self.markers_table.setDragDropMode(QTableWidget.DragDropMode.InternalMove)
-        self.markers_table.setDropIndicatorShown(True)
-
-        # Настройка заголовков
-        header = self.markers_table.horizontalHeader()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # №
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # Время
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Событие
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # Длительность
-
-        # Ширина колонок
-        self.markers_table.setColumnWidth(0, 30)   # №
-        self.markers_table.setColumnWidth(1, 60)   # Время
-        self.markers_table.setColumnWidth(3, 70)   # Длительность
-
-        # Высота строк
-        self.markers_table.verticalHeader().setDefaultSectionSize(25)
-        self.markers_table.verticalHeader().setVisible(False)
-
-        # Подключить делегат для отрисовки цветных маркеров
-        self.event_badge_delegate = EventBadgeDelegate(self.markers_table)
-        self.markers_table.setItemDelegateForColumn(2, self.event_badge_delegate)  # Колонка "Событие"
-
-        list_layout.addWidget(self.markers_table)
+        list_layout.addWidget(self.markers_list)
 
         main_layout.addLayout(list_layout, 3)
 
         central.setLayout(main_layout)
 
-    def _setup_inspector_panel(self, parent_layout):
-        """Создать панель инспектора свойств события."""
-        # Группа "Свойства события"
-        inspector_group = QGroupBox("Свойства события")
-        inspector_layout = QVBoxLayout()
-        inspector_layout.setSpacing(5)
 
-        # Форма с полями
-        form_layout = QFormLayout()
-        form_layout.setSpacing(3)
-
-        # Тип события
-        self.event_type_combo = QComboBox()
-        self.event_type_combo.setToolTip("Тип события")
-        self.event_type_combo.currentTextChanged.connect(self._on_inspector_event_type_changed)
-        form_layout.addRow("Тип:", self.event_type_combo)
-
-        # Время начала
-        self.start_time_edit = QLineEdit()
-        self.start_time_edit.setPlaceholderText("00:00")
-        self.start_time_edit.setToolTip("Время начала события (ММ:СС)")
-        self.start_time_edit.setMaximumWidth(80)
-        self.start_time_edit.editingFinished.connect(self._on_inspector_start_time_changed)
-        form_layout.addRow("Начало:", self.start_time_edit)
-
-        # Время конца
-        self.end_time_edit = QLineEdit()
-        self.end_time_edit.setPlaceholderText("00:00")
-        self.end_time_edit.setToolTip("Время конца события (ММ:СС)")
-        self.end_time_edit.setMaximumWidth(80)
-        self.end_time_edit.editingFinished.connect(self._on_inspector_end_time_changed)
-        form_layout.addRow("Конец:", self.end_time_edit)
-
-        # Заметки
-        self.notes_edit = QLineEdit()
-        self.notes_edit.setPlaceholderText("Комментарий к событию...")
-        self.notes_edit.setToolTip("Заметки к событию")
-        self.notes_edit.editingFinished.connect(self._on_inspector_notes_changed)
-        form_layout.addRow("Заметка:", self.notes_edit)
-
-        inspector_layout.addLayout(form_layout)
-
-        # Заполнить комбо-бокс типов событий
-        self._update_inspector_event_types()
-
-        inspector_group.setLayout(inspector_layout)
-        parent_layout.addWidget(inspector_group)
-
-        # Подключить сигналы для обновления инспектора при выборе строки
-        self.markers_table.itemSelectionChanged.connect(self._on_marker_selection_changed)
-
-    def _create_event_item_with_badge(self, event_name: str) -> QTableWidgetItem:
-        """Создать ячейку события с цветным маркером."""
-        # Получить цвет события из CustomEventManager
-        from ..utils.custom_events import get_custom_event_manager
-        event_manager = get_custom_event_manager()
-        event = event_manager.get_event(event_name)
-
-        # Создать ячейку с текстом события
-        item = QTableWidgetItem(event_name if not event else event.get_localized_name())
-        item.setForeground(QColor("#ffffff"))  # Белый текст
-
-        # Добавить цветной маркер через data
-        if event:
-            color = event.get_qcolor()
-            # Сохранить цвет в data для использования в делегате отрисовки
-            item.setData(Qt.ItemDataRole.UserRole, color.name())
-        else:
-            item.setData(Qt.ItemDataRole.UserRole, "#666666")  # Серый по умолчанию
-
-        return item
 
     def _update_marker_list(self):
-        """Обновить таблицу отрезков с фильтрацией."""
-        self.markers_table.setRowCount(0)  # Очистить таблицу
+        """Обновить список карточек событий с фильтрацией."""
+        self.markers_list.clear()  # Очистить список
 
         fps = self.controller.get_fps()
         filtered_markers = []  # Список (оригинальный_индекс, marker)
@@ -723,81 +720,41 @@ class PreviewWindow(QMainWindow):
             if self._passes_filters(marker):
                 filtered_markers.append((idx, marker))
 
-        # Заполняем таблицу
-        for row_idx, (original_idx, marker) in enumerate(filtered_markers):
-            self.markers_table.insertRow(row_idx)
+        # Создаем карточки для каждого маркера
+        for original_idx, marker in filtered_markers:
+            # Создать карточку события
+            card = EventCard(original_idx, marker, fps)
+            card.play_requested.connect(self._on_card_play_requested)
+            card.edit_requested.connect(self._on_card_edit_requested)
+            card.delete_requested.connect(self._on_card_delete_requested)
 
-            # Колонка 0: №
-            id_item = QTableWidgetItem(str(original_idx + 1))
-            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            id_item.setData(Qt.ItemDataRole.UserRole, original_idx)  # Сохранить оригинальный индекс
-            self.markers_table.setItem(row_idx, 0, id_item)
+            # Создать элемент списка для карточки
+            item = QListWidgetItem(self.markers_list)
+            item.setSizeHint(card.sizeHint())
+            self.markers_list.setItemWidget(item, card)
 
-            # Колонка 1: Время (начало)
-            start_time = self._format_time(marker.start_frame / fps if fps > 0 else 0)
-            time_item = QTableWidgetItem(start_time)
-            time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.markers_table.setItem(row_idx, 1, time_item)
+            # Сохранить ссылку на карточку для последующего доступа
+            item.setData(Qt.ItemDataRole.UserRole, card)
 
-            # Колонка 2: Событие с цветным маркером
-            event_item = self._create_event_item_with_badge(marker.event_name)
-            self.markers_table.setItem(row_idx, 2, event_item)
+        # Выделить текущую активную карточку
+        self._update_active_card_highlight()
 
-            # Колонка 3: Длительность
-            duration_frames = marker.end_frame - marker.start_frame
-            duration_time = self._format_time(duration_frames / fps if fps > 0 else 0)
-            duration_item = QTableWidgetItem(duration_time)
-            duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.markers_table.setItem(row_idx, 3, duration_item)
-
-        # Выделить текущий активный клип
-        self._update_active_row_highlight()
-
-    def _passes_filters(self, marker):
-        """Проверить, проходит ли маркер через текущие фильтры."""
-        # Фильтр по типу события
-        if self.filter_event_types and marker.event_name not in self.filter_event_types:
-            return False
-
-        # Фильтр по заметкам
-        if self.filter_has_notes and not marker.note.strip():
-            return False
-
-        # Фильтр по поиску в заметках
-        if self.filter_notes_search and self.filter_notes_search not in marker.note.lower():
-            return False
-
-        return True
-
-    def _on_marker_selected(self, item):
-        """Клик на отрезок = воспроизведение с начала."""
-        # Получить текущую строку
-        current_row = self.markers_table.currentRow()
-        if current_row < 0:
-            return
-
-        # Всегда брать ID из первой колонки (колонка 0) текущей строки
-        id_item = self.markers_table.item(current_row, 0)  # Колонка "№"
-        if not id_item:
-            return
-
-        marker_idx = int(id_item.data(Qt.ItemDataRole.UserRole))
+    def _on_card_play_requested(self, marker_idx: int):
+        """Обработка запроса воспроизведения от карточки."""
         self.current_marker_idx = marker_idx
-
         marker = self.controller.markers[marker_idx]
         self.controller.seek_frame(marker.start_frame)
         self._display_current_frame()
         self._update_slider()
+        self._update_active_card_highlight()
 
         # Автоматически начать воспроизведение
         if not self.is_playing:
             self._on_play_pause_clicked()
 
-    def _on_marker_double_clicked(self, item):
-        """Двойной клик по строке = открыть Instance Edit Window."""
-        marker_idx, marker = self._get_selected_marker()
-        if marker is None:
-            return
+    def _on_card_edit_requested(self, marker_idx: int):
+        """Обработка запроса редактирования от карточки."""
+        marker = self.controller.markers[marker_idx]
 
         # Поставить на паузу перед открытием редактора
         if self.is_playing:
@@ -827,6 +784,46 @@ class PreviewWindow(QMainWindow):
         )
         self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
         self.instance_edit_window.show()
+
+    def _on_card_delete_requested(self, marker_idx: int):
+        """Обработка запроса удаления от карточки."""
+        self.controller.delete_marker(marker_idx)
+        self._update_marker_list()
+
+    def _update_active_card_highlight(self):
+        """Выделить активную карточку (которая воспроизводится сейчас)."""
+        # Снять выделение со всех карточек
+        for i in range(self.markers_list.count()):
+            item = self.markers_list.item(i)
+            card = item.data(Qt.ItemDataRole.UserRole)
+            if card:
+                card.set_active(False)
+
+        # Найти и выделить карточку текущего маркера
+        for i in range(self.markers_list.count()):
+            item = self.markers_list.item(i)
+            card = item.data(Qt.ItemDataRole.UserRole)
+            if card and card.marker_idx == self.current_marker_idx:
+                card.set_active(True)
+                break
+
+    def _passes_filters(self, marker):
+        """Проверить, проходит ли маркер через текущие фильтры."""
+        # Фильтр по типу события
+        if self.filter_event_types and marker.event_name not in self.filter_event_types:
+            return False
+
+        # Фильтр по заметкам
+        if self.filter_has_notes and not marker.note.strip():
+            return False
+
+        # Фильтр по поиску в заметках
+        if self.filter_notes_search and self.filter_notes_search not in marker.note.lower():
+            return False
+
+        return True
+
+
 
     def _on_play_pause_clicked(self):
         """Кнопка Play/Pause."""
@@ -864,23 +861,17 @@ class PreviewWindow(QMainWindow):
         if current_frame >= marker.end_frame:
             # ---> ЛОГИКА АВТОПЕРЕХОДА <---
 
-            # Есть ли следующий маркер в отфильтрованном списке?
-            next_row = self.markers_table.currentRow() + 1
+            # Найти следующий маркер в отфильтрованном списке
+            next_marker_idx = self._find_next_filtered_marker(self.current_marker_idx)
 
-            if next_row < self.markers_table.rowCount():
-                # Переключаемся на следующую строку в таблице
-                self.markers_table.selectRow(next_row)
-
-                # Получаем данные следующего маркера
-                item = self.markers_table.item(next_row, 0)
-                next_marker_idx = item.data(Qt.ItemDataRole.UserRole)
-
-                # Перематываем и продолжаем играть
+            if next_marker_idx is not None:
+                # Переключаемся на следующий маркер
                 self.current_marker_idx = next_marker_idx
                 next_marker = self.controller.markers[next_marker_idx]
 
                 # Мгновенный переход (без паузы между клипами)
                 self.controller.seek_frame(next_marker.start_frame)
+                self._update_active_card_highlight()
 
             else:
                 # Конец плейлиста -> Стоп
@@ -894,24 +885,26 @@ class PreviewWindow(QMainWindow):
         self._display_current_frame()
         self._update_slider()
 
+    def _find_next_filtered_marker(self, current_idx: int) -> Optional[int]:
+        """Найти следующий маркер, соответствующий фильтрам."""
+        for idx in range(current_idx + 1, len(self.controller.markers)):
+            marker = self.controller.markers[idx]
+            if self._passes_filters(marker):
+                return idx
+        return None
+
     def _go_to_next_marker(self):
         """Перейти на следующий отрезок (с фильтрацией)."""
-        # Найти следующий отрезок, соответствующий фильтру
-        for idx in range(self.current_marker_idx + 1, len(self.controller.markers)):
-            marker = self.controller.markers[idx]
+        next_marker_idx = self._find_next_filtered_marker(self.current_marker_idx)
 
-            if self._passes_filters(marker):
-                self.current_marker_idx = idx
-                self.controller.seek_frame(marker.start_frame)
-                # Найти строку в таблице, соответствующую этому маркеру
-                for row in range(self.markers_table.rowCount()):
-                    item = self.markers_table.item(row, 0)  # Колонка с ID
-                    if item and item.data(Qt.ItemDataRole.UserRole) == idx:
-                        self.markers_table.setCurrentCell(row, 0)
-                        break
-                self._display_current_frame()
-                self._update_slider()
-                return
+        if next_marker_idx is not None:
+            self.current_marker_idx = next_marker_idx
+            marker = self.controller.markers[next_marker_idx]
+            self.controller.seek_frame(marker.start_frame)
+            self._display_current_frame()
+            self._update_slider()
+            self._update_active_card_highlight()
+            return
 
         # Конец списка
         self.is_playing = False
@@ -925,73 +918,7 @@ class PreviewWindow(QMainWindow):
         self._display_current_frame()
         self._update_slider()
 
-    def _on_edit_marker(self):
-        """Открыть окно редактирования инстанса."""
-        marker_idx, marker = self._get_selected_marker()
-        if marker is None:
-            return
 
-        # Важно: сохраните ссылку на окно в атрибуте класса, иначе сборщик мусора его закроет
-        # Если окно уже открыто, можно закрыть старое или обновить его
-        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
-             self.instance_edit_window.close()
-
-        # Создаем новое окно
-        from .instance_edit_window import InstanceEditWindow
-        self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
-        # Сохраняем индекс маркера для обновления
-        self.instance_edit_window._marker_idx = marker_idx
-
-        # Подключаем сигнал обновления, чтобы таблица в PreviewWindow обновлялась сразу
-        self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
-
-        self.instance_edit_window.show()
-
-    def _on_instance_updated_externally(self):
-        """Вызывается, когда маркер изменен в окне Instance Editor."""
-        self.controller.markers_changed.emit()  # Сигнализируем контроллеру
-        self._update_marker_list()             # Обновляем таблицу
-        # Опционально: восстановить выделение строки
-
-    def _on_delete_marker(self):
-        """Удалить выбранный отрезок."""
-        current_row = self.markers_table.currentRow()
-        if current_row < 0:
-            return
-
-        item = self.markers_table.item(current_row, 0)  # Колонка с ID
-        if not item:
-            return
-
-        marker_idx = int(item.data(Qt.ItemDataRole.UserRole))
-        self.controller.delete_marker(marker_idx)
-        self._update_marker_list()
-
-    def _update_active_row_highlight(self):
-        """Выделить строку активного (проигрываемого) клипа."""
-        # Снять выделение со всех строк
-        for row in range(self.markers_table.rowCount()):
-            for col in range(self.markers_table.columnCount()):
-                item = self.markers_table.item(row, col)
-                if item:
-                    # Сохранить оригинальный цвет фона
-                    original_bg = item.data(Qt.ItemDataRole.UserRole + 1)
-                    if original_bg is None:
-                        original_bg = QColor("#2a2a2a")  # Темно-серый фон по умолчанию
-                        item.setData(Qt.ItemDataRole.UserRole + 1, original_bg)
-                    item.setBackground(original_bg)
-
-        # Найти и выделить строку текущего маркера
-        for row in range(self.markers_table.rowCount()):
-            item = self.markers_table.item(row, 0)  # Колонка с ID
-            if item and item.data(Qt.ItemDataRole.UserRole) == self.current_marker_idx:
-                # Выделить всю строку темно-синим цветом
-                highlight_color = QColor("#1a4d7a")  # Темно-синий, светлее основного фона
-                for col in range(self.markers_table.columnCount()):
-                    col_item = self.markers_table.item(row, col)
-                    if col_item:
-                        col_item.setBackground(highlight_color)
-                break
 
     def _display_current_frame(self):
         """Отобразить текущий кадр."""
