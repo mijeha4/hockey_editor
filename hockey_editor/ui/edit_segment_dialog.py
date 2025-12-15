@@ -375,13 +375,8 @@ class EditSegmentDialog(QDialog):
 
     def _set_initial_focus(self):
         """Установить начальный фокус."""
-        # Если время уже установлено (не по умолчанию), фокус на примечание
-        # Иначе на тип события
-        if (self.marker.start_frame > 0 or self.marker.end_frame > 0 or
-            self.marker.note):
-            self.note_edit.setFocus()
-        else:
-            self.type_combo.setFocus()
+        # По умолчанию фокус на поле "Начало" (IN)
+        self.start_time_edit.setFocus()
 
     def get_marker(self) -> Marker:
         """Получить отредактированный маркер."""

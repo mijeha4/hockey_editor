@@ -292,13 +292,13 @@ class InstanceEditWindow(QMainWindow):
         self.loop_enabled = True
 
         # Активная точка редактирования (IN или OUT)
-        self.active_point = 'out'  # По умолчанию OUT (соответствует текущей инициализации)
+        self.active_point = 'in'  # По умолчанию IN (начало отрезка)
 
         self._setup_ui()
         self._setup_shortcuts()
 
-        # Инициализация - устанавливаем playhead на конец отрезка (OUT)
-        self.controller.seek_frame(self.marker.end_frame)
+        # Инициализация - устанавливаем playhead на начало отрезка (IN)
+        self.controller.seek_frame(self.marker.start_frame)
         self._update_ui_from_marker()
         self._update_active_point_visual()  # Инициализируем визуальное выделение активной точки
         self._update_navigation_buttons()  # Обновляем состояние кнопок навигации

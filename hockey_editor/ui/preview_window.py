@@ -32,9 +32,10 @@ class EventCard(QWidget):
         self.marker_idx = marker_idx
         self.marker = marker
         self.fps = fps
-        self.is_active = False
+        self.is_active = False  # Выделена (кликнута)
+        self.is_playing = False  # Воспроизводится сейчас
 
-        self.setFixedHeight(60)
+        self.setFixedHeight(120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self._setup_ui()
@@ -43,12 +44,12 @@ class EventCard(QWidget):
     def _setup_ui(self):
         """Создать интерфейс карточки."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
 
         # Левая часть: информация о событии
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
+        info_layout.setSpacing(4)
 
         # Верхняя строка: номер + время начала
         top_layout = QHBoxLayout()
@@ -56,31 +57,27 @@ class EventCard(QWidget):
 
         # Номер события
         self.id_label = QLabel(f"#{self.marker_idx + 1}")
-        self.id_label.setStyleSheet("font-weight: bold; color: #cccccc;")
-        self.id_label.setFixedWidth(30)
+        self.id_label.setStyleSheet("font-weight: bold; color: #cccccc; font-size: 14px;")
+        self.id_label.setFixedWidth(35)
         top_layout.addWidget(self.id_label)
 
         # Время начала
         start_time = self._format_time(self.marker.start_frame / self.fps if self.fps > 0 else 0)
         self.time_label = QLabel(start_time)
-        self.time_label.setStyleSheet("color: #aaaaaa; font-family: monospace;")
+        self.time_label.setStyleSheet("color: #aaaaaa; font-family: monospace; font-size: 13px; font-weight: bold;")
         top_layout.addWidget(self.time_label)
 
         top_layout.addStretch()
         info_layout.addLayout(top_layout)
 
-        # Нижняя строка: название события + длительность
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
-
-        # Название события с цветным маркером
+        # Средняя строка: название события с цветным маркером
         event_layout = QHBoxLayout()
-        event_layout.setSpacing(4)
+        event_layout.setSpacing(6)
 
         # Цветной маркер
         self.color_badge = QLabel()
-        self.color_badge.setFixedSize(10, 10)
-        self.color_badge.setStyleSheet("border-radius: 5px;")
+        self.color_badge.setFixedSize(14, 14)
+        self.color_badge.setStyleSheet("border-radius: 7px;")
         event_layout.addWidget(self.color_badge)
 
         # Название события
@@ -89,41 +86,86 @@ class EventCard(QWidget):
         event = event_manager.get_event(self.marker.event_name)
         event_name = event.get_localized_name() if event else self.marker.event_name
         self.event_label = QLabel(event_name)
-        self.event_label.setStyleSheet("font-weight: bold; color: #ffffff;")
-        event_layout.addWidget(self.event_label)
+        self.event_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 16px;")
+        self.event_label.setWordWrap(True)  # Разрешить перенос текста
+        event_layout.addWidget(self.event_label, 1)
 
-        event_layout.addStretch()
-        bottom_layout.addLayout(event_layout)
+        info_layout.addLayout(event_layout)
+
+        # Нижняя строка: длительность + заметки (если есть)
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(8)
 
         # Длительность
         duration_frames = self.marker.end_frame - self.marker.start_frame
         duration_time = self._format_time(duration_frames / self.fps if self.fps > 0 else 0)
-        self.duration_label = QLabel(duration_time)
-        self.duration_label.setStyleSheet("color: #aaaaaa; font-family: monospace;")
-        self.duration_label.setFixedWidth(45)
+        self.duration_label = QLabel(f"Длительность: {duration_time}")
+        self.duration_label.setStyleSheet("color: #aaaaaa; font-family: monospace; font-size: 12px;")
         bottom_layout.addWidget(self.duration_label)
+
+        bottom_layout.addStretch()
+
+        # Заметки (если есть)
+        if self.marker.note.strip():
+            self.notes_label = QLabel(f"📝 {self.marker.note[:30]}{'...' if len(self.marker.note) > 30 else ''}")
+            self.notes_label.setStyleSheet("color: #888888; font-size: 11px; font-style: italic;")
+            self.notes_label.setToolTip(self.marker.note)
+            bottom_layout.addWidget(self.notes_label)
 
         info_layout.addLayout(bottom_layout)
         layout.addLayout(info_layout, 1)
 
         # Правая часть: кнопки действий
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(2)
+        buttons_layout = QVBoxLayout()
+        buttons_layout.setSpacing(4)
 
         # Кнопка редактирования
-        self.edit_btn = QPushButton("✏")
-        self.edit_btn.setFixedSize(24, 24)
-        self.edit_btn.setToolTip("Редактировать событие")
+        self.edit_btn = QPushButton("✏️ Редактировать")
+        self.edit_btn.setFixedSize(120, 28)
+        self.edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2d5a27;
+                color: white;
+                border: 1px solid #3d6b1f;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3d6b1f;
+            }
+            QPushButton:pressed {
+                background-color: #1f3a0f;
+            }
+        """)
+        self.edit_btn.setToolTip("Открыть окно редактирования события")
         self.edit_btn.clicked.connect(lambda: self.edit_requested.emit(self.marker_idx))
         buttons_layout.addWidget(self.edit_btn)
 
         # Кнопка удаления
-        self.delete_btn = QPushButton("🗑")
-        self.delete_btn.setFixedSize(24, 24)
+        self.delete_btn = QPushButton("🗑️ Удалить")
+        self.delete_btn.setFixedSize(120, 28)
+        self.delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #8b2d2d;
+                color: white;
+                border: 1px solid #6b1f1f;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #6b1f1f;
+            }
+            QPushButton:pressed {
+                background-color: #3a0f0f;
+            }
+        """)
         self.delete_btn.setToolTip("Удалить событие")
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.marker_idx))
         buttons_layout.addWidget(self.delete_btn)
 
+        buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
 
         # Обновить цвета
@@ -161,21 +203,37 @@ class EventCard(QWidget):
                 border-color: #666666;
                 background-color: #333333;
             }
+        """
+
+        # Стиль для кнопок (всегда одинаковый)
+        button_style = """
             QPushButton {
-                background-color: transparent;
-                border: none;
                 color: #cccccc;
-                font-size: 12px;
+                font-size: 11px;
+                font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #444444;
-                border-radius: 3px;
                 color: #ffffff;
             }
         """
 
-        if self.is_active:
-            # Выделенная карточка (воспроизводится)
+        # Выделение для воспроизводимого события (синяя рамка)
+        if self.is_playing:
+            playing_style = """
+                EventCard {
+                    border: 3px solid #0088ff;
+                    border-radius: 6px;
+                    background-color: #2a2a3a;
+                }
+                EventCard:hover {
+                    border-color: #0099ff;
+                    background-color: #33334a;
+                }
+            """
+            self.setStyleSheet(base_style + playing_style + button_style)
+
+        # Выделение для активной карточки (желтая рамка)
+        elif self.is_active:
             active_style = """
                 EventCard {
                     border: 2px solid #ffcc00;
@@ -187,14 +245,20 @@ class EventCard(QWidget):
                     background-color: #444433;
                 }
             """
-            self.setStyleSheet(base_style + active_style)
+            self.setStyleSheet(base_style + active_style + button_style)
         else:
-            self.setStyleSheet(base_style)
+            self.setStyleSheet(base_style + button_style)
 
     def set_active(self, active: bool):
         """Установить статус активной карточки."""
         if self.is_active != active:
             self.is_active = active
+            self._update_style()
+
+    def set_playing(self, playing: bool):
+        """Установить статус воспроизводимого события."""
+        if self.is_playing != playing:
+            self.is_playing = playing
             self._update_style()
 
     def mouseDoubleClickEvent(self, event):
@@ -221,7 +285,7 @@ class PreviewWindow(QMainWindow):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
         self.controller = controller
-        self.setWindowTitle("Preview - Segments")
+        self.setWindowTitle("🎬 Кинотеатр событий - Презентация тренерам")
         self.setGeometry(100, 100, 1400, 800)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # Немодальное окно
         self.setStyleSheet(self._get_dark_stylesheet())
@@ -754,36 +818,45 @@ class PreviewWindow(QMainWindow):
 
     def _on_card_edit_requested(self, marker_idx: int):
         """Обработка запроса редактирования от карточки."""
-        marker = self.controller.markers[marker_idx]
-
         # Поставить на паузу перед открытием редактора
         if self.is_playing:
             self._on_play_pause_clicked()
 
-        # Если окно уже открыто, закрыть старое
-        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
-            self.instance_edit_window.close()
-
-        # Создать список отфильтрованных маркеров для навигации
-        filtered_markers = []
-        for idx, m in enumerate(self.controller.markers):
-            if self._passes_filters(m):
-                filtered_markers.append((idx, m))
-
-        # Найти индекс текущего маркера в отфильтрованном списке
-        current_filtered_idx = None
-        for i, (orig_idx, m) in enumerate(filtered_markers):
-            if orig_idx == marker_idx:
-                current_filtered_idx = i
+        # Использовать главное окно приложения для открытия редактора
+        # Это обеспечит правильную интеграцию и навигацию
+        main_window = None
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, 'open_segment_editor'):
+                main_window = widget
                 break
 
-        # Создать новое окно редактирования
-        from .instance_edit_window import InstanceEditWindow
-        self.instance_edit_window = InstanceEditWindow(
-            marker, self.controller, filtered_markers, current_filtered_idx, self
-        )
-        self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
-        self.instance_edit_window.show()
+        if main_window:
+            # Используем метод главного окна для открытия редактора
+            main_window.open_segment_editor(marker_idx)
+        else:
+            # Fallback: создать окно напрямую (если главное окно не найдено)
+            marker = self.controller.markers[marker_idx]
+
+            # Создать список отфильтрованных маркеров для навигации
+            filtered_markers = []
+            for idx, m in enumerate(self.controller.markers):
+                if self._passes_filters(m):
+                    filtered_markers.append((idx, m))
+
+            # Найти индекс текущего маркера в отфильтрованном списке
+            current_filtered_idx = None
+            for i, (orig_idx, m) in enumerate(filtered_markers):
+                if orig_idx == marker_idx:
+                    current_filtered_idx = i
+                    break
+
+            # Создать новое окно редактирования
+            from .instance_edit_window import InstanceEditWindow
+            self.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, filtered_markers, current_filtered_idx, self
+            )
+            self.instance_edit_window.marker_updated.connect(self._on_instance_updated_externally)
+            self.instance_edit_window.show()
 
     def _on_card_delete_requested(self, marker_idx: int):
         """Обработка запроса удаления от карточки."""
@@ -798,6 +871,7 @@ class PreviewWindow(QMainWindow):
             card = item.data(Qt.ItemDataRole.UserRole)
             if card:
                 card.set_active(False)
+                card.set_playing(False)
 
         # Найти и выделить карточку текущего маркера
         for i in range(self.markers_list.count()):
@@ -805,6 +879,9 @@ class PreviewWindow(QMainWindow):
             card = item.data(Qt.ItemDataRole.UserRole)
             if card and card.marker_idx == self.current_marker_idx:
                 card.set_active(True)
+                # Если воспроизведение активно, показать что эта карточка воспроизводится
+                if self.is_playing:
+                    card.set_playing(True)
                 break
 
     def _passes_filters(self, marker):
@@ -834,6 +911,8 @@ class PreviewWindow(QMainWindow):
             self.playback_timer.stop()
             self.is_playing = False
             self.play_btn.setText("▶ Play")
+            # Обновить выделение карточек при остановке
+            self._update_active_card_highlight()
         else:
             # Всегда брать актуальную скорость перед запуском воспроизведения
             fps = self.controller.get_fps()
@@ -844,6 +923,8 @@ class PreviewWindow(QMainWindow):
             self.is_playing = True
             self.play_btn.setText("⏸ Pause")
             self.playback_timer.start(self.frame_time_ms)
+            # Обновить выделение карточек при начале воспроизведения
+            self._update_active_card_highlight()
 
     def _on_playback_tick(self):
         """Таймер воспроизведения с логикой плейлиста."""
