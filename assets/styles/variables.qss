@@ -1,0 +1,91 @@
+/* Hockey Editor - CSS Variables for Colors and Themes */
+/* Цветовая палитра Hockey Editor */
+
+/* Основные цвета фона */
+--primary-bg: #1a1a1a;        /* Основной фон приложения */
+--secondary-bg: #2a2a2a;      /* Вторичный фон (панели, боковые панели) */
+--accent-bg: #333333;         /* Акцентный фон (кнопки, поля ввода) */
+--hover-bg: #444444;          /* Фон при наведении */
+--active-bg: #555555;         /* Фон при нажатии/активном состоянии */
+--selected-bg: #666666;       /* Фон выделенных элементов */
+
+/* Цвета текста */
+--primary-text: #ffffff;      /* Основной текст */
+--secondary-text: #cccccc;    /* Вторичный текст */
+--accent-text: #ffcc00;       /* Акцентный текст (заголовки, важная информация) */
+--muted-text: #888888;        /* Приглушенный текст */
+--disabled-text: #666666;     /* Текст отключенных элементов */
+
+/* Цвета границ и разделителей */
+--border-color: #555555;      /* Основные границы */
+--border-light: #666666;      /* Светлые границы */
+--border-dark: #333333;       /* Темные границы */
+--grid-color: #444444;        /* Цвет сетки и разделителей */
+
+/* Статусные цвета */
+--success-color: #00aa00;     /* Зеленый для успешных операций */
+--warning-color: #ffaa00;     /* Оранжевый для предупреждений */
+--error-color: #aa0000;       /* Красный для ошибок */
+--info-color: #0088aa;        /* Синий для информации */
+
+/* Цвета таймлайна */
+--timeline-bg: #1a1a1a;       /* Фон таймлайна */
+--timeline-ruler-bg: #2a2a2a; /* Фон линейки времени */
+--timeline-track-bg: #232323; /* Фон треков (зеброй) */
+--timeline-track-alt-bg: #1e1e1e; /* Альтернативный фон треков */
+--playhead-color: #ffff00;    /* Цвет плейхеда */
+--segment-border: #ffffff;    /* Граница сегментов при выделении */
+
+/* Цвета видео */
+--video-bg: #000000;          /* Фон видео при отсутствии контента */
+--video-border: #555555;      /* Граница видео */
+
+/* Цвета кнопок управления */
+--control-button-bg: transparent; /* Фон кнопок управления */
+--control-button-hover: #444444; /* Фон кнопок при наведении */
+--control-button-active: #555555; /* Фон кнопок при нажатии */
+
+/* Цвета таблиц */
+--table-bg: #2a2a2a;          /* Фон таблицы */
+--table-alternate-bg: #232323; /* Чередующийся фон строк */
+--table-header-bg: #333333;   /* Фон заголовков таблицы */
+--table-border: #444444;      /* Границы таблицы */
+--table-selected-bg: #444444; /* Фон выделенных строк */
+
+/* Цвета диалогов */
+--dialog-bg: #2a2a2a;         /* Фон диалогов */
+--dialog-border: #555555;     /* Границы диалогов */
+
+/* Цвета меню */
+--menu-bg: #2a2a2a;           /* Фон меню */
+--menu-hover-bg: #444444;     /* Фон пунктов меню при наведении */
+--menu-border: #555555;       /* Границы меню */
+
+/* Цвета полос прокрутки */
+--scrollbar-bg: #333333;      /* Фон полосы прокрутки */
+--scrollbar-handle: #666666;  /* Ползунок прокрутки */
+--scrollbar-handle-hover: #888888; /* Ползунок при наведении */
+
+/* Размеры и отступы */
+--border-radius: 3px;          /* Радиус скругления */
+--border-width: 1px;           /* Толщина границ */
+--padding-small: 2px;          /* Маленькие отступы */
+--padding-medium: 5px;         /* Средние отступы */
+--padding-large: 10px;         /* Большие отступы */
+
+/* Шрифты */
+--font-family: "Segoe UI", sans-serif;
+--font-family-mono: "Consolas", "Courier New", monospace;
+--font-size-small: 9pt;
+--font-size-normal: 10pt;
+--font-size-large: 12pt;
+--font-size-xlarge: 14pt;
+--font-size-header: 13pt;
+
+/* Новые переменные для улучшенного дизайна */
+--text-accent-glow: rgba(255, 204, 0, 0.2);
+--neutral-bg: #3a3a3a;
+--shadow-color: rgba(0, 0, 0, 0.3);
+--transition-time: 0.2s;
+--padding-medium: 8px;
+--padding-large: 12px;

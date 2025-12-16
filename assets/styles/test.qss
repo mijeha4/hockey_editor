@@ -1,0 +1,17 @@
+/* Test QSS file */
+QMainWindow {
+    background-color: #1a1a1a;
+    color: #ffffff;
+}
+
+QPushButton {
+    background-color: #333333;
+    color: #ffffff;
+    border: 1px solid #555555;
+    padding: 5px;
+    border-radius: 3px;
+}
+
+QPushButton:hover {
+    background-color: #444444;
+}
