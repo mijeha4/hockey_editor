@@ -243,15 +243,12 @@ class PreviewWindow(QMainWindow):
                     active_marker_idx = card.marker_idx
                     break
 
-        # Update active state for all cards
-        for i in range(self.markers_list.count()):
-            item = self.markers_list.item(i)
-            card = item.data(Qt.ItemDataRole.UserRole)
-            if card:
-                is_active = (card.marker_idx == active_marker_idx)
-                # Only update if state actually changed to avoid unnecessary repolishing
-                if card.property("active") != is_active:
-                    card.set_active(is_active)
+        # Update current_marker_idx if we found an active marker
+        if active_marker_idx is not None:
+            self.current_marker_idx = active_marker_idx
+
+        # Update card highlighting
+        self._update_active_card_highlight()
 
     def _init_filters(self):
         """Инициализация состояния фильтров."""
@@ -852,8 +849,6 @@ class PreviewWindow(QMainWindow):
             self.playback_timer.stop()
             self.is_playing = False
             self.play_btn.setText("▶ Play")
-            # Обновить выделение карточек при остановке
-            self._update_active_card_highlight()
         else:
             # Всегда брать актуальную скорость перед запуском воспроизведения
             fps = self.controller.get_fps()
@@ -864,8 +859,6 @@ class PreviewWindow(QMainWindow):
             self.is_playing = True
             self.play_btn.setText("⏸ Pause")
             self.playback_timer.start(self.frame_time_ms)
-            # Обновить выделение карточек при начале воспроизведения
-            self._update_active_card_highlight()
 
     def _on_playback_tick(self):
         """Таймер воспроизведения с логикой плейлиста."""

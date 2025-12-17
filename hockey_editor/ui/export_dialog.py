@@ -66,7 +66,11 @@ class ExportWorker(QThread):
             )
             
             self.progress.emit(100)
-            self.finished.emit(True, f"Export completed: {self.output_path}")
+            if self.merge_segments:
+                message = f"Export completed: {self.output_path}"
+            else:
+                message = f"Export completed: {len(self.markers)} separate files in {self.output_path}"
+            self.finished.emit(True, message)
             
         except Exception as e:
             self.finished.emit(False, f"Export failed: {str(e)}")
@@ -208,7 +212,7 @@ class ExportDialog(QDialog):
         options_layout.addWidget(self.audio_check)
         
         self.merge_check = QCheckBox("Merge Segments")
-        self.merge_check.setChecked(False)
+        self.merge_check.setChecked(True)
         self.merge_check.setToolTip("Merge all segments into one video file")
         options_layout.addWidget(self.merge_check)
         
@@ -240,6 +244,7 @@ class ExportDialog(QDialog):
         self.browse_btn = QPushButton("📁 Browse Output")
         self.browse_btn.setToolTip("Select output file path")
         self.browse_btn.clicked.connect(self._on_browse_output)
+        self.merge_check.stateChanged.connect(self._on_merge_segments_changed)
         btn_layout.addWidget(self.browse_btn)
         
         btn_layout.addStretch()
@@ -270,6 +275,9 @@ class ExportDialog(QDialog):
         
         self.setLayout(layout)
         self.output_path = None
+
+        # Инициализировать подсказку кнопки
+        self._on_merge_segments_changed()
     
     def _populate_segments(self):
         """Заполнить список отрезков."""
@@ -336,20 +344,40 @@ class ExportDialog(QDialog):
         secs = int(seconds) % 60
         return f"{minutes:02d}:{secs:02d}"
 
+    def _on_merge_segments_changed(self):
+        """Обработка изменения состояния Merge Segments."""
+        merge_segments = self.merge_check.isChecked()
+        if merge_segments:
+            self.browse_btn.setToolTip("Select output file path")
+        else:
+            self.browse_btn.setToolTip("Select output directory for separate files")
+
     def _on_browse_output(self):
         """Выбрать путь сохранения."""
-        format_idx = self.format_combo.currentIndex()
-        extensions = [".mp4", ".mov", ".mkv", ".webm"]
-        ext = extensions[format_idx] if format_idx < len(extensions) else ".mp4"
-        
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Export As", "",
-            f"Video Files (*{ext});;All Files (*)"
-        )
-        
+        merge_segments = self.merge_check.isChecked()
+
+        if merge_segments:
+            # Выбор файла для объединенного видео
+            format_idx = self.format_combo.currentIndex()
+            extensions = [".mp4", ".mov", ".mkv", ".webm"]
+            ext = extensions[format_idx] if format_idx < len(extensions) else ".mp4"
+
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Export As", "",
+                f"Video Files (*{ext});;All Files (*)"
+            )
+        else:
+            # Выбор папки для отдельных файлов
+            path = QFileDialog.getExistingDirectory(
+                self, "Select Output Directory", ""
+            )
+
         if path:
             self.output_path = path
-            self.progress_label.setText(f"Output: {path}")
+            if merge_segments:
+                self.progress_label.setText(f"Output: {path}")
+            else:
+                self.progress_label.setText(f"Output directory: {path}")
 
     def _on_export_clicked(self):
         """Начать экспорт."""
@@ -364,7 +392,10 @@ class ExportDialog(QDialog):
             return
         
         if not self.output_path:
-            QMessageBox.warning(self, "No Output Path", "Please select output file")
+            if merge_segments:
+                QMessageBox.warning(self, "No Output Path", "Please select output file")
+            else:
+                QMessageBox.warning(self, "No Output Directory", "Please select output directory")
             return
         
         # Disable controls

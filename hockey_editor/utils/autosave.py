@@ -36,6 +36,7 @@ class AutosaveManager(QObject):
         # Загрузить настройки автосохранения
         from ..utils.settings_manager import get_settings_manager
         settings = get_settings_manager()
+        self.autosave_enabled = settings.load_autosave_enabled()
         self.autosave_interval = settings.load_autosave_interval()
 
     def start(self):

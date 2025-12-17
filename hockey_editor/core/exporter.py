@@ -16,7 +16,7 @@ class VideoExporter:
         quality: int = 23,
         resolution: Optional[str] = None,
         include_audio: bool = True,
-        merge_segments: bool = False
+        merge_segments: bool = True
     ):
         """
         Экспорт видео сегментов.
@@ -30,7 +30,7 @@ class VideoExporter:
 
             # Если выбран codec "copy", используем прямой вызов ffmpeg
             if codec.lower() == "copy":
-                return VideoExporter._export_with_copy(video_path, markers, fps, output_path)
+                return VideoExporter._export_with_copy(video_path, markers, fps, output_path, merge_segments)
 
             # Для других кодеков используем moviepy с перекодированием
             return VideoExporter._export_with_moviepy(
@@ -45,12 +45,13 @@ class VideoExporter:
             raise
 
     @staticmethod
-    def _export_with_copy(video_path: str, markers: List[Marker], fps: float, output_path: str):
+    def _export_with_copy(video_path: str, markers: List[Marker], fps: float, output_path: str, merge_segments: bool = True):
         """
         Быстрый экспорт с использованием ffmpeg ultrafast preset для плавных стыков.
-        Всегда объединяет сегменты в один файл с перекодированием для качества.
+        Если merge_segments=True, объединяет сегменты в один файл.
+        Если merge_segments=False, экспортирует каждый сегмент как отдельный файл.
         """
-        print(f"Fast export using ultrafast encoding: {len(markers)} segments to {output_path}")
+        print(f"Fast export using ultrafast encoding: {len(markers)} segments, merge_segments={merge_segments}")
 
         if not markers:
             # Если нет маркеров, создаем пустой файл (не имеет смысла для copy)
@@ -92,16 +93,38 @@ class VideoExporter:
 
                 segment_files.append(segment_path)
 
-            # Всегда объединяем сегменты в один файл
-            if len(segment_files) == 1:
-                # Просто копируем единственный файл
-                import shutil
-                shutil.copy2(segment_files[0], output_path)
+            # Выбор режима экспорта на основе merge_segments
+            if merge_segments:
+                # Объединяем сегменты в один файл
+                if len(segment_files) == 1:
+                    # Просто копируем единственный файл
+                    import shutil
+                    shutil.copy2(segment_files[0], output_path)
+                else:
+                    # Для нескольких сегментов выполняем конкатенацию через concat demuxer
+                    VideoExporter._concatenate_segments(segment_files, output_path)
+                print(f"Fast export completed successfully: {output_path}")
             else:
-                # Для нескольких сегментов выполняем конкатенацию через concat demuxer
-                VideoExporter._concatenate_segments(segment_files, output_path)
+                # Экспортируем каждый сегмент как отдельный файл
+                output_dir = os.path.dirname(output_path)
+                base_name = os.path.splitext(os.path.basename(output_path))[0]
 
-        print(f"Fast export completed successfully: {output_path}")
+                exported_files = []
+                for i, (segment_file, marker) in enumerate(zip(segment_files, markers)):
+                    # Генерируем имя файла для каждого сегмента
+                    segment_output_path = os.path.join(
+                        output_dir,
+                        f"{base_name}_segment_{i+1:03d}_{marker.event_name}.mp4"
+                    )
+
+                    # Копируем сегмент в финальное место
+                    import shutil
+                    shutil.copy2(segment_file, segment_output_path)
+                    exported_files.append(segment_output_path)
+                    print(f"  Exported segment {i+1}: {segment_output_path}")
+
+                print(f"Fast export completed successfully: {len(exported_files)} separate files in {output_dir}")
+
         return True
 
     @staticmethod
@@ -155,38 +178,13 @@ class VideoExporter:
     ):
         """
         Экспорт с использованием moviepy (для перекодирования).
+        Если merge_segments=True, объединяет сегменты в один файл.
+        Если merge_segments=False, экспортирует каждый сегмент как отдельный файл.
         """
         import moviepy as mp
 
         # Загружаем видео
         video = mp.VideoFileClip(video_path)
-
-        clips = []
-
-        if markers:
-            print(f"Exporting {len(markers)} segments with re-encoding to {output_path}")
-
-            for marker in markers:
-                # Конвертируем кадры в секунды
-                start_time = marker.start_frame / fps
-                end_time = marker.end_frame / fps
-
-                # Создаем субклип
-                subclip = video.subclipped(start_time, end_time)
-                clips.append(subclip)
-
-                print(f"  Segment: {marker.event_name} ({start_time:.2f}s - {end_time:.2f}s)")
-
-            # Конкатенируем все клипы
-            if len(clips) > 1:
-                final_clip = mp.concatenate_videoclips(clips)
-            else:
-                final_clip = clips[0]
-
-        else:
-            # Если нет маркеров, создаем пустой клип (минимальная длительность)
-            print(f"Creating empty clip: {output_path}")
-            final_clip = video.subclipped(0, 0.1)
 
         # Настраиваем параметры экспорта
         export_params = {}
@@ -218,33 +216,116 @@ class VideoExporter:
             else:
                 export_params["preset"] = "fast"
 
-        # Разрешение
-        if resolution and resolution != "source":
-            if resolution == "2160p":
-                final_clip = final_clip.resized(height=2160)
-            elif resolution == "1080p":
-                final_clip = final_clip.resized(height=1080)
-            elif resolution == "720p":
-                final_clip = final_clip.resized(height=720)
-            elif resolution == "480p":
-                final_clip = final_clip.resized(height=480)
-            elif resolution == "360p":
-                final_clip = final_clip.resized(height=360)
+        if markers:
+            print(f"Exporting {len(markers)} segments with re-encoding, merge_segments={merge_segments}")
 
-        # Экспортируем видео
-        final_clip.write_videofile(
-            output_path,
-            fps=fps,
-            threads=4,
-            logger=None,  # Отключаем verbose вывод
-            **export_params
-        )
+            clips = []
+            for marker in markers:
+                # Конвертируем кадры в секунды
+                start_time = marker.start_frame / fps
+                end_time = marker.end_frame / fps
+
+                # Создаем субклип
+                subclip = video.subclipped(start_time, end_time)
+                clips.append(subclip)
+
+                print(f"  Segment: {marker.event_name} ({start_time:.2f}s - {end_time:.2f}s)")
+
+            if merge_segments:
+                # Объединяем сегменты в один файл
+                if len(clips) > 1:
+                    final_clip = mp.concatenate_videoclips(clips)
+                else:
+                    final_clip = clips[0]
+
+                # Применяем разрешение к финальному клипу
+                if resolution and resolution != "source":
+                    if resolution == "2160p":
+                        final_clip = final_clip.resized(height=2160)
+                    elif resolution == "1080p":
+                        final_clip = final_clip.resized(height=1080)
+                    elif resolution == "720p":
+                        final_clip = final_clip.resized(height=720)
+                    elif resolution == "480p":
+                        final_clip = final_clip.resized(height=480)
+                    elif resolution == "360p":
+                        final_clip = final_clip.resized(height=360)
+
+                # Экспортируем объединенный клип
+                final_clip.write_videofile(
+                    output_path,
+                    fps=fps,
+                    threads=4,
+                    logger=None,  # Отключаем verbose вывод
+                    **export_params
+                )
+
+                # Освобождаем финальный клип
+                final_clip.close()
+
+                print(f"Re-encoding export completed successfully: {output_path}")
+            else:
+                # Экспортируем каждый сегмент как отдельный файл
+                output_dir = os.path.dirname(output_path)
+                base_name = os.path.splitext(os.path.basename(output_path))[0]
+
+                exported_files = []
+                for i, (clip, marker) in enumerate(zip(clips, markers)):
+                    # Применяем разрешение к каждому клипу
+                    segment_clip = clip
+                    if resolution and resolution != "source":
+                        if resolution == "2160p":
+                            segment_clip = clip.resized(height=2160)
+                        elif resolution == "1080p":
+                            segment_clip = clip.resized(height=1080)
+                        elif resolution == "720p":
+                            segment_clip = clip.resized(height=720)
+                        elif resolution == "480p":
+                            segment_clip = clip.resized(height=480)
+                        elif resolution == "360p":
+                            segment_clip = clip.resized(height=360)
+
+                    # Генерируем имя файла для каждого сегмента
+                    segment_output_path = os.path.join(
+                        output_dir,
+                        f"{base_name}_segment_{i+1:03d}_{marker.event_name}.mp4"
+                    )
+
+                    # Экспортируем сегмент
+                    segment_clip.write_videofile(
+                        segment_output_path,
+                        fps=fps,
+                        threads=4,
+                        logger=None,  # Отключаем verbose вывод
+                        **export_params
+                    )
+
+                    exported_files.append(segment_output_path)
+                    print(f"  Exported segment {i+1}: {segment_output_path}")
+
+                    # Освобождаем клип, если он был изменен (изменение размера)
+                    if segment_clip is not clip:
+                        segment_clip.close()
+
+                print(f"Re-encoding export completed successfully: {len(exported_files)} separate files in {output_dir}")
+
+        else:
+            # Если нет маркеров, создаем пустой клип (минимальная длительность)
+            print(f"Creating empty clip: {output_path}")
+            final_clip = video.subclipped(0, 0.1)
+
+            # Экспортируем пустой клип
+            final_clip.write_videofile(
+                output_path,
+                fps=fps,
+                threads=4,
+                logger=None,  # Отключаем verbose вывод
+                **export_params
+            )
+
+            final_clip.close()
 
         # Освобождаем ресурсы
         video.close()
-        final_clip.close()
-        for clip in clips:
-            clip.close()
 
-        print(f"Re-encoding export completed successfully: {output_path}")
         return True

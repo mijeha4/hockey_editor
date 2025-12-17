@@ -708,10 +708,17 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Project", "", "Hockey Editor Projects (*.hep);;All Files (*)"
         )
-        
+
         if path:
-            if self.controller.load_project(path):
+            success, video_missing = self.controller.load_project(path)
+
+            if success and not video_missing:
                 QMessageBox.information(self, "Success", f"Project loaded: {path}")
+                self.current_project_path = path
+                self.setWindowTitle(f"Hockey Editor Pro - {Path(path).name}")
+            elif success and video_missing:
+                # Предложить выбрать новый путь к видео
+                self._prompt_video_path(path)
             else:
                 QMessageBox.critical(self, "Error", f"Failed to load project: {path}")
     
@@ -752,11 +759,45 @@ class MainWindow(QMainWindow):
             action = self.recent_menu.addAction(Path(path).name)
             action.triggered.connect(lambda checked, p=path: self._on_recent_project(p))
     
+    def _prompt_video_path(self, project_path: str):
+        """Показать диалог выбора нового пути к видео."""
+        reply = QMessageBox.question(
+            self, "Video not found",
+            f"Video file not found for project {Path(project_path).name}.\n"
+            "Would you like to select a new video file?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            video_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Video File", "",
+                "Videos (*.mp4 *.avi *.mov *.mkv);;All (*.*)"
+            )
+
+            if video_path:
+                if self.controller.set_video_path(video_path):
+                    QMessageBox.information(self, "Success", "Project loaded with new video")
+                    self.current_project_path = project_path
+                    self.setWindowTitle(f"Hockey Editor Pro - {Path(project_path).name}")
+                    self._update_recent_menu()
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to load video")
+            else:
+                QMessageBox.warning(self, "Warning", "Project loaded without video")
+        else:
+            QMessageBox.warning(self, "Warning", "Project loaded without video")
+
     def _on_recent_project(self, path: str):
         """Открыть недавний проект."""
-        if self.controller.load_project(path):
+        success, video_missing = self.controller.load_project(path)
+
+        if success and not video_missing:
             QMessageBox.information(self, "Success", f"Project loaded: {path}")
+            self.current_project_path = path
+            self.setWindowTitle(f"Hockey Editor Pro - {Path(path).name}")
             self._update_recent_menu()
+        elif success and video_missing:
+            self._prompt_video_path(path)
         else:
             QMessageBox.critical(self, "Error", f"Failed to load project: {path}")
     

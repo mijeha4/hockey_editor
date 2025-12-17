@@ -64,13 +64,14 @@ class TestVideoExporter(unittest.TestCase):
         mock_final = MagicMock()
         mock_concatenate.return_value = mock_final
 
-        # Вызываем экспорт
+        # Вызываем экспорт с merge_segments=True (по умолчанию)
         result = VideoExporter.export(
             self.video_path,
             self.markers,
             self.total_frames,
             self.fps,
-            self.output_path
+            self.output_path,
+            merge_segments=True
         )
 
         # Проверяем результат
@@ -185,7 +186,8 @@ class TestVideoExporter(unittest.TestCase):
             boundary_markers,
             600,  # total_frames
             30.0,  # fps
-            self.output_path
+            self.output_path,
+            merge_segments=True
         )
 
         # Проверяем результат
@@ -265,6 +267,115 @@ class TestVideoExporter(unittest.TestCase):
 
         print("✅ Обратная совместимость Marker работает!")
 
+    @patch('os.path.exists')
+    @patch('moviepy.VideoFileClip')
+    @patch('moviepy.concatenate_videoclips')
+    def test_export_with_merge_segments_false(self, mock_concatenate, mock_video_clip, mock_exists):
+        """Тест экспорта с merge_segments=False (отдельные файлы)."""
+        print("\n🧪 Тестирование экспорта с merge_segments=False...")
+
+        # Настраиваем mock'и
+        mock_exists.return_value = True  # Файл существует
+
+        mock_video = MagicMock()
+        mock_video_clip.return_value = mock_video
+
+        mock_clip1 = MagicMock()
+        mock_clip2 = MagicMock()
+        mock_clip3 = MagicMock()
+        mock_video.subclip.side_effect = [mock_clip1, mock_clip2, mock_clip3]
+
+        # Вызываем экспорт с merge_segments=False
+        result = VideoExporter.export(
+            self.video_path,
+            self.markers,
+            self.total_frames,
+            self.fps,
+            self.output_path,
+            merge_segments=False
+        )
+
+        # Проверяем результат
+        self.assertTrue(result)
+
+        # Проверяем, что VideoFileClip был вызван с правильным путем
+        mock_video_clip.assert_called_once_with(self.video_path)
+
+        # Проверяем, что subclip был вызван для каждого маркера
+        expected_calls = [
+            ((0.0, 100.0/30.0),),  # 0-3.33 сек
+            ((200.0/30.0, 300.0/30.0),),  # 6.67-10 сек
+            ((400.0/30.0, 500.0/30.0),)   # 13.33-16.67 сек
+        ]
+        self.assertEqual(mock_video.subclip.call_count, 3)
+        mock_video.subclip.assert_has_calls(expected_calls, any_order=False)
+
+        # Проверяем, что concatenate_videoclips НЕ был вызван (для merge_segments=False)
+        mock_concatenate.assert_not_called()
+
+        # Проверяем, что write_videofile был вызван для каждого клипа отдельно
+        self.assertEqual(mock_clip1.write_videofile.call_count, 1)
+        self.assertEqual(mock_clip2.write_videofile.call_count, 1)
+        self.assertEqual(mock_clip3.write_videofile.call_count, 1)
+
+        # Проверяем, что ресурсы были освобождены
+        mock_video.close.assert_called_once()
+        mock_clip1.close.assert_called_once()
+        mock_clip2.close.assert_called_once()
+        mock_clip3.close.assert_called_once()
+
+        print("✅ Экспорт с merge_segments=False работает корректно!")
+
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    @patch('tempfile.TemporaryDirectory')
+    @patch('os.path.dirname')
+    @patch('os.path.splitext')
+    @patch('os.path.basename')
+    @patch('os.path.join')
+    @patch('shutil.copy2')
+    def test_export_copy_mode_with_merge_segments_false(self, mock_copy2, mock_join, mock_basename,
+                                                       mock_splitext, mock_dirname, mock_temp_dir,
+                                                       mock_subprocess, mock_exists):
+        """Тест экспорта в режиме copy с merge_segments=False."""
+        print("\n🧪 Тестирование экспорта copy с merge_segments=False...")
+
+        # Настраиваем mock'и
+        mock_exists.return_value = True
+
+        # Mock временной директории
+        mock_temp_dir.return_value.__enter__ = MagicMock(return_value="/tmp/test")
+        mock_temp_dir.return_value.__exit__ = MagicMock(return_value=None)
+
+        # Mock путей
+        mock_dirname.return_value = "/output/dir"
+        mock_basename.return_value = "output"
+        mock_splitext.return_value = ("output", ".mp4")
+
+        mock_join.side_effect = lambda *args: "/".join(args)
+
+        # Mock subprocess для извлечения сегментов
+        mock_subprocess.return_value.returncode = 0
+
+        # Вызываем экспорт с codec="copy" и merge_segments=False
+        result = VideoExporter.export(
+            self.video_path,
+            self.markers,
+            self.total_frames,
+            self.fps,
+            self.output_path,
+            codec="copy",
+            merge_segments=False
+        )
+
+        # Проверяем результат
+        self.assertTrue(result)
+
+        # Проверяем, что было создано правильное количество вызовов copy2 (по одному на сегмент)
+        self.assertEqual(mock_copy2.call_count, 3)
+
+        print("✅ Экспорт copy с merge_segments=False работает корректно!")
+
 
 class TestExportIntegration(unittest.TestCase):
     """Интеграционные тесты экспорта."""
@@ -308,7 +419,8 @@ class TestExportIntegration(unittest.TestCase):
                 markers,
                 300,  # total_frames
                 30.0, # fps
-                output_path
+                output_path,
+                merge_segments=True
             )
 
             # Проверяем результат

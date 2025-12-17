@@ -340,26 +340,69 @@ class VideoController(QObject):
             ProjectManager.add_to_recent(file_path)
         return success
     
-    def load_project(self, file_path: str) -> bool:
-        """Загрузить проект из файла."""
+    def load_project(self, file_path: str) -> tuple[bool, bool]:
+        """Загрузить проект из файла.
+        Returns: (success, video_missing) - успех загрузки, отсутствует ли видео
+        """
         from .project_manager import ProjectManager
-        
+
         project = ProjectManager.load_project(file_path)
         if not project:
+            return False, False
+
+        # Проверить наличие видео файла
+        if project.video_path and not os.path.exists(project.video_path):
+            # Сохранить проект для последующей установки пути к видео
+            self._pending_project = project
+            self._pending_project_path = file_path
+            ProjectManager.add_to_recent(file_path)
+            return True, True  # success=True, video_missing=True
+
+        # Загрузить видео
+        if project.video_path:
+            if not self.load_video(project.video_path):
+                return False, False
+
+        # Загрузить маркеры
+        self.markers = project.markers.copy()
+        self.markers_changed.emit()
+
+        ProjectManager.add_to_recent(file_path)
+        return True, False
+    
+    def set_video_path(self, new_path: str) -> bool:
+        """Установить новый путь к видео для загруженного проекта."""
+        if hasattr(self, '_pending_project') and self._pending_project:
+            self._pending_project.video_path = new_path
+            # Завершить загрузку проекта
+            return self._finish_project_loading()
+
+        # Если проект уже загружен, перезагрузить видео
+        return self.load_video(new_path)
+
+    def _finish_project_loading(self) -> bool:
+        """Завершить загрузку проекта после установки пути к видео."""
+        if not hasattr(self, '_pending_project'):
             return False
-        
+
+        project = self._pending_project
+        project_path = self._pending_project_path
+
         # Загрузить видео
         if project.video_path and os.path.exists(project.video_path):
             if not self.load_video(project.video_path):
                 return False
-        
+
         # Загрузить маркеры
         self.markers = project.markers.copy()
         self.markers_changed.emit()
-        
-        ProjectManager.add_to_recent(file_path)
+
+        # Очистить pending
+        del self._pending_project
+        del self._pending_project_path
+
         return True
-    
+
     def get_recent_projects(self) -> List[str]:
         """Получить список недавних проектов."""
         from .project_manager import ProjectManager
