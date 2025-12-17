@@ -283,7 +283,6 @@ class InstanceEditWindow(QMainWindow):
 
         self.setWindowTitle(title)
         self.resize(1000, 700)
-        self.setStyleSheet(self._get_dark_stylesheet())
 
         # Состояние воспроизведения
         self.is_playing = False
@@ -846,35 +845,3 @@ class InstanceEditWindow(QMainWindow):
     def resizeEvent(self, event):
         self._display_current_frame()
         super().resizeEvent(event)
-
-    def _get_dark_stylesheet(self):
-        """Тёмный стиль (адаптирован из PreviewWindow)"""
-        return """
-        QMainWindow, QWidget {
-            background-color: #1a1a1a;
-            color: #ffffff;
-        }
-        QPushButton {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 5px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #444444;
-        }
-        QLineEdit, QComboBox {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 3px;
-            border-radius: 3px;
-        }
-        QLabel {
-            color: #ffffff;
-        }
-        QCheckBox {
-            color: #ffffff;
-        }
-        """

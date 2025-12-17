@@ -31,7 +31,6 @@ class EditSegmentDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.resize(550, 280)
-        self.setStyleSheet(self._get_dark_stylesheet())
 
         self._setup_ui()
 
@@ -390,34 +389,3 @@ class EditSegmentDialog(QDialog):
             event_name=self.type_combo.currentData(),
             note=self.note_edit.text()
         )
-
-
-
-    def _get_dark_stylesheet(self) -> str:
-        """Тёмный стиль для диалога."""
-        return """
-        QDialog {
-            background-color: #1a1a1a;
-            color: #ffffff;
-        }
-        QLabel {
-            color: #ffffff;
-        }
-        QSpinBox, QLineEdit, QComboBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-            padding: 4px;
-            border-radius: 3px;
-        }
-        QPushButton {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 5px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #444444;
-        }
-        """

@@ -16,11 +16,16 @@ from PySide6.QtCore import Qt
 # Импорты компонентов
 from hockey_editor.core.video_controller import VideoController
 from hockey_editor.ui.main_window import MainWindow
+from hockey_editor.utils.style_manager import get_style_manager
 
 
 def main():
     app = QApplication(sys.argv)
-    
+
+    # Initialize global design system
+    style_manager = get_style_manager()
+    style_manager.apply_global_styles()
+
     # Проверить наличие файлов восстановления
     from hockey_editor.utils.autosave import AutosaveManager
     recovery_path = AutosaveManager.check_recovery()
@@ -55,6 +60,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

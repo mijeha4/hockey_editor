@@ -19,7 +19,7 @@ from ..models.marker import Marker, EventType
 from .drawing_overlay import DrawingOverlay, DrawingTool
 
 
-class EventCard(QWidget):
+class EventCard(QFrame):
     """Карточка события с информацией и кнопками действий."""
 
     # Сигналы
@@ -32,144 +32,87 @@ class EventCard(QWidget):
         self.marker_idx = marker_idx
         self.marker = marker
         self.fps = fps
-        self.is_active = False  # Выделена (кликнута)
-        self.is_playing = False  # Воспроизводится сейчас
 
-        self.setFixedHeight(120)
+        # Set up the card as a QFrame with class for QSS styling
+        self.setProperty("class", "EventCard")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self._setup_ui()
-        self._update_style()
+        self._update_colors()
 
     def _setup_ui(self):
-        """Создать интерфейс карточки."""
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
-        layout.setSpacing(12)
+        """Создать интерфейс карточки с новой структурой."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
-        # Левая часть: информация о событии
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(4)
-
-        # Верхняя строка: номер + время начала
+        # ===== TOP ROW: Index | Start Time | Duration =====
         top_layout = QHBoxLayout()
         top_layout.setSpacing(8)
 
-        # Номер события
+        # Index (#1)
         self.id_label = QLabel(f"#{self.marker_idx + 1}")
-        self.id_label.setStyleSheet("font-weight: bold; color: #cccccc; font-size: 14px;")
-        self.id_label.setFixedWidth(35)
+        self.id_label.setStyleSheet("color: @muted_text; font-size: @font_size_small; font-weight: bold;")
         top_layout.addWidget(self.id_label)
 
-        # Время начала
+        # Start Time (00:00)
         start_time = self._format_time(self.marker.start_frame / self.fps if self.fps > 0 else 0)
         self.time_label = QLabel(start_time)
-        self.time_label.setStyleSheet("color: #aaaaaa; font-family: monospace; font-size: 13px; font-weight: bold;")
+        self.time_label.setStyleSheet("color: @muted_text; font-size: @font_size_small; font-family: @font_family_mono;")
         top_layout.addWidget(self.time_label)
 
+        # Duration (05s)
+        duration_frames = self.marker.end_frame - self.marker.start_frame
+        duration_time = self._format_time(duration_frames / self.fps if self.fps > 0 else 0)
+        self.duration_label = QLabel(duration_time)
+        self.duration_label.setStyleSheet("color: @muted_text; font-size: @font_size_small; font-family: @font_family_mono;")
+        top_layout.addWidget(self.duration_label)
+
         top_layout.addStretch()
-        info_layout.addLayout(top_layout)
+        layout.addLayout(top_layout)
 
-        # Средняя строка: название события с цветным маркером
+        # ===== MIDDLE ROW: Event Name with Color Indicator =====
         event_layout = QHBoxLayout()
-        event_layout.setSpacing(6)
+        event_layout.setSpacing(8)
 
-        # Цветной маркер
-        self.color_badge = QLabel()
-        self.color_badge.setFixedSize(14, 14)
-        self.color_badge.setStyleSheet("border-radius: 7px;")
-        event_layout.addWidget(self.color_badge)
+        # Colored circle indicator
+        self.color_indicator = QLabel()
+        self.color_indicator.setFixedSize(12, 12)
+        self.color_indicator.setStyleSheet("border-radius: 6px;")
+        event_layout.addWidget(self.color_indicator)
 
-        # Название события
+        # Event name (large, bold, word wrap enabled)
         from ..utils.custom_events import get_custom_event_manager
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(self.marker.event_name)
         event_name = event.get_localized_name() if event else self.marker.event_name
         self.event_label = QLabel(event_name)
-        self.event_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 16px;")
-        self.event_label.setWordWrap(True)  # Разрешить перенос текста
+        self.event_label.setStyleSheet("color: @primary_text; font-size: @font_size_large; font-weight: bold;")
+        self.event_label.setWordWrap(True)
+        self.event_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         event_layout.addWidget(self.event_label, 1)
 
-        info_layout.addLayout(event_layout)
+        layout.addLayout(event_layout)
 
-        # Нижняя строка: длительность + заметки (если есть)
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
+        # ===== BOTTOM ROW: Action Buttons (Right Aligned) =====
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()  # Push buttons to the right
 
-        # Длительность
-        duration_frames = self.marker.end_frame - self.marker.start_frame
-        duration_time = self._format_time(duration_frames / self.fps if self.fps > 0 else 0)
-        self.duration_label = QLabel(f"Длительность: {duration_time}")
-        self.duration_label.setStyleSheet("color: #aaaaaa; font-family: monospace; font-size: 12px;")
-        bottom_layout.addWidget(self.duration_label)
-
-        bottom_layout.addStretch()
-
-        # Заметки (если есть)
-        if self.marker.note.strip():
-            self.notes_label = QLabel(f"📝 {self.marker.note[:30]}{'...' if len(self.marker.note) > 30 else ''}")
-            self.notes_label.setStyleSheet("color: #888888; font-size: 11px; font-style: italic;")
-            self.notes_label.setToolTip(self.marker.note)
-            bottom_layout.addWidget(self.notes_label)
-
-        info_layout.addLayout(bottom_layout)
-        layout.addLayout(info_layout, 1)
-
-        # Правая часть: кнопки действий
-        buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(4)
-
-        # Кнопка редактирования
-        self.edit_btn = QPushButton("✏️ Редактировать")
-        self.edit_btn.setFixedSize(120, 28)
-        self.edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d5a27;
-                color: white;
-                border: 1px solid #3d6b1f;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3d6b1f;
-            }
-            QPushButton:pressed {
-                background-color: #1f3a0f;
-            }
-        """)
-        self.edit_btn.setToolTip("Открыть окно редактирования события")
+        # Edit button
+        self.edit_btn = QPushButton("✏️")
+        self.edit_btn.setFixedSize(28, 24)
+        self.edit_btn.setToolTip("Редактировать событие")
         self.edit_btn.clicked.connect(lambda: self.edit_requested.emit(self.marker_idx))
         buttons_layout.addWidget(self.edit_btn)
 
-        # Кнопка удаления
-        self.delete_btn = QPushButton("🗑️ Удалить")
-        self.delete_btn.setFixedSize(120, 28)
-        self.delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8b2d2d;
-                color: white;
-                border: 1px solid #6b1f1f;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6b1f1f;
-            }
-            QPushButton:pressed {
-                background-color: #3a0f0f;
-            }
-        """)
+        # Delete button
+        self.delete_btn = QPushButton("🗑️")
+        self.delete_btn.setFixedSize(28, 24)
         self.delete_btn.setToolTip("Удалить событие")
         self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self.marker_idx))
         buttons_layout.addWidget(self.delete_btn)
 
-        buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
-
-        # Обновить цвета
-        self._update_colors()
 
     def _update_colors(self):
         """Обновить цвета маркера и текста."""
@@ -179,87 +122,61 @@ class EventCard(QWidget):
 
         if event:
             color = event.get_qcolor()
-            self.color_badge.setStyleSheet(f"""
+            self.color_indicator.setStyleSheet(f"""
                 background-color: {color.name()};
-                border-radius: 5px;
+                border-radius: 6px;
                 border: 1px solid {color.darker(120).name()};
             """)
         else:
-            self.color_badge.setStyleSheet("""
+            self.color_indicator.setStyleSheet("""
                 background-color: #666666;
-                border-radius: 5px;
+                border-radius: 6px;
                 border: 1px solid #444444;
             """)
 
-    def _update_style(self):
-        """Обновить стиль карточки."""
-        base_style = """
-            EventCard {
-                border: 1px solid #444444;
-                border-radius: 6px;
-                background-color: #2a2a2a;
-            }
-            EventCard:hover {
-                border-color: #666666;
-                background-color: #333333;
-            }
-        """
+    def set_active(self, is_active: bool):
+        """Установить активное состояние (подсветка)."""
+        # Если состояние не изменилось - выходим (оптимизация)
+        if self.property("active") == is_active:
+            return
 
-        # Стиль для кнопок (всегда одинаковый)
-        button_style = """
-            QPushButton {
-                color: #cccccc;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                color: #ffffff;
-            }
-        """
+        # 1. Меняем свойство
+        self.setProperty("active", is_active)
 
-        # Выделение для воспроизводимого события (синяя рамка)
-        if self.is_playing:
-            playing_style = """
-                EventCard {
-                    border: 3px solid #0088ff;
-                    border-radius: 6px;
-                    background-color: #2a2a3a;
-                }
-                EventCard:hover {
-                    border-color: #0099ff;
-                    background-color: #33334a;
-                }
-            """
-            self.setStyleSheet(base_style + playing_style + button_style)
+        # 2. ВАЖНО: Заставляем Qt пересчитать стили!
+        # Без этого цвет рамки не изменится
+        self.style().unpolish(self)
+        self.style().polish(self)
 
-        # Выделение для активной карточки (желтая рамка)
-        elif self.is_active:
-            active_style = """
-                EventCard {
-                    border: 2px solid #ffcc00;
-                    border-radius: 6px;
-                    background-color: #3a3a2a;
-                }
-                EventCard:hover {
-                    border-color: #ffaa00;
-                    background-color: #444433;
-                }
-            """
-            self.setStyleSheet(base_style + active_style + button_style)
-        else:
-            self.setStyleSheet(base_style + button_style)
+        # 3. Принудительная перерисовка
+        self.update()
 
-    def set_active(self, active: bool):
-        """Установить статус активной карточки."""
-        if self.is_active != active:
-            self.is_active = active
-            self._update_style()
+    def update_marker_info(self, marker: Marker, fps: float):
+        """Обновить информацию о маркере в карточке."""
+        self.marker = marker
+        self.fps = fps
 
-    def set_playing(self, playing: bool):
-        """Установить статус воспроизводимого события."""
-        if self.is_playing != playing:
-            self.is_playing = playing
-            self._update_style()
+        # Update index
+        self.id_label.setText(f"#{self.marker_idx + 1}")
+
+        # Update start time
+        start_time = self._format_time(marker.start_frame / fps if fps > 0 else 0)
+        self.time_label.setText(start_time)
+
+        # Update duration
+        duration_frames = marker.end_frame - marker.start_frame
+        duration_time = self._format_time(duration_frames / fps if fps > 0 else 0)
+        self.duration_label.setText(duration_time)
+
+        # Update event name
+        from ..utils.custom_events import get_custom_event_manager
+        event_manager = get_custom_event_manager()
+        event = event_manager.get_event(marker.event_name)
+        event_name = event.get_localized_name() if event else marker.event_name
+        self.event_label.setText(event_name)
+
+        # Update colors
+        self._update_colors()
 
     def mouseDoubleClickEvent(self, event):
         """Обработка двойного клика - воспроизведение."""
@@ -288,7 +205,6 @@ class PreviewWindow(QMainWindow):
         self.setWindowTitle("🎬 Кинотеатр событий - Презентация тренерам")
         self.setGeometry(100, 100, 1400, 800)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # Немодальное окно
-        self.setStyleSheet(self._get_dark_stylesheet())
         
         # Параметры воспроизведения
         self.current_marker_idx = 0
@@ -309,6 +225,33 @@ class PreviewWindow(QMainWindow):
         from ..utils.custom_events import get_custom_event_manager
         self.event_manager = get_custom_event_manager()
         self.event_manager.events_changed.connect(self._on_events_changed)
+
+        # Connect to controller's playback time changed signal for active card highlighting
+        self.controller.playback_time_changed.connect(self._on_playback_time_changed)
+
+    def _on_playback_time_changed(self, frame_idx: int):
+        """Handle playback time changes to highlight active event cards."""
+        # Find which card should be active based on current frame
+        active_marker_idx = None
+
+        for i in range(self.markers_list.count()):
+            item = self.markers_list.item(i)
+            card = item.data(Qt.ItemDataRole.UserRole)
+            if card:
+                # Check if current frame is within this marker's range
+                if card.marker.start_frame <= frame_idx <= card.marker.end_frame:
+                    active_marker_idx = card.marker_idx
+                    break
+
+        # Update active state for all cards
+        for i in range(self.markers_list.count()):
+            item = self.markers_list.item(i)
+            card = item.data(Qt.ItemDataRole.UserRole)
+            if card:
+                is_active = (card.marker_idx == active_marker_idx)
+                # Only update if state actually changed to avoid unnecessary repolishing
+                if card.property("active") != is_active:
+                    card.set_active(is_active)
 
     def _init_filters(self):
         """Инициализация состояния фильтров."""
@@ -871,7 +814,6 @@ class PreviewWindow(QMainWindow):
             card = item.data(Qt.ItemDataRole.UserRole)
             if card:
                 card.set_active(False)
-                card.set_playing(False)
 
         # Найти и выделить карточку текущего маркера
         for i in range(self.markers_list.count()):
@@ -879,9 +821,8 @@ class PreviewWindow(QMainWindow):
             card = item.data(Qt.ItemDataRole.UserRole)
             if card and card.marker_idx == self.current_marker_idx:
                 card.set_active(True)
-                # Если воспроизведение активно, показать что эта карточка воспроизводится
-                if self.is_playing:
-                    card.set_playing(True)
+                # Автоскролл к активной карточке
+                self.markers_list.scrollToItem(item)
                 break
 
     def _passes_filters(self, marker):
@@ -1241,93 +1182,3 @@ class PreviewWindow(QMainWindow):
         marker.note = self.notes_edit.text().strip()
         self.controller.markers_changed.emit()
         self._update_marker_list()
-
-    def _get_dark_stylesheet(self) -> str:
-        """Тёмный стиль."""
-        return """
-        QMainWindow, QWidget {
-            background-color: #1a1a1a;
-            color: #ffffff;
-        }
-        QPushButton {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 5px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #444444;
-        }
-        QPushButton:checked {
-            background-color: #ffcc00;
-            color: #000000;
-            border: 2px solid #ffaa00;
-        }
-        QPushButton:checked:hover {
-            background-color: #ffdd44;
-        }
-        QSlider::groove:horizontal {
-            background: #333333;
-            height: 6px;
-            border-radius: 3px;
-        }
-        QSlider::handle:horizontal {
-            background: #ffcc00;
-            width: 14px;
-            margin: -4px 0;
-            border-radius: 7px;
-        }
-        QListWidget {
-            background-color: #2a2a2a;
-            color: #ffffff;
-            border: 1px solid #555555;
-        }
-        QTableWidget {
-            background-color: #2a2a2a;
-            color: #ffffff;
-            border: 1px solid #444444;
-            gridline-color: #444444;
-            selection-background-color: #1a4d7a;
-        }
-        QTableWidget::item {
-            padding: 2px;
-            border-bottom: 1px solid #333333;
-        }
-        QTableWidget::item:selected {
-            background-color: #1a4d7a;
-        }
-        QHeaderView::section {
-            background-color: #333333;
-            color: #ffffff;
-            padding: 4px;
-            border: 1px solid #555555;
-            font-weight: bold;
-            font-size: 10px;
-        }
-        QTableWidget QTableCornerButton::section {
-            background-color: #333333;
-            border: 1px solid #555555;
-        }
-        QLabel, QCheckBox {
-            color: #ffffff;
-        }
-        QComboBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-        }
-        QGroupBox {
-            border: 1px solid #555555;
-            border-radius: 4px;
-            margin-top: 8px;
-            padding-top: 8px;
-        }
-        QLineEdit {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-            padding: 3px;
-            border-radius: 3px;
-        }
-        """

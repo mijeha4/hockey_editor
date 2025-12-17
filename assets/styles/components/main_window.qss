@@ -141,7 +141,6 @@ QSplitter::handle {
     background-color: #555555;
     border: 1px solid #555555;
     border-radius: 2px;
-    transition: background-color var(--transition-time) ease;
 }
 
 QSplitter::handle:hover {
@@ -279,18 +278,16 @@ QPushButton[class="nav-button"]:pressed {
 
 /* Контейнеры с закругленными углами */
 QWidget[class="rounded-container"] {
-    background-color: var(--secondary-bg);
-    border: var(--border-width) solid var(--border-color);
+    background-color: #2a2a2a;
+    border: 1px solid #555555;
     border-radius: 6px;
-    padding: var(--padding-medium);
-    box-shadow: 0 2px 6px var(--shadow-color);
+    padding: 5px;
 }
 
 /* Тени для контейнеров */
 QWidget[class="shadow-container"] {
-    background-color: var(--secondary-bg);
-    border: var(--border-width) solid var(--border-color);
+    background-color: #2a2a2a;
+    border: 1px solid #555555;
     border-radius: 6px;
-    padding: var(--padding-medium);
-    box-shadow: 0 2px 6px var(--shadow-color);
+    padding: 5px;
 }

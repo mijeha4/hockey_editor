@@ -86,7 +86,6 @@ class ExportDialog(QDialog):
         
         self.setWindowTitle("Export Segments")
         self.setGeometry(200, 200, 700, 650)
-        self.setStyleSheet(self._get_dark_stylesheet())
         
         self._setup_ui()
 
@@ -442,64 +441,3 @@ class ExportDialog(QDialog):
             self.export_worker.cancel()
             self.export_worker.wait()
         self.reject()
-
-    def _get_dark_stylesheet(self) -> str:
-        """Тёмный стиль."""
-        return """
-        QDialog, QGroupBox {
-            background-color: #1a1a1a;
-            color: #ffffff;
-        }
-        QGroupBox {
-            border: 1px solid #444444;
-            border-radius: 4px;
-            margin-top: 8px;
-            padding-top: 8px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 3px 0 3px;
-        }
-        QLabel {
-            color: #ffffff;
-        }
-        QPushButton {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 6px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #444444;
-        }
-        QComboBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-            padding: 4px;
-        }
-        QSpinBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-        }
-        QProgressBar {
-            background-color: #333333;
-            border: 1px solid #555555;
-            border-radius: 3px;
-            text-align: center;
-            color: #ffffff;
-        }
-        QProgressBar::chunk {
-            background-color: #ffcc00;
-        }
-        QCheckBox {
-            color: #ffffff;
-        }
-        QScrollArea {
-            background-color: #2a2a2a;
-            border: 1px solid #444444;
-        }
-        """

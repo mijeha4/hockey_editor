@@ -39,7 +39,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Хоккейный Редактор")
         self.setGeometry(0, 0, 1800, 1000)
-        self.setStyleSheet(self._get_dark_stylesheet())
 
         # Поддержка drag-drop для видео
         self.setAcceptDrops(True)
@@ -694,48 +693,7 @@ class MainWindow(QMainWindow):
         secs = int(seconds) % 60
         return f"{minutes:02d}:{secs:02d}"
 
-    def _get_dark_stylesheet(self) -> str:
-        """Тёмный стиль."""
-        return """
-        QMainWindow, QWidget {
-            background-color: #1a1a1a;
-            color: #ffffff;
-        }
-        QPushButton {
-            background-color: #333333;
-            color: white;
-            border: 1px solid #555555;
-            padding: 5px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #444444;
-        }
-        QSlider::groove:horizontal {
-            background: #333333;
-            height: 6px;
-            border-radius: 3px;
-        }
-        QSlider::handle:horizontal {
-            background: #ffcc00;
-            width: 14px;
-            margin: -4px 0;
-            border-radius: 7px;
-        }
-        QListWidget {
-            background-color: #2a2a2a;
-            color: #ffffff;
-            border: 1px solid #555555;
-        }
-        QLabel {
-            color: #ffffff;
-        }
-        QComboBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-        }
-        """
+
 
     # ===== MENU HANDLERS =====
     
