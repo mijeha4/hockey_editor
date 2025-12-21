@@ -17,7 +17,6 @@ class PlayerControls(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(50)  # Фиксированная высота
-        self.setStyleSheet(self._get_stylesheet())
         self._setup_ui()
 
     def _setup_ui(self):
@@ -28,12 +27,14 @@ class PlayerControls(QWidget):
 
         # Уменьшить скорость
         self.speed_down_btn = QPushButton("⏪")
+        self.speed_down_btn.setProperty("class", "speed-control")
         self.speed_down_btn.setToolTip("Уменьшить скорость")
         self.speed_down_btn.clicked.connect(lambda: self.speedStepChanged.emit(-1))
         layout.addWidget(self.speed_down_btn)
 
         # Play/Pause (большая кнопка)
         self.play_pause_btn = QPushButton("▶")
+        self.play_pause_btn.setProperty("class", "play-pause")
         self.play_pause_btn.setFixedWidth(60)
         self.play_pause_btn.setToolTip("Play/Pause (Space)")
         self.play_pause_btn.clicked.connect(self.playClicked.emit)
@@ -41,6 +42,7 @@ class PlayerControls(QWidget):
 
         # Увеличить скорость
         self.speed_up_btn = QPushButton("⏩")
+        self.speed_up_btn.setProperty("class", "speed-control")
         self.speed_up_btn.setToolTip("Увеличить скорость")
         self.speed_up_btn.clicked.connect(lambda: self.speedStepChanged.emit(1))
         layout.addWidget(self.speed_up_btn)
@@ -50,7 +52,6 @@ class PlayerControls(QWidget):
 
         # Speed combo
         speed_label = QLabel("Speed:")
-        speed_label.setStyleSheet("color: #ffffff; margin-right: 5px;")
         layout.addWidget(speed_label)
 
         self.speed_combo = QComboBox()
@@ -97,92 +98,3 @@ class PlayerControls(QWidget):
             items = [self.speed_combo.itemText(i) for i in range(self.speed_combo.count())]
             closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - speed))
             self.speed_combo.setCurrentText(closest_item)
-
-    def _get_stylesheet(self) -> str:
-        """Получить QSS стили для панели управления."""
-        return """
-        PlayerControls {
-            background-color: #1a1a1a;
-            border-top: 1px solid #333333;
-        }
-
-        QPushButton {
-            background-color: transparent;
-            color: #ffffff;
-            border: none;
-            padding: 8px;
-            border-radius: 3px;
-            font-size: 14px;
-            min-width: 30px;
-        }
-
-        QPushButton:hover {
-            background-color: #333333;
-        }
-
-        QPushButton:pressed {
-            background-color: #444444;
-        }
-
-        QPushButton:disabled {
-            color: #666666;
-        }
-
-        QLabel {
-            color: #ffffff;
-            font-size: 12px;
-        }
-
-        QComboBox {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-            border-radius: 3px;
-            padding: 2px;
-            min-width: 50px;
-        }
-
-        QComboBox:hover {
-            border-color: #777777;
-        }
-
-        QComboBox::drop-down {
-            border: none;
-        }
-
-        QComboBox::down-arrow {
-            image: none;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 4px solid #ffffff;
-            margin-right: 5px;
-        }
-
-        QComboBox QAbstractItemView {
-            background-color: #333333;
-            color: #ffffff;
-            border: 1px solid #555555;
-            selection-background-color: #444444;
-        }
-
-        QSlider {
-            background-color: transparent;
-        }
-
-        QSlider::groove:horizontal {
-            background: #333333;
-            height: 4px;
-            border-radius: 2px;
-        }
-
-        QSlider::handle:horizontal {
-            background: #666666;
-            width: 12px;
-            margin: -4px 0;
-            border-radius: 6px;
-        }
-
-        QSlider::handle:horizontal:hover {
-            background: #888888;
-        }
-        """

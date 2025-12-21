@@ -311,7 +311,6 @@ class InstanceEditWindow(QMainWindow):
         # 1. Видеоплеер
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setStyleSheet("background-color: black; border: 1px solid #444;")
         self.video_label.setMinimumSize(640, 360)
         layout.addWidget(self.video_label, stretch=1)
 
@@ -320,7 +319,7 @@ class InstanceEditWindow(QMainWindow):
 
         # Таймкоды слева
         self.lbl_start = QLabel("00:00")
-        self.lbl_start.setStyleSheet("color: #FFFF00; font-weight: bold;")  # Желтый для IN
+        self.lbl_start.setProperty("class", "time-label")
         trim_panel.addWidget(self.lbl_start)
 
         # Слайдер
@@ -334,7 +333,7 @@ class InstanceEditWindow(QMainWindow):
 
         # Таймкоды справа
         self.lbl_end = QLabel("00:00")
-        self.lbl_end.setStyleSheet("color: #FFFF00; font-weight: bold;")
+        self.lbl_end.setProperty("class", "time-label")
         trim_panel.addWidget(self.lbl_end)
 
         layout.addLayout(trim_panel)
@@ -344,7 +343,6 @@ class InstanceEditWindow(QMainWindow):
 
         # Группа IN (слева)
         in_group = QFrame()
-        in_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
         in_layout = QHBoxLayout(in_group)
         in_layout.setContentsMargins(2, 2, 2, 2) # Компактнее
         in_layout.setSpacing(1)
@@ -355,7 +353,6 @@ class InstanceEditWindow(QMainWindow):
         btn_in_minus.clicked.connect(lambda: self._nudge_in(-1))
 
         lbl_in_title = QLabel(" IN ")
-        lbl_in_title.setStyleSheet("font-weight: bold; color: #FFF; border: none;")
         lbl_in_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         btn_in_plus = QPushButton("▶") # Стрелка вправо
@@ -385,7 +382,6 @@ class InstanceEditWindow(QMainWindow):
 
         # Группа OUT (справа)
         out_group = QFrame()
-        out_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
         out_layout = QHBoxLayout(out_group)
         out_layout.setContentsMargins(2, 2, 2, 2) # Компактнее
         out_layout.setSpacing(1)
@@ -396,7 +392,6 @@ class InstanceEditWindow(QMainWindow):
         btn_out_minus.clicked.connect(lambda: self._nudge_out(-1))
 
         lbl_out_title = QLabel(" OUT ")
-        lbl_out_title.setStyleSheet("font-weight: bold; color: #FFF; border: none;")
         lbl_out_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         btn_out_plus = QPushButton("▶") # Стрелка вправо
@@ -449,51 +444,15 @@ class InstanceEditWindow(QMainWindow):
         if self.filtered_markers:
             # Предыдущий клип
             self.btn_prev = QPushButton("◀ Предыдущий")
+            self.btn_prev.setProperty("class", "nav-button")
             self.btn_prev.setMaximumWidth(120)
-            self.btn_prev.setStyleSheet("""
-                QPushButton {
-                    background-color: #333333;
-                    color: white;
-                    border: 1px solid #555555;
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #444444;
-                }
-                QPushButton:pressed {
-                    background-color: #222222;
-                }
-                QPushButton:disabled {
-                    background-color: #222222;
-                    color: #666666;
-                }
-            """)
             self.btn_prev.clicked.connect(self._navigate_previous)
             buttons_layout.addWidget(self.btn_prev)
 
             # Следующий клип
             self.btn_next = QPushButton("Следующий ▶")
+            self.btn_next.setProperty("class", "nav-button")
             self.btn_next.setMaximumWidth(120)
-            self.btn_next.setStyleSheet("""
-                QPushButton {
-                    background-color: #333333;
-                    color: white;
-                    border: 1px solid #555555;
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background-color: #444444;
-                }
-                QPushButton:pressed {
-                    background-color: #222222;
-                }
-                QPushButton:disabled {
-                    background-color: #222222;
-                    color: #666666;
-                }
-            """)
             self.btn_next.clicked.connect(self._navigate_next)
             buttons_layout.addWidget(self.btn_next)
 
@@ -503,23 +462,8 @@ class InstanceEditWindow(QMainWindow):
 
         # Кнопка Сохранить (зеленая, акцентная)
         self.save_btn = QPushButton("✓ Сохранить")
+        self.save_btn.setProperty("class", "save-button")
         self.save_btn.setMaximumWidth(100)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2d5016;
-                color: white;
-                border: 1px solid #3d6b1f;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3d6b1f;
-            }
-            QPushButton:pressed {
-                background-color: #1f3a0f;
-            }
-        """)
         self.save_btn.clicked.connect(self._accept_changes)
         buttons_layout.addWidget(self.save_btn)
 
@@ -830,13 +774,19 @@ class InstanceEditWindow(QMainWindow):
 
         if in_group and out_group:
             if self.active_point == 'in':
-                # IN активна - зеленая рамка
-                in_group.setStyleSheet("background-color: #2a2a2a; border: 2px solid #00AA00; border-radius: 4px;")
-                out_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
+                # IN активна - добавить класс in-active
+                in_group.setProperty("class", "in-active")
+                out_group.setProperty("class", "")
             else:
-                # OUT активна - зеленая рамка
-                in_group.setStyleSheet("background-color: #2a2a2a; border-radius: 4px;")
-                out_group.setStyleSheet("background-color: #2a2a2a; border: 2px solid #00AA00; border-radius: 4px;")
+                # OUT активна - добавить класс out-active
+                in_group.setProperty("class", "")
+                out_group.setProperty("class", "out-active")
+
+            # Обновить стили
+            in_group.style().unpolish(in_group)
+            in_group.style().polish(in_group)
+            out_group.style().unpolish(out_group)
+            out_group.style().polish(out_group)
 
     def closeEvent(self, event):
         self.playback_timer.stop()

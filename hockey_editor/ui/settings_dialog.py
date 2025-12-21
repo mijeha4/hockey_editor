@@ -160,9 +160,9 @@ class SettingsDialog(QDialog):
     def save_and_close(self):
         """Сохранить настройки и закрыть."""
         # Режим расстановки
-        mode_str = "dynamic" if self.mode_combo.currentIndex() == 0 else "fixed_length"
-        from ..core.video_controller import RecordingMode
-        self.controller.set_recording_mode(RecordingMode(mode_str))
+        from ..core.event_creation_controller import RecordingMode
+        mode = RecordingMode.DYNAMIC if self.mode_combo.currentIndex() == 0 else RecordingMode.FIXED_LENGTH
+        self.controller.set_recording_mode(mode)
 
         # Фиксированная длина
         self.controller.set_fixed_duration(self.fixed_duration_spin.value())

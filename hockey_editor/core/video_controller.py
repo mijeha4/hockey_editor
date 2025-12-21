@@ -4,6 +4,7 @@ from enum import Enum
 import json
 import os
 from .video_processor import VideoProcessor
+from .event_creation_controller import EventCreationController, RecordingMode
 from ..models.marker import Marker, EventType
 from ..utils.settings_manager import get_settings_manager
 from ..utils.custom_events import get_custom_event_manager
@@ -38,6 +39,14 @@ class VideoController(QObject):
         # CustomEventManager - менеджер событий
         self.event_manager = get_custom_event_manager()
 
+        # EventCreationController - контроллер создания событий
+        self.event_creation_controller = EventCreationController(self)
+
+        # Подключить сигналы EventCreationController
+        self.event_creation_controller.recording_status_changed.connect(self.recording_status_changed)
+        self.event_creation_controller.markers_changed.connect(self.markers_changed)
+        self.event_creation_controller.timeline_update.connect(self.timeline_update)
+
         # UndoRedoManager
         from ..utils.undo_redo import UndoRedoManager
         self.undo_redo = UndoRedoManager()
@@ -49,20 +58,8 @@ class VideoController(QObject):
         self.frame_time_ms = 33  # ~30 FPS (рассчитывается на основе FPS видео)
         self.playback_speed = 1.0  # Скорость воспроизведения (1.0 = нормальная скорость)
 
-        # Параметры расстановки отрезков (загрузить из QSettings)
-        mode_str = self.settings.load_recording_mode()
-        self.recording_mode = RecordingMode(mode_str)
-        self.fixed_duration_sec = self.settings.load_fixed_duration()
-        self.pre_roll_sec = self.settings.load_pre_roll()
-        self.post_roll_sec = self.settings.load_post_roll()
-
         # Загрузить скорость воспроизведения
         self.playback_speed = self.settings.load_playback_speed()
-
-        # Состояние текущей записи (динамический режим)
-        self.is_recording = False
-        self.recording_event_name: Optional[str] = None  # Имя события вместо EventType
-        self.recording_start_frame: Optional[int] = None
 
     def load_video(self, video_path: str) -> bool:
         """Загрузить видеофайл (ПАУЗИРОВАН!)."""
@@ -159,88 +156,8 @@ class VideoController(QObject):
             self.frame_ready.emit(frame)
 
     def on_hotkey_pressed(self, key: str):
-        """Обработка нажатия горячей клавиши."""
-        # Найти событие по клавише
-        event = self.event_manager.get_event_by_hotkey(key)
-        if not event:
-            return  # Нет события для этой клавиши
-
-        current_frame = self.processor.get_current_frame_idx()
-        event_name = event.name
-
-        if self.recording_mode == RecordingMode.DYNAMIC:
-            self._handle_dynamic_mode(event_name, current_frame)
-        elif self.recording_mode == RecordingMode.FIXED_LENGTH:
-            self._handle_fixed_length_mode(event_name, current_frame)
-
-    def _handle_dynamic_mode(self, event_name: str, current_frame: int):
-        """Динамический режим: два нажатия = начало и конец."""
-        if not self.is_recording:
-            # Начало записи
-            self.is_recording = True
-            self.recording_event_name = event_name
-            self.recording_start_frame = current_frame
-            self.recording_status_changed.emit(event_name, "Recording")
-            self.timeline_update.emit()
-        elif self.recording_event_name == event_name:
-            # Конец записи
-            pre_roll_frames = max(0, int(self.pre_roll_sec * self.processor.fps))
-            start_frame = max(0, self.recording_start_frame - pre_roll_frames)
-
-            marker = Marker(
-                start_frame=start_frame,
-                end_frame=current_frame,
-                event_name=event_name,
-                note=""
-            )
-            self.markers.append(marker)
-
-            # Автооткат начала отрезка
-            self.seek_frame(start_frame)
-
-            self.is_recording = False
-            self.recording_event_name = None
-            self.recording_start_frame = None
-
-            self.recording_status_changed.emit(event_name, "Complete")
-            self.markers_changed.emit()
-            self.timeline_update.emit()
-
-    def _handle_fixed_length_mode(self, event_name: str, current_frame: int):
-        """Фиксированная длина: одно нажатие = отрезок фиксированной длины."""
-        # Рассчитать границы
-        fixed_frames = int(self.fixed_duration_sec * self.processor.fps)
-        pre_roll_frames = max(0, int(self.pre_roll_sec * self.processor.fps))
-
-        start_frame = max(0, current_frame - pre_roll_frames)
-        end_frame = min(self.processor.total_frames - 1, current_frame + fixed_frames - pre_roll_frames)
-
-        # Создать отрезок
-        marker = Marker(
-            start_frame=start_frame,
-            end_frame=end_frame,
-            event_name=event_name,
-            note=""
-        )
-        self.markers.append(marker)
-
-        # Визуальная обратная связь
-        self.recording_status_changed.emit(event_name, "Fixed")
-
-        # Автооткат начала отрезка
-        self.seek_frame(start_frame)
-
-        self.markers_changed.emit()
-        self.timeline_update.emit()
-
-    def cancel_recording(self):
-        """Отменить текущую запись."""
-        if self.is_recording:
-            self.is_recording = False
-            self.recording_event_name = None
-            self.recording_start_frame = None
-            self.recording_status_changed.emit("", "Cancelled")
-            self.timeline_update.emit()
+        """Обработка нажатия горячей клавиши - делегировать EventCreationController."""
+        self.event_creation_controller.on_hotkey_pressed(key)
 
     def delete_marker(self, idx: int):
         """Удалить отрезок (с undo/redo)."""
@@ -259,25 +176,25 @@ class VideoController(QObject):
         self.markers_changed.emit()
         self.timeline_update.emit()
 
-    def set_recording_mode(self, mode: RecordingMode):
-        """Установить режим расстановки отрезков."""
-        self.recording_mode = mode
-        self.settings.save_recording_mode(mode.value)
+    def cancel_recording(self):
+        """Отменить текущую запись - делегировать EventCreationController."""
+        self.event_creation_controller.cancel_recording()
+
+    def set_recording_mode(self, mode):
+        """Установить режим расстановки отрезков - делегировать EventCreationController."""
+        self.event_creation_controller.set_recording_mode(mode)
 
     def set_fixed_duration(self, seconds: int):
-        """Установить фиксированную длину отрезка."""
-        self.fixed_duration_sec = seconds
-        self.settings.save_fixed_duration(seconds)
+        """Установить фиксированную длину отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_fixed_duration(seconds)
 
     def set_pre_roll(self, seconds: float):
-        """Установить откат перед началом отрезка."""
-        self.pre_roll_sec = seconds
-        self.settings.save_pre_roll(seconds)
+        """Установить откат перед началом отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_pre_roll(seconds)
 
     def set_post_roll(self, seconds: float):
-        """Установить добавление в конец отрезка."""
-        self.post_roll_sec = seconds
-        self.settings.save_post_roll(seconds)
+        """Установить добавление в конец отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_post_roll(seconds)
 
     def set_playback_speed(self, speed: float):
         """Установить скорость воспроизведения."""
@@ -301,6 +218,26 @@ class VideoController(QObject):
     def get_playback_speed(self) -> float:
         """Получить текущую скорость воспроизведения."""
         return self.playback_speed
+
+    @property
+    def recording_mode(self):
+        """Получить текущий режим записи."""
+        return self.event_creation_controller.recording_mode
+
+    @property
+    def fixed_duration_sec(self):
+        """Получить фиксированную длительность."""
+        return self.event_creation_controller.fixed_duration_sec
+
+    @property
+    def pre_roll_sec(self):
+        """Получить предварительный откат."""
+        return self.event_creation_controller.pre_roll_sec
+
+    @property
+    def post_roll_sec(self):
+        """Получить добавление в конец."""
+        return self.event_creation_controller.post_roll_sec
 
     # Метод update_hotkeys убран - hotkeys теперь управляются через CustomEventManager
 
