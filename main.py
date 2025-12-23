@@ -1,37 +1,30 @@
 #!/usr/bin/env python3
 """
-Hockey Editor Pro - Professional Video Analysis Tool
+Hockey Editor - MVC Architecture
 Main entry point
 """
 
 import sys
 import os
 
-# Добавить hockey_editor в путь
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'hockey_editor'))
+# Добавить src в путь для импортов
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from PySide6.QtWidgets import QApplication
-from hockey_editor.core.video_controller import VideoController
-from hockey_editor.ui.main_window import MainWindow
-from hockey_editor.utils.style_manager import get_style_manager
+from controllers.main_controller import MainController
 
 
 def main():
     """Запуск приложения."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Hockey Editor Pro")
-    app.setApplicationVersion("2.0.0")
+    app.setApplicationName("Hockey Editor")
+    app.setApplicationVersion("1.0.0")
 
-    # Initialize global design system
-    style_manager = get_style_manager()
-    style_manager.apply_global_styles()
+    # Создать главный контроллер (он создаст все компоненты)
+    controller = MainController()
 
-    # Создать контроллер
-    controller = VideoController()
-
-    # Создать главное окно
-    window = MainWindow(controller)
-    window.show()
+    # Запустить приложение
+    controller.run()
 
     sys.exit(app.exec())
 

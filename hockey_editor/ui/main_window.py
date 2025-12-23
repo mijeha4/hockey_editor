@@ -417,10 +417,18 @@ class MainWindow(QMainWindow):
         if not self.controller.markers:
             QMessageBox.warning(self, "Warning", "No segments to preview")
             return
-        
+
         from .preview_window import PreviewWindow
         self.preview_window = PreviewWindow(self.controller, self)
         self.preview_window.show()
+
+        # Исправление проблемы с масштабированием видео при первом показе окна
+        # Принудительно обновить геометрию после show()
+        QTimer.singleShot(0, lambda: (
+            self.preview_window.layout().activate(),
+            self.preview_window.updateGeometry(),
+            self.preview_window._display_current_frame()
+        ))
 
     def _on_settings_clicked(self):
         """Открыть настройки."""

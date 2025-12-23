@@ -155,6 +155,11 @@ class StyleManager(QObject):
         for var_name, var_value in self._variables.items():
             stylesheet = stylesheet.replace(f'@{var_name}', var_value)
 
+        # Debug: Check for invalid color names
+        if '#666666' in stylesheet:
+            print("WARNING: Found '#666666' in processed stylesheet!")
+            print("This indicates a variable substitution issue.")
+
         return stylesheet
 
     def _get_fallback_stylesheet(self) -> str:
@@ -195,6 +200,11 @@ class StyleManager(QObject):
         """Apply the global stylesheet to the QApplication instance."""
         if self._stylesheet_cache is None:
             self._stylesheet_cache = self._load_stylesheet()
+
+        # Debug: Check final stylesheet for issues
+        if '#666666' in self._stylesheet_cache:
+            print("CRITICAL: '#666666' found in final stylesheet!")
+            print("This will cause Qt CSS parser errors.")
 
         app = QApplication.instance()
         if app:

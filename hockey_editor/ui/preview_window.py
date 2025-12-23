@@ -10,11 +10,13 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage, QFont, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QListWidget, QListWidgetItem,
+    QSlider, QListView,
     QCheckBox, QComboBox, QGroupBox, QSpinBox, QLineEdit, QButtonGroup,
     QTextEdit, QTimeEdit, QFormLayout,
     QFrame, QSizePolicy
 )
+from .event_list_model import MarkersListModel
+from .event_card_delegate import EventCardDelegate
 from ..models.marker import Marker, EventType
 from .drawing_overlay import DrawingOverlay, DrawingTool
 
@@ -205,7 +207,7 @@ class PreviewWindow(QMainWindow):
         self.setWindowTitle("🎬 Кинотеатр событий - Презентация тренерам")
         self.setGeometry(100, 100, 1400, 800)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # Немодальное окно
-        
+
         # Параметры воспроизведения
         self.current_marker_idx = 0
         self.is_playing = False
@@ -215,6 +217,13 @@ class PreviewWindow(QMainWindow):
 
         # Инициализация фильтров
         self._init_filters()
+
+        # Создание модели и делегата для списка маркеров
+        self.markers_model = MarkersListModel(self)
+        self.markers_delegate = EventCardDelegate(self)
+        self.markers_delegate.play_clicked.connect(self._on_card_play_requested)
+        self.markers_delegate.edit_clicked.connect(self._on_card_edit_requested)
+        self.markers_delegate.delete_clicked.connect(self._on_card_delete_requested)
 
         self._setup_ui()
         self._setup_shortcuts()
@@ -234,14 +243,12 @@ class PreviewWindow(QMainWindow):
         # Find which card should be active based on current frame
         active_marker_idx = None
 
-        for i in range(self.markers_list.count()):
-            item = self.markers_list.item(i)
-            card = item.data(Qt.ItemDataRole.UserRole)
-            if card:
-                # Check if current frame is within this marker's range
-                if card.marker.start_frame <= frame_idx <= card.marker.end_frame:
-                    active_marker_idx = card.marker_idx
-                    break
+        # Проверяем все маркеры в модели
+        for row in range(self.markers_model.rowCount()):
+            original_idx, marker = self.markers_model.get_marker_at(row)
+            if marker and marker.start_frame <= frame_idx <= marker.end_frame:
+                active_marker_idx = original_idx
+                break
 
         # Update current_marker_idx if we found an active marker
         if active_marker_idx is not None:
@@ -624,7 +631,8 @@ class PreviewWindow(QMainWindow):
 
         # Контейнер для видео с наложением рисования
         self.video_container = QWidget()
-        self.video_container.setMinimumSize(800, 450)
+        self.video_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_container.setMinimumSize(1, 1)
         self.video_container.setStyleSheet("background-color: black; border: 1px solid #555555;")
 
         # Видео
@@ -686,23 +694,27 @@ class PreviewWindow(QMainWindow):
         self._setup_filters(list_layout)
 
         # Список карточек событий
-        self.markers_list = QListWidget()
+        self.markers_list = QListView()
+        self.markers_list.setModel(self.markers_model)
+        self.markers_list.setItemDelegate(self.markers_delegate)
         self.markers_list.setStyleSheet("""
-            QListWidget {
+            QListView {
                 background-color: #2a2a2a;
                 border: 1px solid #444444;
                 outline: none;
+                alternate-background-color: #2a2a2a;
             }
-            QListWidget::item {
+            QListView::item {
                 border-bottom: 1px solid #333333;
                 padding: 2px;
             }
-            QListWidget::item:selected {
+            QListView::item:selected {
                 background-color: #1a4d7a;
             }
         """)
         self.markers_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.markers_list.setSpacing(2)
+        self.markers_list.setUniformItemSizes(True)  # Все элементы одинакового размера
 
         list_layout.addWidget(self.markers_list)
 
@@ -714,31 +726,14 @@ class PreviewWindow(QMainWindow):
 
     def _update_marker_list(self):
         """Обновить список карточек событий с фильтрацией."""
-        self.markers_list.clear()  # Очистить список
-
         fps = self.controller.get_fps()
-        filtered_markers = []  # Список (оригинальный_индекс, marker)
 
-        # Собираем отфильтрованные маркеры
-        for idx, marker in enumerate(self.controller.markers):
-            if self._passes_filters(marker):
-                filtered_markers.append((idx, marker))
+        # Установить FPS в делегате для форматирования времени
+        self.markers_delegate.set_fps(fps)
 
-        # Создаем карточки для каждого маркера
-        for original_idx, marker in filtered_markers:
-            # Создать карточку события
-            card = EventCard(original_idx, marker, fps)
-            card.play_requested.connect(self._on_card_play_requested)
-            card.edit_requested.connect(self._on_card_edit_requested)
-            card.delete_requested.connect(self._on_card_delete_requested)
-
-            # Создать элемент списка для карточки
-            item = QListWidgetItem(self.markers_list)
-            item.setSizeHint(card.sizeHint())
-            self.markers_list.setItemWidget(item, card)
-
-            # Сохранить ссылку на карточку для последующего доступа
-            item.setData(Qt.ItemDataRole.UserRole, card)
+        # Обновить модель с новыми данными и фильтрами
+        self.markers_model.set_fps(fps)
+        self.markers_model.set_markers(self.controller.markers)
 
         # Выделить текущую активную карточку
         self._update_active_card_highlight()
@@ -805,22 +800,15 @@ class PreviewWindow(QMainWindow):
 
     def _update_active_card_highlight(self):
         """Выделить активную карточку (которая воспроизводится сейчас)."""
-        # Снять выделение со всех карточек
-        for i in range(self.markers_list.count()):
-            item = self.markers_list.item(i)
-            card = item.data(Qt.ItemDataRole.UserRole)
-            if card:
-                card.set_active(False)
+        # Найти строку в модели для текущего маркера
+        row = self.markers_model.find_row_by_marker_idx(self.current_marker_idx)
 
-        # Найти и выделить карточку текущего маркера
-        for i in range(self.markers_list.count()):
-            item = self.markers_list.item(i)
-            card = item.data(Qt.ItemDataRole.UserRole)
-            if card and card.marker_idx == self.current_marker_idx:
-                card.set_active(True)
-                # Автоскролл к активной карточке
-                self.markers_list.scrollToItem(item)
-                break
+        if row >= 0:
+            # Выделить элемент в QListView
+            index = self.markers_model.index(row, 0)
+            self.markers_list.setCurrentIndex(index)
+            # Автоскролл к выделенному элементу
+            self.markers_list.scrollTo(index)
 
     def _passes_filters(self, marker):
         """Проверить, проходит ли маркер через текущие фильтры."""

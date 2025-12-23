@@ -32,7 +32,6 @@ QDialog {
     color: @primary_text;
     border: 2px solid @border_color;
     border-radius: 8px;
-    box-shadow: 0 4px 12px @shadow_color;
 }
 
 QSplitter::handle {
@@ -158,6 +157,8 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     padding: @padding_medium;
     selection-background-color: @selected_bg;
     selection-color: @primary_text;
+    show-decoration-selected: 1;
+    border-style: none;
 }
 
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
@@ -704,17 +705,14 @@ PlayerControls QPushButton[class="play-pause"] {
     min-width: 70px;
     padding: 12px;
     border-radius: 6px;
-    box-shadow: 0 2px 4px @shadow_color;
 }
 
 PlayerControls QPushButton[class="play-pause"]:hover {
     background-color: #0056A3;
-    box-shadow: 0 4px 8px rgba(0, 122, 204, 0.3);
 }
 
 PlayerControls QPushButton[class="play-pause"]:pressed {
     background-color: #004080;
-    box-shadow: 0 1px 2px @shadow_color;
 }
 
 PlayerControls QLabel[class="time-label"] {
