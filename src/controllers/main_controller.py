@@ -48,6 +48,7 @@ class MainController:
         self.timeline_controller = TimelineController(
             self.project,
             self.main_window.get_timeline_view().scene,
+            self.main_window.get_segment_list(),  # Добавить ссылку на SegmentList
             self.history_manager
         )
 

@@ -1,12 +1,12 @@
 from PySide6.QtWidgets import QGraphicsView
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QBrush, QColor
 from PySide6.QtCore import Qt
 from typing import List, Dict
 from .scene import TimelineScene
 
 
 class TimelineView(QGraphicsView):
-    """Виджет отображения таймлайна."""
+    """Виджет отображения таймлайна с темной темой."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,6 +23,9 @@ class TimelineView(QGraphicsView):
 
         # Настройки взаимодействия
         self.setDragMode(QGraphicsView.NoDrag)
+
+        # Темная тема для сцены
+        self.scene.setBackgroundBrush(QBrush(QColor("#1e1e1e")))
 
     def wheelEvent(self, event):
         """Обработка колесика мыши для зума."""

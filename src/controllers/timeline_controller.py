@@ -6,12 +6,14 @@ try:
     from models.domain.project import Project
     from services.history import HistoryManager, Command
     from views.components.timeline.scene import TimelineScene
+    from views.components.segment_list import SegmentList
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ..models.domain.marker import Marker
     from ..models.domain.project import Project
     from ..services.history import HistoryManager, Command
     from ..views.components.timeline.scene import TimelineScene
+    from ..views.components.segment_list import SegmentList
 
 
 class AddMarkerCommand(Command):
@@ -33,18 +35,20 @@ class AddMarkerCommand(Command):
 
 
 class TimelineController:
-    """Контроллер управления маркерами."""
+    """Контроллер управления маркерами с синхронизацией UI."""
 
     def __init__(self, project: Project,
                  timeline_scene: TimelineScene,
+                 segment_list: SegmentList,
                  history_manager: HistoryManager):
         self.project = project
         self.timeline_scene = timeline_scene
+        self.segment_list = segment_list
         self.history_manager = history_manager
 
         # Подключить сигналы от View
         self.timeline_scene.marker_clicked.connect(self._on_marker_clicked)
-        self.timeline_scene.marker_moved.connect(self._on_marker_moved)
+        self.segment_list.selection_changed.connect(self._on_segment_selected)
 
     def add_marker(self, start_frame: int, end_frame: int, event_name: str, note: str = ""):
         """Добавить маркер."""
@@ -62,20 +66,27 @@ class TimelineController:
         self.refresh_view()
 
     def _on_marker_clicked(self, marker_id: int):
-        """Обработка клика на маркере."""
+        """Обработка клика на маркере в сцене."""
         print(f"Marker clicked: {marker_id}")
-        # Здесь можно открыть диалог редактирования
+        # Синхронизировать выделение в таблице
+        self.segment_list.table.selectRow(marker_id)
 
-    def _on_marker_moved(self, marker_id: int, new_start: int, new_end: int):
-        """Обработка перемещения маркера."""
-        print(f"Marker moved: {marker_id} -> {new_start}-{new_end}")
-        # Здесь можно создать команду изменения
+    def _on_segment_selected(self, segment_id: int):
+        """Обработка выбора сегмента в таблице."""
+        print(f"Segment selected: {segment_id}")
+        # Синхронизировать выделение в сцене
+        # Здесь можно добавить логику выделения маркера на сцене
 
     def refresh_view(self):
-        """Обновить отображение маркеров."""
-        markers_data = []
+        """Обновить отображение маркеров в обоих компонентах."""
+        # Данные для сцены таймлайна
+        scene_markers_data = []
+        # Данные для таблицы сегментов
+        table_segments_data = []
+
         for i, marker in enumerate(self.project.markers):
-            markers_data.append({
+            # Данные для сцены
+            scene_markers_data.append({
                 'id': i,
                 'start_frame': marker.start_frame,
                 'end_frame': marker.end_frame,
@@ -84,4 +95,17 @@ class TimelineController:
                 'note': marker.note
             })
 
-        self.timeline_scene.set_markers(markers_data)
+            # Данные для таблицы
+            table_segments_data.append({
+                'id': i,
+                'event_name': marker.event_name,
+                'start_frame': marker.start_frame,
+                'end_frame': marker.end_frame,
+                'color': '#FF0000'  # Пока фиксированный цвет
+            })
+
+        # Обновить сцену таймлайна
+        self.timeline_scene.set_markers(scene_markers_data)
+
+        # Обновить таблицу сегментов
+        self.segment_list.set_segments(table_segments_data)
