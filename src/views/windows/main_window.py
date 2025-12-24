@@ -18,6 +18,7 @@ class MainWindow(QMainWindow):
     load_project_triggered = Signal()
     new_project_triggered = Signal()
     open_settings_triggered = Signal()
+    export_triggered = Signal()
 
     # Сигнал для клавиш
     key_pressed = Signal(str)  # Нажатая клавиша (например, 'G', 'H')
@@ -80,6 +81,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # Export
+        export_action = file_menu.addAction("&Export...")
+        export_action.setShortcut(QKeySequence("Ctrl+E"))
+        export_action.triggered.connect(self._on_export)
+
+        file_menu.addSeparator()
+
         # Exit
         exit_action = file_menu.addAction("E&xit")
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -109,6 +117,10 @@ class MainWindow(QMainWindow):
     def _on_open_preferences(self):
         """Обработка открытия настроек."""
         self.open_settings_triggered.emit()
+
+    def _on_export(self):
+        """Обработка экспорта."""
+        self.export_triggered.emit()
 
     def keyPressEvent(self, event: QKeyEvent):
         """Обработка нажатий клавиш для горячих клавиш событий."""

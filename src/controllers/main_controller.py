@@ -10,6 +10,7 @@ try:
     from controllers.playback_controller import PlaybackController
     from controllers.timeline_controller import TimelineController
     from controllers.project_controller import ProjectController
+    from controllers.export import ExportController
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ..models.domain.project import Project
@@ -22,6 +23,7 @@ except ImportError:
     from .playback_controller import PlaybackController
     from .timeline_controller import TimelineController
     from .project_controller import ProjectController
+    from .export import ExportController
 
 
 class MainController:
@@ -57,6 +59,9 @@ class MainController:
 
         self.project_controller = ProjectController(self.project_io)
 
+        # Создать export controller (lazy initialization)
+        self.export_controller = None
+
         # Настроить связи
         self._setup_connections()
 
@@ -73,6 +78,7 @@ class MainController:
         self.main_window.load_project_triggered.connect(self._on_load_project)
         self.main_window.new_project_triggered.connect(self._on_new_project)
         self.main_window.open_settings_triggered.connect(self._on_open_settings)
+        self.main_window.export_triggered.connect(self._on_export)
 
         # Подключить сигнал клавиш
         self.main_window.key_pressed.connect(self._on_key_pressed)
@@ -208,6 +214,17 @@ class MainController:
         dialog = SettingsDialog(self.settings, self.main_window)
         dialog.settings_saved.connect(self._on_settings_saved)
         dialog.exec()
+
+    def _on_export(self):
+        """Обработка экспорта."""
+        # Создать export controller если еще не создан
+        if self.export_controller is None:
+            video_path = getattr(self.project, 'video_path', '')
+            fps = self.video_service.get_fps() if self.video_service.cap else 30.0
+            self.export_controller = ExportController(self.project, video_path, fps)
+
+        # Показать диалог экспорта
+        self.export_controller.show_dialog()
 
     def _on_settings_saved(self, new_settings: AppSettings):
         """Обработка сохранения настроек."""
