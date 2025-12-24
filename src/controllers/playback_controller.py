@@ -1,4 +1,4 @@
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal, Qt
 from PySide6.QtGui import QPixmap, QImage
 import cv2
 import numpy as np
@@ -129,6 +129,6 @@ class PlaybackController(QObject):
         pixmap = QPixmap.fromImage(qt_image)
 
         # Масштабировать для отображения
-        pixmap = pixmap.scaledToWidth(800, QPixmap.TransformationMode.SmoothTransformation)
+        pixmap = pixmap.scaledToWidth(800, Qt.TransformationMode.SmoothTransformation)
 
         return pixmap

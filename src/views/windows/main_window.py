@@ -1,15 +1,26 @@
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter,
+    QMenuBar, QMenu, QFileDialog
 )
-from PySide6.QtGui import QPixmap
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap, QKeySequence, QKeyEvent
+from PySide6.QtCore import Qt, Signal
 from ..components.player_controls import PlayerControls
 from ..components.timeline.view import TimelineView
 from ..components.segment_list import SegmentList
 
 
 class MainWindow(QMainWindow):
-    """Главное окно приложения с темной темой и сложной версткой."""
+    """Главное окно приложения с темной темой, меню и обработкой клавиш."""
+
+    # Сигналы для меню
+    open_video_triggered = Signal()
+    save_project_triggered = Signal()
+    load_project_triggered = Signal()
+    new_project_triggered = Signal()
+    open_settings_triggered = Signal()
+
+    # Сигнал для клавиш
+    key_pressed = Signal(str)  # Нажатая клавиша (например, 'G', 'H')
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -20,7 +31,105 @@ class MainWindow(QMainWindow):
         # Применить темную тему
         self._apply_dark_theme()
 
+        # Создать меню
+        self._create_menu_bar()
+
         self._setup_ui()
+
+    def _create_menu_bar(self):
+        """Создать главное меню."""
+        menubar = self.menuBar()
+
+        # Меню File
+        file_menu = menubar.addMenu("&File")
+
+        # Меню Edit
+        edit_menu = menubar.addMenu("&Edit")
+
+        # Preferences
+        preferences_action = edit_menu.addAction("&Preferences...")
+        preferences_action.setShortcut(QKeySequence("Ctrl+,"))
+        preferences_action.triggered.connect(self._on_open_preferences)
+
+        # New Project
+        new_action = file_menu.addAction("&New Project")
+        new_action.setShortcut(QKeySequence.StandardKey.New)
+        new_action.triggered.connect(self._on_new_project)
+
+        # Open Video
+        open_video_action = file_menu.addAction("&Open Video...")
+        open_video_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_video_action.triggered.connect(self._on_open_video)
+
+        file_menu.addSeparator()
+
+        # Open Project
+        open_project_action = file_menu.addAction("Open &Project...")
+        open_project_action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        open_project_action.triggered.connect(self._on_load_project)
+
+        # Save Project
+        save_action = file_menu.addAction("&Save Project")
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self._on_save_project)
+
+        # Save Project As
+        save_as_action = file_menu.addAction("Save Project &As...")
+        save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        save_as_action.triggered.connect(self._on_save_project_as)
+
+        file_menu.addSeparator()
+
+        # Exit
+        exit_action = file_menu.addAction("E&xit")
+        exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        exit_action.triggered.connect(self.close)
+
+    def _on_new_project(self):
+        """Обработка New Project."""
+        self.new_project_triggered.emit()
+
+    def _on_open_video(self):
+        """Обработка Open Video."""
+        self.open_video_triggered.emit()
+
+    def _on_load_project(self):
+        """Обработка Open Project."""
+        self.load_project_triggered.emit()
+
+    def _on_save_project(self):
+        """Обработка Save Project."""
+        self.save_project_triggered.emit()
+
+    def _on_save_project_as(self):
+        """Обработка Save Project As."""
+        # Пока просто эмитим тот же сигнал
+        self.save_project_triggered.emit()
+
+    def _on_open_preferences(self):
+        """Обработка открытия настроек."""
+        self.open_settings_triggered.emit()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """Обработка нажатий клавиш для горячих клавиш событий."""
+        # Игнорируем, если фокус в поле ввода или другом редактируемом виджете
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+
+        # Обычные буквы (A-Z)
+        if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
+            key_char = chr(key).upper()
+            self.key_pressed.emit(key_char)
+            return
+
+        # Специальные клавиши (если понадобятся)
+        # if key == Qt.Key.Key_Space:
+        #     self.key_pressed.emit('SPACE')
+
+        # Вызываем родительский обработчик для остальных клавиш
+        super().keyPressEvent(event)
 
     def _apply_dark_theme(self):
         """Применить темную тему ко всему приложению."""

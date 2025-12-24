@@ -1,10 +1,50 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
+from enum import Enum
+
+
+class RecordingMode(Enum):
+    """Режимы расстановки маркеров."""
+    DYNAMIC = "dynamic"          # Два нажатия = начало и конец
+    FIXED_LENGTH = "fixed_length"  # Одно нажатие = отрезок фиксированной длины
+
+
+@dataclass
+class EventType:
+    """Тип события с настройками."""
+    name: str
+    color: str
+    shortcut: str
+    description: str = ""
 
 
 @dataclass
 class AppSettings:
     """Модель настроек приложения."""
+
+    # Список событий по умолчанию (13 штук)
+    default_events: List[EventType] = field(default_factory=lambda: [
+        # Shooting
+        EventType(name='Goal', color='#FF0000', shortcut='G', description='Goal scored'),
+        EventType(name='Shot on Goal', color='#FF5722', shortcut='H', description='Shot on goal'),
+        EventType(name='Missed Shot', color='#FF9800', shortcut='M', description='Shot missed the net'),
+        EventType(name='Blocked Shot', color='#795548', shortcut='B', description='Shot blocked'),
+
+        # Zone Entries/Exits
+        EventType(name='Zone Entry', color='#2196F3', shortcut='Z', description='Entry into offensive zone'),
+        EventType(name='Zone Exit', color='#03A9F4', shortcut='X', description='Exit from defensive zone'),
+        EventType(name='Dump In', color='#00BCD4', shortcut='D', description='Dump puck into zone'),
+
+        # Possession
+        EventType(name='Turnover', color='#607D8B', shortcut='T', description='Loss of puck possession'),
+        EventType(name='Takeaway', color='#4CAF50', shortcut='A', description='Puck possession gained'),
+        EventType(name='Faceoff Win', color='#8BC34A', shortcut='F', description='Faceoff won'),
+        EventType(name='Faceoff Loss', color='#558B2F', shortcut='L', description='Faceoff lost'),
+
+        # Defense
+        EventType(name='Defensive Block', color='#3F51B5', shortcut='K', description='Shot blocked in defense'),
+        EventType(name='Penalty', color='#9C27B0', shortcut='P', description='Penalty called'),
+    ])
 
     # Горячие клавиши
     hotkeys: Dict[str, str] = field(default_factory=lambda: {

@@ -1,11 +1,12 @@
-from PySide6.QtWidgets import QGraphicsScene
-from PySide6.QtCore import Signal, QObject
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsRectItem, QGraphicsTextItem
+from PySide6.QtCore import Signal, QObject, QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPen
 from typing import List, Dict
 from .items import MarkerItem, PlayheadItem
 
 
 class TimelineScene(QGraphicsScene):
-    """Сцена таймлайна с маркерами и плейхедом."""
+    """Сцена таймлайна с маркерами, дорожками и плейхедом."""
 
     # Сигналы
     marker_clicked = Signal(int)  # marker_id
@@ -21,15 +22,75 @@ class TimelineScene(QGraphicsScene):
         # Хранилище маркеров
         self.marker_items = {}  # marker_id -> MarkerItem
 
+        # Хранилище элементов фона дорожек
+        self.track_backgrounds = []  # Список QGraphicsRectItem для фона
+        self.track_headers = []      # Список QGraphicsTextItem для заголовков
+
         # Настройки масштаба
         self.pixels_per_frame = 0.5
         self.track_height = 30
+
+    def init_tracks(self, event_types: List, duration_frames: int):
+        """
+        Инициализировать дорожки с фоном и заголовками.
+
+        Args:
+            event_types: Список EventType объектов
+            duration_frames: Общая длительность видео в кадрах
+        """
+        # Очистить старые элементы фона (но не маркеры и плейхед!)
+        for item in self.track_backgrounds:
+            self.removeItem(item)
+        for item in self.track_headers:
+            self.removeItem(item)
+
+        self.track_backgrounds.clear()
+        self.track_headers.clear()
+
+        # Рассчитать ширину сцены
+        scene_width = duration_frames * self.pixels_per_frame + 200  # +200 для заголовков
+
+        # Цвета фона дорожек (зебра)
+        track_colors = [QColor("#2b2b2b"), QColor("#333333")]  # Темный и чуть светлее
+
+        for i, event_type in enumerate(event_types):
+            # Рассчитать Y-позицию дорожки
+            y = i * self.track_height + 10
+
+            # Создать фон дорожки (длинный прямоугольник)
+            track_rect = QRectF(120, y, scene_width - 120, self.track_height)  # 120 - место для заголовков
+            background = QGraphicsRectItem(track_rect)
+
+            # Установить цвет фона (чередование)
+            background.setBrush(QBrush(track_colors[i % 2]))
+            background.setPen(QPen(Qt.PenStyle.NoPen))  # Без границы
+
+            # Z-index: 0 (фон ниже всего)
+            background.setZValue(0)
+
+            self.addItem(background)
+            self.track_backgrounds.append(background)
+
+            # Создать заголовок дорожки
+            header_text = QGraphicsTextItem(event_type.name)
+            header_text.setPos(10, y + 5)  # Смещение для центрирования
+
+            # Стилизация текста
+            header_text.setDefaultTextColor(QColor("#ffffff"))
+            font = QFont("Segoe UI", 10, QFont.Weight.Bold)
+            header_text.setFont(font)
+
+            # Z-index: 0 (фон)
+            header_text.setZValue(0)
+
+            self.addItem(header_text)
+            self.track_headers.append(header_text)
 
     def set_markers(self, markers_data: List[Dict]):
         """
         Установить маркеры.
         markers_data: [{'id': int, 'start_frame': int, 'end_frame': int,
-                       'color': str, 'event_name': str, 'note': str}, ...]
+                       'color': str, 'event_name': str, 'note': str, 'track_index': int}, ...]
         """
         # Очистить старые маркеры (кроме плейхеда)
         for item in self.items():
@@ -39,8 +100,6 @@ class TimelineScene(QGraphicsScene):
         self.marker_items.clear()
 
         # Создать новые маркеры
-        y_offset = 10  # Отступ от верха
-
         for marker_data in markers_data:
             marker_id = marker_data['id']
             start_frame = marker_data['start_frame']
@@ -48,6 +107,7 @@ class TimelineScene(QGraphicsScene):
             color = marker_data['color']
             event_name = marker_data['event_name']
             note = marker_data.get('note', '')
+            track_index = marker_data.get('track_index', 0)  # Индекс дорожки
 
             # Создать элемент
             marker_item = MarkerItem(marker_id, start_frame, end_frame,
@@ -59,7 +119,10 @@ class TimelineScene(QGraphicsScene):
             if width < 10:
                 width = 10
 
-            marker_item.set_geometry(x, y_offset, width, self.track_height)
+            # Рассчитать Y-позицию на основе индекса дорожки
+            y = track_index * self.track_height + 10  # 10 - отступ от верха
+
+            marker_item.set_geometry(x, y, width, self.track_height)
             marker_item.setToolTip(marker_item.get_tooltip_text())
 
             # Добавить на сцену
