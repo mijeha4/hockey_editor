@@ -5,12 +5,12 @@ import numpy as np
 # Используем абсолютные импорты для совместимости с run_test.py
 try:
     from services.video_engine import VideoService
-    from views.components.player_controls import PlayerControls
+    from views.widgets.player_controls import PlayerControls
     from views.windows.main_window import MainWindow
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ..services.video_engine import VideoService
-    from ..views.components.player_controls import PlayerControls
+    from ..views.widgets.player_controls import PlayerControls
     from ..views.windows.main_window import MainWindow
 
 
@@ -32,11 +32,12 @@ class PlaybackController(QObject):
 
         self.playing = False
         self.current_frame = 0
+        self._speed = 1.0  # Скорость воспроизведения
 
         # Подключить сигналы от View
-        self.player_controls.play_clicked.connect(self.play)
-        self.player_controls.pause_clicked.connect(self.pause)
-        self.player_controls.seek_requested.connect(self.seek_to_frame)
+        self.player_controls.play_toggled.connect(self._on_play_toggled)
+        self.player_controls.speed_changed.connect(self._on_speed_changed)
+        self.player_controls.seek_frame.connect(self.seek_to_frame)
 
     def load_video(self, video_path: str) -> bool:
         """Загрузить видео."""
@@ -80,6 +81,23 @@ class PlaybackController(QObject):
         """Перемотать на кадр."""
         self.current_frame = frame_idx
         self._display_current_frame()
+
+    def get_speed(self) -> float:
+        """Возвращает текущую скорость воспроизведения."""
+        return self._speed
+
+    def _on_play_toggled(self, is_playing: bool):
+        """Handle play/pause toggle from player controls."""
+        if is_playing:
+            self.play()
+        else:
+            self.pause()
+
+    def _on_speed_changed(self, speed: float):
+        """Handle speed change from player controls."""
+        # For now, just print the speed change
+        # In a full implementation, this would adjust playback speed
+        print(f"Playback speed changed to: {speed}x")
 
     def _on_playback_tick(self):
         """Таймер воспроизведения."""

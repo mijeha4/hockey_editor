@@ -1,56 +1,68 @@
+"""
+Main Window - Primary application window for Hockey Editor.
+
+Provides the main UI layout with video player, timeline, segment list,
+event shortcuts panel, advanced filtering, and comprehensive menu system.
+"""
+
+from typing import Optional, List
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter,
-    QMenuBar, QMenu, QFileDialog
+    QMenuBar, QMenu, QStatusBar, QComboBox, QCheckBox, QPushButton,
+    QMessageBox, QFileDialog, QSpinBox
 )
-from PySide6.QtGui import QPixmap, QKeySequence, QKeyEvent
-from PySide6.QtCore import Qt, Signal
-from ..components.player_controls import PlayerControls
-from ..components.timeline.view import TimelineView
-from ..components.segment_list import SegmentList
+from PySide6.QtGui import QPixmap, QKeySequence, QKeyEvent, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import Qt, Signal, QTimer
+
+# Импорты для работы из корня проекта (main.py добавляет src в sys.path)
+from views.widgets.player_controls import PlayerControls
+from views.widgets.segment_list import SegmentListWidget
+# Используем новую профессиональную timeline
+from hockey_editor.ui.timeline_graphics import TimelineWidget
+from views.styles import get_application_stylesheet
+# Импортируем EventShortcutListWidget
+from hockey_editor.ui.event_shortcut_list_widget import EventShortcutListWidget
 
 
 class MainWindow(QMainWindow):
-    """Главное окно приложения с темной темой, меню и обработкой клавиш."""
+    """Main application window with video editing interface."""
 
-    # Сигналы для меню
+    # Signals for menu actions
     open_video_triggered = Signal()
     save_project_triggered = Signal()
     load_project_triggered = Signal()
     new_project_triggered = Signal()
     open_settings_triggered = Signal()
     export_triggered = Signal()
+    open_preview_triggered = Signal()
 
-    # Сигнал для клавиш
-    key_pressed = Signal(str)  # Нажатая клавиша (например, 'G', 'H')
+    # Signal for keyboard shortcuts
+    key_pressed = Signal(str)  # Pressed key (e.g., 'G', 'H')
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("Hockey Editor")
-        self.setGeometry(100, 100, 1400, 900)
+        self.setWindowTitle("Хоккейный Редактор")
+        self.setGeometry(0, 0, 1800, 1000)
 
-        # Применить темную тему
-        self._apply_dark_theme()
+        # Поддержка drag-drop для видео
+        self.setAcceptDrops(True)
 
-        # Создать меню
+        # Apply application stylesheet
+        self.setStyleSheet(get_application_stylesheet())
+
+        # Create menu bar
         self._create_menu_bar()
 
+        # Setup UI
         self._setup_ui()
 
-    def _create_menu_bar(self):
-        """Создать главное меню."""
+    def _create_menu_bar(self) -> None:
+        """Create the main menu bar."""
         menubar = self.menuBar()
 
-        # Меню File
+        # File menu
         file_menu = menubar.addMenu("&File")
-
-        # Меню Edit
-        edit_menu = menubar.addMenu("&Edit")
-
-        # Preferences
-        preferences_action = edit_menu.addAction("&Preferences...")
-        preferences_action.setShortcut(QKeySequence("Ctrl+,"))
-        preferences_action.triggered.connect(self._on_open_preferences)
 
         # New Project
         new_action = file_menu.addAction("&New Project")
@@ -93,187 +105,297 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
 
-    def _on_new_project(self):
-        """Обработка New Project."""
-        self.new_project_triggered.emit()
+        # Edit menu
+        edit_menu = menubar.addMenu("&Edit")
 
-    def _on_open_video(self):
-        """Обработка Open Video."""
-        self.open_video_triggered.emit()
+        # Preferences
+        preferences_action = edit_menu.addAction("&Preferences...")
+        preferences_action.setShortcut(QKeySequence("Ctrl+,"))
+        preferences_action.triggered.connect(self._on_open_preferences)
 
-    def _on_load_project(self):
-        """Обработка Open Project."""
-        self.load_project_triggered.emit()
+        # View menu
+        view_menu = menubar.addMenu("&View")
 
-    def _on_save_project(self):
-        """Обработка Save Project."""
-        self.save_project_triggered.emit()
+        # Preview Window
+        preview_action = view_menu.addAction("&Preview Window")
+        preview_action.setShortcut(QKeySequence("Ctrl+P"))
+        preview_action.triggered.connect(self._on_open_preview)
 
-    def _on_save_project_as(self):
-        """Обработка Save Project As."""
-        # Пока просто эмитим тот же сигнал
-        self.save_project_triggered.emit()
+    def _setup_ui(self) -> None:
+        """Setup the main user interface."""
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
 
-    def _on_open_preferences(self):
-        """Обработка открытия настроек."""
-        self.open_settings_triggered.emit()
-
-    def _on_export(self):
-        """Обработка экспорта."""
-        self.export_triggered.emit()
-
-    def keyPressEvent(self, event: QKeyEvent):
-        """Обработка нажатий клавиш для горячих клавиш событий."""
-        # Игнорируем, если фокус в поле ввода или другом редактируемом виджете
-        if event.isAutoRepeat():
-            return
-
-        key = event.key()
-
-        # Обычные буквы (A-Z)
-        if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
-            key_char = chr(key).upper()
-            self.key_pressed.emit(key_char)
-            return
-
-        # Специальные клавиши (если понадобятся)
-        # if key == Qt.Key.Key_Space:
-        #     self.key_pressed.emit('SPACE')
-
-        # Вызываем родительский обработчик для остальных клавиш
-        super().keyPressEvent(event)
-
-    def _apply_dark_theme(self):
-        """Применить темную тему ко всему приложению."""
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QSplitter::handle {
-                background-color: #404040;
-                border: 1px solid #555555;
-            }
-            QSplitter::handle:hover {
-                background-color: #505050;
-            }
-            QMenuBar {
-                background-color: #333333;
-                color: #ffffff;
-                border-bottom: 1px solid #555555;
-            }
-            QMenuBar::item {
-                background-color: transparent;
-                padding: 4px 8px;
-            }
-            QMenuBar::item:selected {
-                background-color: #444444;
-            }
-            QMenu {
-                background-color: #333333;
-                color: #ffffff;
-                border: 1px solid #555555;
-            }
-            QMenu::item {
-                padding: 4px 20px;
-            }
-            QMenu::item:selected {
-                background-color: #444444;
-            }
-        """)
-
-    def _setup_ui(self):
-        """Создать интерфейс с иерархией виджетов."""
-        central = QWidget()
-        self.setCentralWidget(central)
-
-        main_layout = QVBoxLayout(central)
+        # Main layout
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        # Центральный сплиттер (вертикальный)
-        central_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Create main vertical splitter
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # ===== ВЕРХНЯЯ ПАНЕЛЬ =====
-        top_panel = self._create_top_panel()
-        central_splitter.addWidget(top_panel)
+        # Top section (70% height) - Video and segments
+        top_section = self._create_top_section()
+        main_splitter.addWidget(top_section)
 
-        # ===== НИЖНЯЯ ПАНЕЛЬ (Timeline) =====
-        self.timeline_view = TimelineView()
-        central_splitter.addWidget(self.timeline_view)
+        # Bottom section - Timeline (будет установлен позже через set_timeline_controller)
+        # self.timeline_widget = TimelineWidget()
+        # main_splitter.addWidget(self.timeline_widget)
 
-        # Установить пропорции (70% верх, 30% низ)
-        central_splitter.setSizes([630, 270])
+        # Set splitter proportions (70% top, 30% bottom)
+        main_splitter.setSizes([630, 270])
 
-        main_layout.addWidget(central_splitter)
+        # Add main splitter to layout
+        main_layout.addWidget(main_splitter)
 
-    def _create_top_panel(self) -> QWidget:
-        """Создать верхнюю панель с видео и списком сегментов."""
-        panel = QWidget()
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        # Create footer (status bar and shortcuts)
+        self._create_footer(main_layout)
 
-        # Левый сплиттер (горизонтальный) для видео и списка
-        left_splitter = QSplitter(Qt.Orientation.Horizontal)
+    def _create_top_section(self) -> QWidget:
+        """Create the top section with video player and segment list."""
+        top_widget = QWidget()
 
-        # ===== ВИДЕО КОНТЕЙНЕР =====
+        # Horizontal splitter for video/segments
+        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left side - Video container
         video_container = self._create_video_container()
-        left_splitter.addWidget(video_container)
+        horizontal_splitter.addWidget(video_container)
 
-        # ===== СПИСОК СЕГМЕНТОВ =====
-        self.segment_list = SegmentList()
-        left_splitter.addWidget(self.segment_list)
+        # Right side - Segment list
+        self.segment_list_widget = SegmentListWidget()
+        horizontal_splitter.addWidget(self.segment_list_widget)
 
-        # Установить пропорции (60% видео, 40% список)
-        left_splitter.setSizes([840, 560])
+        # Set proportions (60% video, 40% segments)
+        horizontal_splitter.setSizes([840, 560])
 
-        layout.addWidget(left_splitter)
-        return panel
+        # Layout for top widget
+        layout = QHBoxLayout(top_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(horizontal_splitter)
+
+        return top_widget
 
     def _create_video_container(self) -> QWidget:
-        """Создать контейнер для видео и управления."""
+        """Create the video container with video display and controls."""
         container = QWidget()
+
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Видео экран
-        self.video_label = QLabel("Video Screen")
+        # Video display (placeholder QLabel)
+        self.video_label = QLabel("Video Display")
         self.video_label.setMinimumSize(640, 360)
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setStyleSheet("""
             QLabel {
-                background-color: #1a1a1a;
+                background-color: #000000;
+                color: #666666;
                 border: 2px solid #444444;
-                color: #888888;
-                font-size: 14px;
+                font-size: 16px;
+                font-weight: bold;
             }
         """)
-        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.video_label)
 
-        # Панель управления
+        # Player controls
         self.player_controls = PlayerControls()
         layout.addWidget(self.player_controls)
 
         return container
 
-    def set_video_image(self, pixmap: QPixmap):
-        """Установить изображение видео."""
+    def _create_footer(self, parent_layout: QVBoxLayout) -> None:
+        """Create the footer with status bar and shortcuts panel."""
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.status_bar.showMessage("Ready")
+        self.setStatusBar(self.status_bar)
+
+        # Shortcuts panel
+        try:
+            from hockey_editor.ui.event_shortcut_list_widget import EventShortcutListWidget
+            self.shortcuts_widget = EventShortcutListWidget()
+            parent_layout.addWidget(self.shortcuts_widget)
+        except ImportError:
+            # Fallback if import fails
+            self.shortcuts_widget = QLabel("Event Shortcuts (Import failed)")
+            self.shortcuts_widget.setStyleSheet("color: #888888; padding: 5px;")
+            parent_layout.addWidget(self.shortcuts_widget)
+
+    # Menu action handlers
+    def _on_new_project(self) -> None:
+        """Handle new project action."""
+        self.new_project_triggered.emit()
+
+    def _on_open_video(self) -> None:
+        """Handle open video action."""
+        self.open_video_triggered.emit()
+
+    def _on_load_project(self) -> None:
+        """Handle load project action."""
+        self.load_project_triggered.emit()
+
+    def _on_save_project(self) -> None:
+        """Handle save project action."""
+        self.save_project_triggered.emit()
+
+    def _on_save_project_as(self) -> None:
+        """Handle save project as action."""
+        # For now, emit the same signal as save
+        self.save_project_triggered.emit()
+
+    def _on_open_preferences(self) -> None:
+        """Handle open preferences action."""
+        self.open_settings_triggered.emit()
+
+    def _on_export(self) -> None:
+        """Handle export action."""
+        self.export_triggered.emit()
+
+    def _on_open_preview(self) -> None:
+        """Handle open preview window action."""
+        self.open_preview_triggered.emit()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle key press events for shortcuts."""
+        # Ignore auto-repeats
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+
+        # Handle letter keys (A-Z)
+        if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
+            key_char = chr(key).upper()
+            self.key_pressed.emit(key_char)
+            return
+
+        # Handle other keys if needed
+        super().keyPressEvent(event)
+
+    # Public interface methods
+    def set_video_image(self, pixmap: QPixmap) -> None:
+        """Set the video display image."""
         self.video_label.setPixmap(pixmap)
 
-    def set_window_title(self, title: str):
-        """Установить заголовок окна."""
-        self.setWindowTitle(f"Hockey Editor - {title}")
+    def set_window_title(self, title: str) -> None:
+        """Set the window title with project name."""
+        if title:
+            self.setWindowTitle(f"Hockey Editor - {title}")
+        else:
+            self.setWindowTitle("Hockey Editor")
+
+    def update_status_bar(self, message: str) -> None:
+        """Update the status bar message."""
+        self.status_bar.showMessage(message)
 
     def get_player_controls(self) -> PlayerControls:
-        """Получить виджет управления плеером."""
+        """Get the player controls widget."""
         return self.player_controls
 
-    def get_timeline_view(self) -> TimelineView:
-        """Получить виджет таймлайна."""
-        return self.timeline_view
+    def get_segment_list_widget(self) -> SegmentListWidget:
+        """Get the segment list widget."""
+        return self.segment_list_widget
 
-    def get_segment_list(self) -> SegmentList:
-        """Получить виджет списка сегментов."""
-        return self.segment_list
+    def get_timeline_widget(self) -> TimelineWidget:
+        """Get the timeline widget."""
+        return self.timeline_widget
+
+    def get_shortcuts_widget(self) -> Optional[QWidget]:
+        """Get the shortcuts widget."""
+        return getattr(self, 'shortcuts_widget', None)
+
+    def set_timeline_controller(self, controller) -> None:
+        """Set the timeline controller and create timeline widget.
+
+        Args:
+            controller: TimelineController instance
+        """
+        # Создать timeline widget с controller
+        self.timeline_widget = TimelineWidget(controller)
+
+        # Добавить timeline widget в splitter
+        central_widget = self.centralWidget()
+        main_layout = central_widget.layout()
+        main_splitter = main_layout.itemAt(0).widget()  # QSplitter
+
+        # Добавить timeline widget как второй элемент splitter
+        main_splitter.addWidget(self.timeline_widget)
+
+    def open_segment_editor(self, segment_idx: int) -> None:
+        """Открыть редактор сегмента.
+
+        Args:
+            segment_idx: Индекс сегмента для редактирования
+        """
+        # Получить маркер по индексу
+        if hasattr(self, '_timeline_controller') and segment_idx < len(self._timeline_controller.markers):
+            marker = self._timeline_controller.markers[segment_idx]
+
+            # Создать и показать диалог редактирования
+            from .instance_edit import InstanceEditWindow
+            dialog = InstanceEditWindow(self)
+            dialog.load_marker(marker)
+
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                # Обновить маркер если изменения приняты
+                updated_marker = dialog.get_result()
+                if updated_marker:
+                    # Заменить маркер в проекте
+                    self._timeline_controller.project.markers[segment_idx] = updated_marker
+                    # Обновить отображение
+                    self._timeline_controller.refresh_view()
+
+    # Drag and drop support
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Обработка входа drag-drop."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        """Обработка drop видеофайла."""
+        for url in event.mimeData().urls():
+            file_path = url.toLocalFile()
+            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')):
+                # Emit signal for video loading
+                self.open_video_triggered.emit()
+                break
+
+    # Extended status bar methods
+    def update_extended_status_bar(self, fps: float, current_frame: int, total_frames: int, speed: float, segment_count: int) -> None:
+        """Обновить расширенный статус-бар с подробной информацией."""
+        if fps > 0 and total_frames > 0:
+            current_time = self._format_time_single(current_frame / fps)
+            total_time = self._format_time_single(total_frames / fps)
+
+            status = f"{current_time}/{total_time} | {segment_count} отрезков | FPS: {fps:.2f} | Speed: {speed:.2f}x"
+
+            # Если воспроизведение, добавить индикатор
+            if hasattr(self, '_is_playing') and self._is_playing:
+                status = "▶ " + status
+
+            self.status_bar.showMessage(status)
+        else:
+            self.status_bar.showMessage("Готов")
+
+    def _format_time_single(self, seconds: float) -> str:
+        """Форматировать время MM:SS."""
+        minutes = int(seconds) // 60
+        secs = int(seconds) % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+    # Filter methods
+    def setup_filters(self) -> None:
+        """Настроить фильтры для сегментов."""
+        # Этот метод будет вызываться из контроллера
+        pass
+
+    def update_event_filter(self) -> None:
+        """Обновить список доступных типов событий в фильтре."""
+        # Этот метод будет реализован в контроллере
+        pass
+
+    # Additional signals
+    video_dropped = Signal(str)  # Signal emitted when video is dropped (file_path)

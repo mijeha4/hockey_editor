@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QGraphicsObject, QScrollArea, QWidget, QVBoxLayout, QMenu
 )
 from PySide6.QtWidgets import QGraphicsItem
-from PySide6.QtCore import Qt, QRectF
+from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction, QFontMetrics
 from ..utils.custom_events import get_custom_event_manager
 
@@ -132,12 +132,11 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        if self.timeline_scene.main_window:
-            try:
-                idx = self.timeline_scene.controller.markers.index(self.marker)
-                self.timeline_scene.main_window.open_segment_editor(idx)
-            except ValueError:
-                pass
+        try:
+            idx = self.timeline_scene.controller.markers.index(self.marker)
+            self.timeline_scene.segment_edit_requested.emit(idx)
+        except ValueError:
+            pass
 
 
 class TrackHeaderItem(QGraphicsObject):
@@ -186,6 +185,10 @@ class TrackHeaderItem(QGraphicsObject):
 
 
 class TimelineGraphicsScene(QGraphicsScene):
+    # Сигналы для взаимодействия
+    seek_requested = Signal(int)  # Frame number to seek to
+    segment_edit_requested = Signal(int)  # Marker index to edit
+
     def __init__(self, controller):
         super().__init__()
         self.controller = controller
@@ -396,8 +399,33 @@ class TimelineWidget(QWidget):
         controller.timeline_update.connect(lambda: self.scene.update_playhead(self.controller.get_current_frame_idx()))
         get_custom_event_manager().events_changed.connect(self.scene.rebuild)
 
+        # Подключаем сигналы от scene
+        self.scene.segment_edit_requested.connect(controller.edit_marker_requested)
+
+        # Вызываем rebuild сразу для инициализации
+        self.scene.rebuild()
+
         # Масштабирование
         self.scale_factor = 1.0
+
+    def set_total_frames(self, total_frames: int):
+        """Установить общее количество кадров видео."""
+        self.controller.set_total_frames(total_frames)
+        self.scene.rebuild()
+
+    def set_fps(self, fps: float):
+        """Установить FPS видео."""
+        self.controller.set_fps(fps)
+        self.scene.rebuild()
+
+    def set_segments(self, segments):
+        """Установить сегменты для отображения."""
+        # Этот метод нужен для совместимости, но в новой реализации сегменты берутся из controller.markers
+        self.scene.rebuild()
+
+    def draw_playhead(self, frame: int):
+        """Нарисовать плейхед на указанном кадре."""
+        self.scene.update_playhead(frame)
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:

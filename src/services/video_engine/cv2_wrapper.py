@@ -49,6 +49,34 @@ class VideoService:
 
         return frame  # numpy array BGR
 
+    def get_current_frame(self) -> Optional[np.ndarray]:
+        """
+        Возвращает текущий кадр без смещения позиции курсора.
+        Используется окном предпросмотра для отрисовки.
+        """
+        if self.cap is None or not self.cap.isOpened():
+            print("VideoService: Видео не загружено или ошибка открытия")
+            return None
+
+        # 1. Запоминаем текущую позицию
+        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+
+        # 2. Принудительно ставим курсор на эту позицию (иногда он сбивается)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
+
+        # 3. Читаем кадр
+        ret, frame = self.cap.read()
+
+        # 4. Возвращаем курсор назад (так как read сдвигает его на +1)
+        # Это важно, чтобы видео не "дергалось"
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
+
+        if not ret:
+            print(f"VideoService: Не удалось прочитать кадр {current_pos}")
+            return None
+
+        return frame
+
     def get_time_from_frame(self, frame: int) -> float:
         """Конвертировать номер кадра в секунды."""
         if self.fps == 0:

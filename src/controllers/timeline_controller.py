@@ -1,4 +1,5 @@
 from typing import List, Dict
+from PySide6.QtCore import Signal, QObject
 
 # Используем абсолютные импорты для совместимости с run_test.py
 try:
@@ -6,16 +7,18 @@ try:
     from models.domain.project import Project
     from models.config.app_settings import AppSettings
     from services.history import HistoryManager, Command
-    from views.components.timeline.scene import TimelineScene
-    from views.components.segment_list import SegmentList
+    from views.widgets.segment_list import SegmentListWidget
+    # Используем новую профессиональную timeline из hockey_editor/ui/
+    from hockey_editor.ui.timeline_graphics import TimelineWidget
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ..models.domain.marker import Marker
     from ..models.domain.project import Project
     from ..models.config.app_settings import AppSettings
     from ..services.history import HistoryManager, Command
-    from ..views.components.timeline.scene import TimelineScene
-    from ..views.components.segment_list import SegmentList
+    from ..views.widgets.segment_list import SegmentListWidget
+    # Используем новую профессиональную timeline из hockey_editor/ui/
+    from hockey_editor.ui.timeline_graphics import TimelineWidget
 
 
 class AddMarkerCommand(Command):
@@ -36,17 +39,23 @@ class AddMarkerCommand(Command):
             self.project.markers.remove(self.marker)
 
 
-class TimelineController:
+class TimelineController(QObject):
     """Контроллер управления маркерами с синхронизацией UI."""
 
+    # Сигналы для новой TimelineWidget
+    markers_changed = Signal()
+    playback_time_changed = Signal(int)
+    timeline_update = Signal()
+
     def __init__(self, project: Project,
-                 timeline_scene: TimelineScene,
-                 segment_list: SegmentList,
+                 timeline_widget: TimelineWidget,
+                 segment_list_widget: SegmentListWidget,
                  history_manager: HistoryManager,
                  settings: AppSettings):
+        super().__init__()
         self.project = project
-        self.timeline_scene = timeline_scene
-        self.segment_list = segment_list
+        self.timeline_widget = timeline_widget
+        self.segment_list_widget = segment_list_widget
         self.history_manager = history_manager
         self.settings = settings
 
@@ -54,9 +63,15 @@ class TimelineController:
         self.recording_start_frame = None
         self.is_recording = False
 
-        # Подключить сигналы от View
-        self.timeline_scene.marker_clicked.connect(self._on_marker_clicked)
-        self.segment_list.selection_changed.connect(self._on_segment_selected)
+        # Текущее состояние воспроизведения
+        self.current_frame = 0
+        self.fps = 30.0
+        self.total_frames = 0
+
+        # Подключить сигналы от View (если timeline_widget уже создан)
+        if self.timeline_widget is not None:
+            self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
+        # segment_list_widget не имеет сигналов выбора, так что убираем эту строку
 
     def handle_hotkey(self, hotkey: str, current_frame: int, fps: float) -> None:
         """
@@ -142,60 +157,66 @@ class TimelineController:
         # Обновить View
         self.refresh_view()
 
-    def _on_marker_clicked(self, marker_id: int):
-        """Обработка клика на маркере в сцене."""
-        print(f"Marker clicked: {marker_id}")
-        # Синхронизировать выделение в таблице
-        self.segment_list.table.selectRow(marker_id)
+    def _on_timeline_seek(self, frame: int):
+        """Обработка клика по таймлайну для перемотки."""
+        print(f"Timeline seek to frame: {frame}")
+        # Здесь можно добавить логику перемотки видео
 
-    def _on_segment_selected(self, segment_id: int):
-        """Обработка выбора сегмента в таблице."""
-        print(f"Segment selected: {segment_id}")
-        # Синхронизировать выделение в сцене
-        # Здесь можно добавить логику выделения маркера на сцене
+    @property
+    def markers(self):
+        """Свойство для доступа к маркерам проекта."""
+        return self.project.markers
+
+    def get_fps(self):
+        """Получить FPS видео."""
+        return self.fps
+
+    def get_total_frames(self):
+        """Получить общее количество кадров видео."""
+        return self.total_frames
+
+    def get_current_frame_idx(self):
+        """Получить текущий кадр воспроизведения."""
+        return self.current_frame
+
+    def seek_frame(self, frame_idx: int):
+        """Перемотать к указанному кадру."""
+        self.current_frame = max(0, min(frame_idx, self.total_frames - 1))
+        self.playback_time_changed.emit(self.current_frame)
+
+    def set_fps(self, fps: float):
+        """Установить FPS видео."""
+        self.fps = fps
+
+    def set_total_frames(self, total_frames: int):
+        """Установить общее количество кадров видео."""
+        self.total_frames = total_frames
 
     def refresh_view(self):
-        """Обновить отображение маркеров в обоих компонентах с правильными цветами и дорожками."""
-        # Создаем маппинги из настроек
-        color_map = {event.name: event.color for event in self.settings.default_events}
-        row_map = {event.name: i for i, event in enumerate(self.settings.default_events)}
+        """Обновить отображение маркеров в обоих компонентах."""
+        # Отправить сигнал об изменении маркеров
+        self.markers_changed.emit()
 
-        # Данные для сцены таймлайна
-        scene_markers_data = []
-        # Данные для таблицы сегментов
-        table_segments_data = []
-
-        for i, marker in enumerate(self.project.markers):
-            # Получаем цвет и индекс дорожки
-            color = color_map.get(marker.event_name, '#CCCCCC')  # Серый по умолчанию
-            track_index = row_map.get(marker.event_name, 0)      # Первая дорожка по умолчанию
-
-            # Данные для сцены
-            scene_markers_data.append({
-                'id': i,
-                'start_frame': marker.start_frame,
-                'end_frame': marker.end_frame,
-                'color': color,
-                'event_name': marker.event_name,
-                'note': marker.note,
-                'track_index': track_index  # Добавляем индекс дорожки
-            })
-
-            # Данные для таблицы
-            table_segments_data.append({
-                'id': i,
-                'event_name': marker.event_name,
-                'start_frame': marker.start_frame,
-                'end_frame': marker.end_frame,
-                'color': color  # Правильный цвет для таблицы
-            })
-
-        # Обновить сцену таймлайна
-        self.timeline_scene.set_markers(scene_markers_data)
+        # Обновить таймлайн
+        self.timeline_widget.set_segments(self.project.markers)
 
         # Обновить таблицу сегментов
-        self.segment_list.set_segments(table_segments_data)
+        self.segment_list_widget.update_segments(self.project.markers)
+
+    def set_timeline_widget(self, timeline_widget):
+        """Установить timeline widget и подключить сигналы."""
+        self.timeline_widget = timeline_widget
+        if self.timeline_widget is not None:
+            self.timeline_widget.scene.seek_requested.connect(self._on_timeline_seek)
+
+    def edit_marker_requested(self, marker_idx: int):
+        """Обработка запроса на редактирование маркера."""
+        if hasattr(self, '_main_window') and self._main_window:
+            self._main_window.open_segment_editor(marker_idx)
 
     def init_tracks(self, total_frames: int):
-        """Инициализировать дорожки с фоном и заголовками."""
-        self.timeline_scene.init_tracks(self.settings.default_events, total_frames)
+        """Инициализировать таймлайн с общим количеством кадров."""
+        self.set_total_frames(total_frames)
+        if self.timeline_widget is not None:
+            self.timeline_widget.set_total_frames(total_frames)
+            self.timeline_widget.set_fps(self.fps)

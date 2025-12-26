@@ -7,8 +7,9 @@ Main entry point
 import sys
 import os
 
-# Добавить src в путь для импортов
+# Добавить src и hockey_editor в путь для импортов
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'hockey_editor'))
 
 from PySide6.QtWidgets import QApplication
 from controllers.main_controller import MainController
