@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QSlider, QListView,
     QCheckBox, QComboBox, QGroupBox, QSpinBox, QLineEdit, QButtonGroup,
     QTextEdit, QTimeEdit, QFormLayout,
-    QFrame, QSizePolicy
+    QFrame, QSizePolicy, QSplitter
 )
 from src.models.ui.event_list_model import MarkersListModel
 from src.views.widgets.event_card_delegate import EventCardDelegate
@@ -298,10 +298,15 @@ class PreviewWindow(QMainWindow):
         main_layout.addLayout(video_layout, 7)
 
         # ===== ПРАВАЯ ЧАСТЬ: СПИСОК ОТРЕЗКОВ (30%) =====
-        list_layout = QVBoxLayout()
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Верхняя часть: список отрезков
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
 
         # ===== КОМПАКТНЫЕ ФИЛЬТРЫ =====
-        self._setup_filters(list_layout)
+        self._setup_filters(top_layout)
 
         # Список карточек событий
         self.markers_list = QListView()
@@ -326,9 +331,23 @@ class PreviewWindow(QMainWindow):
         self.markers_list.setSpacing(2)
         self.markers_list.setUniformItemSizes(True)  # Все элементы одинакового размера
 
-        list_layout.addWidget(self.markers_list)
+        # Подключить сигналы для инспектора
+        self.markers_list.selectionModel().currentChanged.connect(self._on_marker_selection_changed)
 
-        main_layout.addLayout(list_layout, 3)
+        top_layout.addWidget(self.markers_list)
+
+        right_splitter.addWidget(top_widget)
+
+        # Нижняя часть: инспектор
+        self._setup_inspector(right_splitter)
+
+        # Установить пропорции (70% список, 30% инспектор)
+        right_splitter.setSizes([400, 200])
+
+        # Добавить горячие клавиши для редактирования маркеров
+        self._setup_marker_editing_shortcuts()
+
+        main_layout.addWidget(right_splitter, 3)
 
         central.setLayout(main_layout)
 
@@ -860,7 +879,7 @@ class PreviewWindow(QMainWindow):
                 marker.end_frame = max(marker.end_frame, new_start_frame + int(fps))
 
             marker.start_frame = max(0, new_start_frame)
-            self.controller.markers_changed.emit()
+            self.controller.markers_changed()
             self._update_marker_list()
             # Обновить поле в инспекторе
             self._on_marker_selection_changed()
@@ -897,7 +916,7 @@ class PreviewWindow(QMainWindow):
                 marker.start_frame = max(0, new_end_frame - int(fps))
 
             marker.end_frame = min(total_frames - 1, new_end_frame)
-            self.controller.markers_changed.emit()
+            self.controller.markers_changed()
             self._update_marker_list()
             # Обновить поле в инспекторе
             self._on_marker_selection_changed()
@@ -912,9 +931,136 @@ class PreviewWindow(QMainWindow):
         if marker is None:
             return
 
-        marker.note = self.notes_edit.text().strip()
+        marker.note = self.notes_edit.toPlainText().strip()
+        self.controller.markers_changed()
+        self._update_marker_list()
+
+    def _setup_inspector(self, splitter):
+        """Создать панель инспектора для редактирования маркеров."""
+        # Контейнер инспектора
+        inspector_widget = QWidget()
+        inspector_layout = QVBoxLayout(inspector_widget)
+        inspector_layout.setContentsMargins(5, 5, 5, 5)
+        inspector_layout.setSpacing(5)
+
+        # Заголовок
+        title_label = QLabel("Инспектор маркера")
+        title_label.setStyleSheet("font-weight: bold; color: #ffffff; font-size: 12px;")
+        inspector_layout.addWidget(title_label)
+
+        # Форма редактирования
+        form_layout = QFormLayout()
+        form_layout.setSpacing(3)
+
+        # Тип события
+        self.event_type_combo = QComboBox()
+        self.event_type_combo.setMaximumWidth(120)
+        self.event_type_combo.currentTextChanged.connect(self._on_inspector_event_type_changed)
+        form_layout.addRow("Тип:", self.event_type_combo)
+
+        # Время начала
+        self.start_time_edit = QLineEdit()
+        self.start_time_edit.setMaximumWidth(80)
+        self.start_time_edit.setPlaceholderText("MM:SS")
+        self.start_time_edit.textChanged.connect(self._on_inspector_start_time_changed)
+        form_layout.addRow("Начало:", self.start_time_edit)
+
+        # Время конца
+        self.end_time_edit = QLineEdit()
+        self.end_time_edit.setMaximumWidth(80)
+        self.end_time_edit.setPlaceholderText("MM:SS")
+        self.end_time_edit.textChanged.connect(self._on_inspector_end_time_changed)
+        form_layout.addRow("Конец:", self.end_time_edit)
+
+        inspector_layout.addLayout(form_layout)
+
+        # Заметки
+        notes_label = QLabel("Заметки:")
+        notes_label.setStyleSheet("color: #cccccc; font-size: 11px;")
+        inspector_layout.addWidget(notes_label)
+
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setMaximumHeight(60)
+        self.notes_edit.setPlaceholderText("Добавить заметки...")
+        self.notes_edit.textChanged.connect(self._on_inspector_notes_changed)
+        inspector_layout.addWidget(self.notes_edit)
+
+        # Заполнить комбо-бокс типов событий
+        self._update_inspector_event_types()
+
+        splitter.addWidget(inspector_widget)
+
+    def _setup_marker_editing_shortcuts(self):
+        """Настроить горячие клавиши для редактирования маркеров."""
+        # I - установить начало маркера (In-point)
+        self.i_shortcut = QShortcut(QKeySequence("I"), self)
+        self.i_shortcut.activated.connect(self._on_set_marker_start)
+
+        # O - установить конец маркера (Out-point)
+        self.o_shortcut = QShortcut(QKeySequence("O"), self)
+        self.o_shortcut.activated.connect(self._on_set_marker_end)
+
+        # Delete - удалить маркер
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self)
+        self.delete_shortcut.activated.connect(self._on_delete_current_marker)
+
+    def _get_selected_marker(self):
+        """Получить выбранный маркер из списка."""
+        current_index = self.markers_list.currentIndex()
+        if current_index.isValid():
+            return self.markers_model.get_marker_at(current_index.row())
+        return None, None
+
+    def _on_set_marker_start(self):
+        """Установить начало маркера на текущую позицию (клавиша I)."""
+        if not self.controller.markers or self.current_marker_idx >= len(self.controller.markers):
+            return
+
+        marker = self.controller.markers[self.current_marker_idx]
+        current_frame = self.controller.playback_controller.current_frame
+
+        marker.start_frame = current_frame
+        if marker.start_frame > marker.end_frame:
+            marker.end_frame = marker.start_frame + int(self.controller.get_fps())
+
         self.controller.markers_changed.emit()
         self._update_marker_list()
+        self._on_marker_selection_changed()  # Обновить инспектор
+
+    def _on_set_marker_end(self):
+        """Установить конец маркера на текущую позицию (клавиша O)."""
+        if not self.controller.markers or self.current_marker_idx >= len(self.controller.markers):
+            return
+
+        marker = self.controller.markers[self.current_marker_idx]
+        current_frame = self.controller.playback_controller.current_frame
+
+        marker.end_frame = current_frame
+        if marker.end_frame < marker.start_frame:
+            marker.start_frame = max(0, marker.end_frame - int(self.controller.get_fps()))
+
+        self.controller.markers_changed.emit()
+        self._update_marker_list()
+        self._on_marker_selection_changed()  # Обновить инспектор
+
+    def _on_delete_current_marker(self):
+        """Удалить текущий маркер (клавиша Delete)."""
+        if not self.controller.markers or self.current_marker_idx >= len(self.controller.markers):
+            return
+
+        self.controller.delete_marker(self.current_marker_idx)
+        self._update_marker_list()
+
+    def keyPressEvent(self, event):
+        """Обработка горячих клавиш для быстрого редактирования маркеров."""
+        # Защита от конфликтов: не обрабатывать горячие клавиши если фокус в поле ввода
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, (QLineEdit, QTextEdit)):
+            super().keyPressEvent(event)
+            return
+
+        # Обработка уже реализована через QShortcut
+        super().keyPressEvent(event)
 
     def _on_instance_updated_externally(self):
         """Обработка обновления маркера из внешнего окна редактирования."""

@@ -27,8 +27,8 @@ def test_imports():
         print("✅ Services imported successfully")
 
         # Test Views
-        from views.components import PlayerControls
-        from views.components.timeline import TimelineView
+        from views.widgets import PlayerControls
+        from views.widgets import SegmentListWidget
         from views.windows import MainWindow
         print("✅ Views imported successfully")
 

@@ -334,19 +334,17 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_timeline_controller') and segment_idx < len(self._timeline_controller.markers):
             marker = self._timeline_controller.markers[segment_idx]
 
-            # Создать и показать диалог редактирования
-            from .instance_edit import InstanceEditWindow
-            dialog = InstanceEditWindow(self)
-            dialog.load_marker(marker)
+            # Получить MainController через TimelineController
+            # MainController сохраняет ссылку на себя в TimelineController
+            main_controller = getattr(self._timeline_controller, '_main_controller', None)
 
-            if dialog.exec() == dialog.DialogCode.Accepted:
-                # Обновить маркер если изменения приняты
-                updated_marker = dialog.get_result()
-                if updated_marker:
-                    # Заменить маркер в проекте
-                    self._timeline_controller.project.markers[segment_idx] = updated_marker
-                    # Обновить отображение
-                    self._timeline_controller.refresh_view()
+            if main_controller:
+                from src.views.windows.instance_edit import InstanceEditWindow
+                dialog = InstanceEditWindow(marker, main_controller, parent=self)
+                dialog.exec()
+            else:
+                # Fallback: показать сообщение об ошибке
+                QMessageBox.warning(self, "Error", "Cannot open segment editor: controller not available")
 
     # Drag and drop support
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:

@@ -1,10 +1,82 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QSpinBox, QCheckBox, QProgressBar, QMessageBox, QFileDialog, QGroupBox,
     QScrollArea, QWidget
 )
-from typing import List, Dict
+from typing import List, Dict, Optional
+
+
+class ExportWorker(QThread):
+    """Worker thread для экспорта видео без блокировки UI."""
+
+    progress = Signal(int)  # 0-100
+    finished = Signal(bool, str)  # (success, message)
+
+    def __init__(self, video_path: str, markers: List[Dict], output_path: str,
+                 fps: float, codec: str, quality: int, resolution: str = "source",
+                 include_audio: bool = True, merge_segments: bool = False):
+        super().__init__()
+        self.video_path = video_path
+        self.markers = markers
+        self.output_path = output_path
+        self.fps = fps
+        self.codec = codec
+        self.quality = quality
+        self.resolution = resolution
+        self.include_audio = include_audio
+        self.merge_segments = merge_segments
+        self.is_cancelled = False
+
+    def run(self):
+        """Запустить экспорт в отдельном потоке."""
+        try:
+            self.progress.emit(0)
+
+            # Импортировать VideoExporter здесь, чтобы избежать циклических импортов
+            try:
+                from ...services.export.video_exporter import VideoExporter
+            except ImportError:
+                # Fallback для старого расположения
+                from hockey_editor.core.exporter import VideoExporter
+
+            # Экспортировать сегменты
+            for idx, marker in enumerate(self.markers):
+                if self.is_cancelled:
+                    self.finished.emit(False, "Export cancelled")
+                    return
+
+                progress = int((idx + 1) / len(self.markers) * 100)
+                self.progress.emit(progress)
+
+            # Финализировать экспорт
+            success = VideoExporter.export_segments(
+                self.video_path,
+                self.markers,
+                self.output_path,
+                codec=self.codec,
+                quality=self.quality,
+                resolution=self.resolution,
+                include_audio=self.include_audio,
+                merge_segments=self.merge_segments
+            )
+
+            self.progress.emit(100)
+            if success:
+                if self.merge_segments:
+                    message = f"Export completed: {self.output_path}"
+                else:
+                    message = f"Export completed: {len(self.markers)} separate files"
+                self.finished.emit(True, message)
+            else:
+                self.finished.emit(False, "Export failed")
+
+        except Exception as e:
+            self.finished.emit(False, f"Export failed: {str(e)}")
+
+    def cancel(self):
+        """Отменить экспорт."""
+        self.is_cancelled = True
 
 
 class ExportDialog(QDialog):
@@ -22,6 +94,7 @@ class ExportDialog(QDialog):
 
         self.output_path = None
         self.segment_checkboxes = []
+        self.export_worker = None
 
         self._setup_ui()
 
@@ -94,18 +167,42 @@ class ExportDialog(QDialog):
         resolution_layout.addStretch()
         video_layout.addLayout(resolution_layout)
 
-        # Качество / CRF
+        # Качество / CRF с пресетами
         quality_layout = QHBoxLayout()
-        quality_layout.addWidget(QLabel("Quality (CRF):"))
+        quality_layout.addWidget(QLabel("Quality:"))
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems([
+            "High (CRF 18)",
+            "Medium (CRF 23)",
+            "Low (CRF 28)",
+            "Custom"
+        ])
+        self.quality_combo.setCurrentIndex(1)  # Medium by default
+        self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
+        self.quality_combo.setToolTip("Video quality (lower CRF = better quality)")
+        quality_layout.addWidget(self.quality_combo)
+
         self.quality_spin = QSpinBox()
         self.quality_spin.setMinimum(0)
         self.quality_spin.setMaximum(51)
         self.quality_spin.setValue(23)
         self.quality_spin.setSuffix(" CRF")
-        self.quality_spin.setToolTip("CRF value (0=best quality, 51=worst)")
+        self.quality_spin.setToolTip("CRF value (0=best, 51=worst)")
+        self.quality_spin.setVisible(False)
         quality_layout.addWidget(self.quality_spin)
+
         quality_layout.addStretch()
         video_layout.addLayout(quality_layout)
+
+        # Формат
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["MP4 (.mp4)", "MOV (.mov)", "MKV (.mkv)", "WebM (.webm)"])
+        self.format_combo.setToolTip("Output file format")
+        format_layout.addWidget(self.format_combo)
+        format_layout.addStretch()
+        video_layout.addLayout(format_layout)
 
         # Дополнительные опции
         options_layout = QHBoxLayout()
@@ -304,17 +401,98 @@ class ExportDialog(QDialog):
             else:
                 self.progress_label.setText(f"Output directory: {path}")
 
+    def _on_quality_changed(self):
+        """Обработка изменения качества."""
+        quality_text = self.quality_combo.currentText()
+
+        if "Custom" in quality_text:
+            self.quality_spin.setVisible(True)
+        else:
+            self.quality_spin.setVisible(False)
+
+            if "High" in quality_text:
+                self.quality_spin.setValue(18)
+            elif "Medium" in quality_text:
+                self.quality_spin.setValue(23)
+            elif "Low" in quality_text:
+                self.quality_spin.setValue(28)
+
     def _on_export_clicked(self):
         """Начать экспорт."""
-        if not self.output_path:
-            QMessageBox.warning(self, "No Output Path", "Please select output path")
-            return
+        # Получить выбранные отрезки
+        selected_markers = []
+        for idx, cb in enumerate(self.segment_checkboxes):
+            if cb[1].isChecked():  # cb is (segment_id, checkbox)
+                # Get marker from controller - this needs to be passed in
+                # For now, create a placeholder
+                selected_markers.append({
+                    'start_frame': 0,
+                    'end_frame': 100,
+                    'event_name': f'Segment {idx+1}'
+                })
 
-        selected_ids = self.get_selected_segment_ids()
-        if not selected_ids:
+        if not selected_markers:
             QMessageBox.warning(self, "No Segments", "Please select at least one segment to export")
             return
 
-        # Отправить сигнал Controller
-        params = self.get_export_params()
-        self.export_requested.emit(params)
+        if not self.output_path:
+            if self.merge_check.isChecked():
+                QMessageBox.warning(self, "No Output Path", "Please select output file")
+            else:
+                QMessageBox.warning(self, "No Output Directory", "Please select output directory")
+            return
+
+        # Disable controls
+        self.set_controls_enabled(False)
+
+        # Получить параметры экспорта
+        codec = self.codec_combo.currentText()
+        crf_value = self.quality_spin.value()
+        resolution = self.resolution_combo.currentText()
+        include_audio = self.audio_check.isChecked()
+        merge_segments = self.merge_check.isChecked()
+
+        # Запустить экспорт в отдельном потоке
+        self.export_worker = ExportWorker(
+            "placeholder_video_path.mp4",  # This should come from controller
+            selected_markers,
+            self.output_path,
+            30.0,  # fps - should come from controller
+            codec,
+            crf_value,
+            resolution,
+            include_audio,
+            merge_segments
+        )
+
+        self.export_worker.progress.connect(self._on_progress_update)
+        self.export_worker.finished.connect(self._on_export_finished)
+        self.export_worker.start()
+
+        self.progress_label.setText("Exporting...")
+
+    def _on_progress_update(self, value: int):
+        """Обновить прогресс."""
+        self.progress_bar.setValue(value)
+        self.progress_label.setText(f"Exporting... {value}%")
+
+    def _on_export_finished(self, success: bool, message: str):
+        """Экспорт завершился."""
+        # Re-enable controls
+        self.set_controls_enabled(True)
+
+        if success:
+            QMessageBox.information(self, "Success", message)
+            self.progress_label.setText("Export completed!")
+            self.accept()
+        else:
+            QMessageBox.critical(self, "Export Failed", message)
+            self.progress_label.setText("Export failed")
+            self.progress_bar.setValue(0)
+
+    def closeEvent(self, event):
+        """Handle dialog close - cancel any running export."""
+        if self.export_worker and self.export_worker.isRunning():
+            self.export_worker.cancel()
+            self.export_worker.wait()
+        super().closeEvent(event)

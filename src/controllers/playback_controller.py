@@ -35,9 +35,9 @@ class PlaybackController(QObject):
         self._speed = 1.0  # Скорость воспроизведения
 
         # Подключить сигналы от View
-        self.player_controls.play_toggled.connect(self._on_play_toggled)
-        self.player_controls.speed_changed.connect(self._on_speed_changed)
-        self.player_controls.seek_frame.connect(self.seek_to_frame)
+        self.player_controls.playClicked.connect(self._on_play_clicked)
+        self.player_controls.speedChanged.connect(self._on_speed_changed)
+        self.player_controls.speedStepChanged.connect(self._on_speed_step_changed)
 
     def load_video(self, video_path: str) -> bool:
         """Загрузить видео."""
@@ -86,15 +86,31 @@ class PlaybackController(QObject):
         """Возвращает текущую скорость воспроизведения."""
         return self._speed
 
-    def _on_play_toggled(self, is_playing: bool):
-        """Handle play/pause toggle from player controls."""
-        if is_playing:
-            self.play()
-        else:
+    def _on_play_clicked(self):
+        """Handle play/pause click from player controls."""
+        if self.playing:
             self.pause()
+        else:
+            self.play()
+
+    def _on_speed_step_changed(self, step: int):
+        """Handle speed step change from player controls."""
+        # Get current speed and adjust it
+        current_speed = self.player_controls.get_current_speed()
+        speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+        try:
+            current_index = speeds.index(current_speed)
+            new_index = max(0, min(len(speeds) - 1, current_index + step))
+            new_speed = speeds[new_index]
+            self.player_controls.set_speed(new_speed)
+        except ValueError:
+            # If current speed not in list, set to 1.0x
+            self.player_controls.set_speed(1.0)
 
     def _on_speed_changed(self, speed: float):
         """Handle speed change from player controls."""
+        self._speed = speed
         # For now, just print the speed change
         # In a full implementation, this would adjust playback speed
         print(f"Playback speed changed to: {speed}x")

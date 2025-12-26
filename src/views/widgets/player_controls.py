@@ -1,8 +1,8 @@
 """
-Player Controls Widget - Video player control panel.
+Player Controls Widget - Professional video player control panel.
 
-Provides playback controls with rewind, play/pause, forward buttons,
-and speed selection combo box.
+Provides playback controls with speed step buttons, play/pause, speed selection,
+and additional features for professional video editing.
 """
 
 from typing import Optional
@@ -13,44 +13,48 @@ from PySide6.QtCore import Qt, Signal
 
 
 class PlayerControls(QWidget):
-    """Video player control panel widget."""
+    """Professional video player control panel widget."""
 
     # Signals
-    play_toggled: Signal = Signal(bool)  # True for play, False for pause
-    speed_changed: Signal = Signal(float)  # Speed multiplier (e.g., 1.0, 1.5)
-    seek_frame: Signal = Signal(int)  # Frame number to seek to
+    playClicked = Signal()
+    speedStepChanged = Signal(int)  # -1 decrease speed, +1 increase speed
+    skipSeconds = Signal(int)  # seconds: +5 or -5 (for hotkeys)
+    speedChanged = Signal(float)
+    fullscreenClicked = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._is_playing: bool = False
+        self.setFixedHeight(50)  # Fixed height for consistency
+        self._is_playing = False  # Track playing state
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        """Create the user interface."""
+        """Create the professional user interface."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        layout.setContentsMargins(5, 2, 5, 2)  # Reduced margins for dense layout
+        layout.setSpacing(2)  # Reduced spacing between buttons
 
-        # Rewind button
-        self.rewind_btn = QPushButton("<<")
-        self.rewind_btn.setFixedWidth(40)
-        self.rewind_btn.setToolTip("Rewind")
-        self.rewind_btn.clicked.connect(self._on_rewind_clicked)
-        layout.addWidget(self.rewind_btn)
+        # Decrease speed button
+        self.speed_down_btn = QPushButton("⏪")
+        self.speed_down_btn.setProperty("class", "speed-control")
+        self.speed_down_btn.setToolTip("Decrease speed")
+        self.speed_down_btn.clicked.connect(lambda: self.speedStepChanged.emit(-1))
+        layout.addWidget(self.speed_down_btn)
 
-        # Play/Pause button (larger)
+        # Play/Pause button (large, prominent)
         self.play_pause_btn = QPushButton("▶")
+        self.play_pause_btn.setProperty("class", "play-pause")
         self.play_pause_btn.setFixedWidth(60)
-        self.play_pause_btn.setToolTip("Play/Pause")
-        self.play_pause_btn.clicked.connect(self._on_play_pause_clicked)
+        self.play_pause_btn.setToolTip("Play/Pause (Space)")
+        self.play_pause_btn.clicked.connect(self.playClicked.emit)
         layout.addWidget(self.play_pause_btn)
 
-        # Forward button
-        self.forward_btn = QPushButton(">>")
-        self.forward_btn.setFixedWidth(40)
-        self.forward_btn.setToolTip("Forward")
-        self.forward_btn.clicked.connect(self._on_forward_clicked)
-        layout.addWidget(self.forward_btn)
+        # Increase speed button
+        self.speed_up_btn = QPushButton("⏩")
+        self.speed_up_btn.setProperty("class", "speed-control")
+        self.speed_up_btn.setToolTip("Increase speed")
+        self.speed_up_btn.clicked.connect(lambda: self.speedStepChanged.emit(1))
+        layout.addWidget(self.speed_up_btn)
 
         # Stretch to push controls to the right
         layout.addStretch()
@@ -59,11 +63,11 @@ class PlayerControls(QWidget):
         speed_label = QLabel("Speed:")
         layout.addWidget(speed_label)
 
-        # Speed combo box
+        # Speed combo box with extended options
         self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.25x", "0.5x", "1.0x", "1.5x", "2.0x"])
+        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
         self.speed_combo.setCurrentText("1.0x")
-        self.speed_combo.setFixedWidth(70)
+        self.speed_combo.setFixedWidth(60)
         self.speed_combo.setToolTip("Playback speed")
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
         layout.addWidget(self.speed_combo)
@@ -88,7 +92,7 @@ class PlayerControls(QWidget):
         """Handle speed combo box change."""
         speed_text = self.speed_combo.currentText()
         speed = float(speed_text.replace('x', ''))
-        self.speed_changed.emit(speed)
+        self.speedChanged.emit(speed)
 
     def _update_play_pause_button(self) -> None:
         """Update play/pause button text based on current state."""
@@ -128,4 +132,15 @@ class PlayerControls(QWidget):
         """Set the current frame (for compatibility with existing code)."""
         # This method is kept for compatibility but doesn't do anything
         # since our player controls don't display current frame
+        pass
+
+    def update_play_pause_button(self, is_playing: bool) -> None:
+        """Update play/pause button text (for compatibility with existing code)."""
+        self._is_playing = is_playing
+        self._update_play_pause_button()
+
+    def update_time_label(self, current_sec: float, total_sec: float) -> None:
+        """Update time display (for compatibility with existing code)."""
+        # This method is kept for compatibility but doesn't do anything
+        # since our player controls don't display time labels
         pass

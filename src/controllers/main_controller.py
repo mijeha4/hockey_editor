@@ -65,6 +65,9 @@ class MainController:
         # Сохранить ссылку на main_window в timeline_controller для edit_marker_requested
         self.timeline_controller._main_window = self.main_window
 
+        # Сохранить ссылку на main_controller в timeline_controller для InstanceEditWindow
+        self.timeline_controller._main_controller = self
+
         self.project_controller = ProjectController(self.project_io)
 
         # Создать менеджер автосохранения
@@ -92,9 +95,8 @@ class MainController:
     def _setup_connections(self):
         """Настроить связи между компонентами."""
         # Связать timeline с playback (позиция плейхеда)
-        self.playback_controller.player_controls.seek_frame.connect(
-            lambda frame: self.main_window.get_timeline_widget().draw_playhead(frame)
-        )
+        # Note: PlayerControls больше не имеет сигнала seek_frame
+        # Timeline обновляется через другие механизмы
 
         # Подключить сигналы меню
         self.main_window.open_video_triggered.connect(self._on_open_video)
