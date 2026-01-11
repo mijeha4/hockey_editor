@@ -707,11 +707,19 @@ class InstanceEditWindow(QDialog):
 
     def _on_playback_tick(self):
         # 1. Двигаем кадр вперед
-        self.controller.playback_controller.advance_frame()
+        # БЫЛО (вызывало ошибку):
+        # self.controller.playback_controller.advance_frame()
+
+        # СТАЛО (исправление):
+        current_frame = self.controller.playback_controller.current_frame
+        self.controller.playback_controller.seek_to_frame(current_frame + 1)
+
+        # Получаем обновленную позицию
         curr = self.controller.playback_controller.current_frame
 
-        # 2. Логика Loop
+        # 2. Логика Loop (Зацикливание)
         if self.loop_enabled:
+            # Если вышли за пределы конца маркера
             if curr >= self.marker.end_frame:
                 self.controller.playback_controller.seek_to_frame(self.marker.start_frame)
                 curr = self.marker.start_frame
