@@ -288,8 +288,9 @@ class InstanceEditWindow(QDialog):
     def __init__(self, marker: Marker, controller, filtered_markers=None, current_marker_idx=0, parent=None):
         super().__init__(parent)
         self.marker = marker  # Reference to edited object
-        self.controller = controller
-        self.fps = controller.get_fps() if controller.get_fps() > 0 else 30.0
+        self.controller = controller  # This is MainController
+        self.instance_controller = controller.get_instance_edit_controller()  # InstanceEditController
+        self.fps = self.instance_controller.get_fps()
 
         # Navigation between markers
         self.filtered_markers = filtered_markers or []  # List (original_idx, marker) tuples
@@ -325,11 +326,19 @@ class InstanceEditWindow(QDialog):
         self._setup_ui()
         self._setup_shortcuts()
 
-        # Initialize - set playhead to segment start (IN)
-        self.controller.playback_controller.seek_to_frame(self.marker.start_frame)
+        # Initialize controller with marker
+        self.instance_controller.set_marker(self.marker, self.filtered_markers, self.current_marker_idx)
+
+        # Connect controller signals
+        self.instance_controller.marker_updated.connect(self.marker_updated.emit)
+        self.instance_controller.playback_position_changed.connect(self._on_playback_position_changed)
+        self.instance_controller.timeline_range_changed.connect(self._on_timeline_range_changed)
+        self.instance_controller.active_point_changed.connect(self._on_active_point_changed)
+
+        # Update UI
         self._update_ui_from_marker()
-        self._update_active_point_visual()  # Initialize visual highlighting of active point
-        self._update_navigation_buttons()  # Update navigation button states
+        self._update_active_point_visual()
+        self._update_navigation_buttons()
         self._display_current_frame()
 
     def _setup_ui(self):
@@ -531,21 +540,29 @@ class InstanceEditWindow(QDialog):
         self.addAction(QAction("Close", self, shortcut=QKeySequence(Qt.Key.Key_Escape), triggered=self.close))
         self.addAction(QAction("Close W", self, shortcut=QKeySequence("Ctrl+W"), triggered=self.close))
 
-    # --- Logic ---
+    # --- Controller signal handlers ---
 
-    def _on_timeline_range_changed(self, start, end):
-        """Вызывается когда тянем ручки на слайдере"""
+    def _on_playback_position_changed(self, frame: int):
+        """Handle playback position changes from controller."""
+        self.timeline.set_current_frame(frame)
+        self._display_current_frame()
+
+    def _on_timeline_range_changed(self, start: int, end: int):
+        """Handle timeline range changes from controller."""
         self.marker.start_frame = start
         self.marker.end_frame = end
         self._update_ui_from_marker()
-        self.marker_updated.emit()  # Уведомляем систему
 
-        # Если меняем начало - перематываем туда, чтобы видеть кадр
-        if abs(self.controller.playback_controller.current_frame - start) < abs(self.controller.playback_controller.current_frame - end):
-             self.controller.playback_controller.seek_to_frame(start)
-        else:
-             self.controller.playback_controller.seek_to_frame(end)
-        self._display_current_frame()
+    def _on_active_point_changed(self, point: str):
+        """Handle active point changes from controller."""
+        self.active_point = point
+        self._update_active_point_visual()
+
+    # --- UI Logic ---
+
+    def _on_timeline_range_changed_ui(self, start, end):
+        """Вызывается когда тянем ручки на слайдере - UI event"""
+        self.instance_controller.set_timeline_range(start, end)
 
     def _on_timeline_seek(self, frame):
         """Клик по слайдеру для перемотки"""

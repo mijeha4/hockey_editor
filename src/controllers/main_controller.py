@@ -12,6 +12,9 @@ from controllers.project_controller import ProjectController
 from controllers.export import ExportController
 from controllers.shortcut_controller import ShortcutController
 from controllers.filter_controller import FilterController
+from controllers.instance_edit_controller import InstanceEditController
+from controllers.settings_controller import SettingsController
+from controllers.custom_event_controller import CustomEventController
 from hockey_editor.utils.autosave import AutosaveManager
 from PySide6.QtCore import QObject
 
@@ -78,6 +81,11 @@ class MainController(QObject):
 
         # Создать export controller (lazy initialization)
         self.export_controller = None
+
+        # Создать контроллеры для окон (lazy initialization)
+        self._instance_edit_controller = None
+        self._settings_controller = None
+        self._custom_event_controller = None
 
         # Свойства для доступа из views
         self.markers = self.project.markers
@@ -356,8 +364,38 @@ class MainController(QObject):
 
         print("Settings updated successfully")
 
+    # Controller factory methods
+    def get_instance_edit_controller(self) -> InstanceEditController:
+        """Get or create instance edit controller."""
+        if self._instance_edit_controller is None:
+            self._instance_edit_controller = InstanceEditController(self)
+        return self._instance_edit_controller
+
+    def get_settings_controller(self) -> SettingsController:
+        """Get or create settings controller."""
+        if self._settings_controller is None:
+            self._settings_controller = SettingsController()
+            # Load settings on first access
+            self._settings_controller.load_settings()
+        return self._settings_controller
+
+    def get_custom_event_controller(self) -> CustomEventController:
+        """Get or create custom event controller."""
+        if self._custom_event_controller is None:
+            self._custom_event_controller = CustomEventController()
+        return self._custom_event_controller
+
     def closeEvent(self, event):
         """Закрытие окна."""
         self.autosave_manager.stop()
+
+        # Cleanup controllers
+        if self._instance_edit_controller:
+            self._instance_edit_controller.cleanup()
+        if self._settings_controller:
+            self._settings_controller.cleanup()
+        if self._custom_event_controller:
+            self._custom_event_controller.cleanup()
+
         # self.playback_controller.cleanup()  # Метод cleanup не существует
         event.accept()
