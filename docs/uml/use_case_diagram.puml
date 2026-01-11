@@ -1,11 +1,9 @@
 @startuml Hockey Editor Use Case Diagram
 !theme plain
 left to right direction
-title Диаграмма вариантов использования Hockey Editor
 
 actor "Хоккейный Тренер / Аналитик" as Coach
 
-rectangle "Hockey Editor" {
     usecase "Загрузка видео" as UC1
     usecase "Создание события" as UC2 
     usecase "Редактирование событий" as UC6
@@ -17,7 +15,6 @@ rectangle "Hockey Editor" {
     usecase "Управление горячими клавишами" as UC12
     usecase "Отмена действия" as UC13
     usecase "Экспорт видео" as UC14
-}
 
 ' ================== ПРЯМЫЕ ВЗАИМОДЕЙСТВИЯ ==================
 ' Удалены комментарии к стрелкам
@@ -34,13 +31,6 @@ Coach --> UC14
 
 ' ================== ОТНОШЕНИЯ INCLUDE (Обязательные) ==================
 ' Разметка требует загруженного видео
-UC2 ..> UC1 : <<include>>
-
-UC6 ..> UC2 : <<include>>
-UC7 ..> UC2 : <<include>>
-UC14 ..> UC2 : <<include>>
-UC8 ..> UC2 : <<include>>
-
 UC10 ..> UC1 : <<include>>
 
 ' ================== ОТНОШЕНИЯ EXTEND (Опциональные) ==================

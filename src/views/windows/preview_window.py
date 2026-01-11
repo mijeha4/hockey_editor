@@ -442,28 +442,21 @@ class PreviewWindow(QMainWindow):
         """Обработка изменения инструмента рисования."""
         tool_id = self.drawing_tool_group.id(button)
 
+        # Используем .value, чтобы передать строку (например, "none", "line")
         if tool_id == 0:  # Курсор
-            self.drawing_overlay.set_tool(DrawingTool.NONE)
+            self.drawing_overlay.set_tool(DrawingTool.NONE.value)
         elif tool_id == 1:  # Линия
-            self.drawing_overlay.set_tool(DrawingTool.LINE)
-            # Автопауза при выборе инструмента рисования
-            if self.is_playing:
-                self._on_play_pause_clicked()
+            self.drawing_overlay.set_tool(DrawingTool.LINE.value)
+            if self.is_playing: self._on_play_pause_clicked()
         elif tool_id == 2:  # Прямоугольник
-            self.drawing_overlay.set_tool(DrawingTool.RECTANGLE)
-            # Автопауза при выборе инструмента рисования
-            if self.is_playing:
-                self._on_play_pause_clicked()
+            self.drawing_overlay.set_tool(DrawingTool.RECTANGLE.value)
+            if self.is_playing: self._on_play_pause_clicked()
         elif tool_id == 3:  # Круг
-            self.drawing_overlay.set_tool(DrawingTool.CIRCLE)
-            # Автопауза при выборе инструмента рисования
-            if self.is_playing:
-                self._on_play_pause_clicked()
+            self.drawing_overlay.set_tool(DrawingTool.CIRCLE.value)
+            if self.is_playing: self._on_play_pause_clicked()
         elif tool_id == 4:  # Стрелка
-            self.drawing_overlay.set_tool(DrawingTool.ARROW)
-            # Автопауза при выборе инструмента рисования
-            if self.is_playing:
-                self._on_play_pause_clicked()
+            self.drawing_overlay.set_tool(DrawingTool.ARROW.value)
+            if self.is_playing: self._on_play_pause_clicked()
 
     def _on_color_changed(self):
         """Обработка изменения цвета."""
@@ -808,37 +801,52 @@ class PreviewWindow(QMainWindow):
     def _on_marker_selection_changed(self):
         """Обработка изменения выбора строки в таблице - обновить инспектор."""
         marker_idx, marker = self._get_selected_marker()
-        if marker is None:
-            # Очистить поля инспектора
-            self.event_type_combo.blockSignals(True)
-            self.event_type_combo.setCurrentIndex(-1)
-            self.event_type_combo.blockSignals(False)
-            self.start_time_edit.clear()
-            self.end_time_edit.clear()
-            self.notes_edit.clear()
-            return
 
-        fps = self.controller.get_fps()
-        if fps <= 0:
-            return
-
-        # Заполнить поля данными маркера
+        # Блокируем сигналы, чтобы не вызвать рекурсию при очистке
         self.event_type_combo.blockSignals(True)
-        # Найти индекс текущего типа события
-        for i in range(self.event_type_combo.count()):
-            if self.event_type_combo.itemData(i) == marker.event_name:
-                self.event_type_combo.setCurrentIndex(i)
-                break
-        self.event_type_combo.blockSignals(False)
+        self.start_time_edit.blockSignals(True)
+        self.end_time_edit.blockSignals(True)
+        self.notes_edit.blockSignals(True)
 
-        # Время начала и конца
-        start_time = self._format_time(marker.start_frame / fps)
-        end_time = self._format_time(marker.end_frame / fps)
-        self.start_time_edit.setText(start_time)
-        self.end_time_edit.setText(end_time)
+        try:
+            if marker is None:
+                # Очистить поля инспектора
+                self.event_type_combo.setCurrentIndex(-1)
+                self.start_time_edit.clear()
+                self.end_time_edit.clear()
+                self.notes_edit.clear()
+                return
 
-        # Заметки
-        self.notes_edit.setText(marker.note)
+            fps = self.controller.get_fps()
+            if fps <= 0:
+                return
+
+            # Заполнить поля данными маркера
+            # Найти индекс текущего типа события
+            found = False
+            for i in range(self.event_type_combo.count()):
+                if self.event_type_combo.itemData(i) == marker.event_name:
+                    self.event_type_combo.setCurrentIndex(i)
+                    found = True
+                    break
+            if not found:
+                self.event_type_combo.setCurrentIndex(-1)
+
+            # Время начала и конца
+            start_time = self._format_time(marker.start_frame / fps)
+            end_time = self._format_time(marker.end_frame / fps)
+            self.start_time_edit.setText(start_time)
+            self.end_time_edit.setText(end_time)
+
+            # Заметки
+            self.notes_edit.setText(marker.note)
+
+        finally:
+            # Обязательно разблокируем сигналы обратно
+            self.event_type_combo.blockSignals(False)
+            self.start_time_edit.blockSignals(False)
+            self.end_time_edit.blockSignals(False)
+            self.notes_edit.blockSignals(False)
 
     def _on_inspector_event_type_changed(self):
         """Обработка изменения типа события в инспекторе."""
@@ -849,7 +857,7 @@ class PreviewWindow(QMainWindow):
         current_data = self.event_type_combo.currentData()
         if current_data:
             marker.event_name = current_data
-            self.controller.markers_changed.emit()
+            self.controller.timeline_controller.markers_changed.emit()
             self._update_marker_list()
 
     def _on_inspector_start_time_changed(self):
@@ -879,7 +887,7 @@ class PreviewWindow(QMainWindow):
                 marker.end_frame = max(marker.end_frame, new_start_frame + int(fps))
 
             marker.start_frame = max(0, new_start_frame)
-            self.controller.markers_changed()
+            self.controller.timeline_controller.markers_changed.emit()
             self._update_marker_list()
             # Обновить поле в инспекторе
             self._on_marker_selection_changed()
@@ -916,7 +924,7 @@ class PreviewWindow(QMainWindow):
                 marker.start_frame = max(0, new_end_frame - int(fps))
 
             marker.end_frame = min(total_frames - 1, new_end_frame)
-            self.controller.markers_changed()
+            self.controller.markers_changed.emit()
             self._update_marker_list()
             # Обновить поле в инспекторе
             self._on_marker_selection_changed()
@@ -932,7 +940,7 @@ class PreviewWindow(QMainWindow):
             return
 
         marker.note = self.notes_edit.toPlainText().strip()
-        self.controller.markers_changed()
+        self.controller.timeline_controller.markers_changed.emit()
         self._update_marker_list()
 
     def _setup_inspector(self, splitter):

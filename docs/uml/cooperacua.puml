@@ -1,0 +1,60 @@
+@startuml
+skinparam linestyle ortho
+skinparam nodesep 100
+skinparam ranksep 80
+skinparam rectangle {
+    BackgroundColor White
+    BorderColor Black
+    RoundCorner 10
+    Shadowing false
+}
+
+rectangle "UI" as UI
+rectangle ":VideoController" as vc
+rectangle ":ProjectManager" as pm
+rectangle ":EventCreationController" as ecc
+rectangle ":VideoProcessor" as vp
+rectangle ":VideoExporter" as ve
+
+' === СВЯЗИ UI <-> CONTROLLER ===
+' Линия 1: Запросы от UI к Контроллеру
+UI -[thickness=1]> vc : ←1: Старт записи \n←2: Загрузка (Путь) \n←3: Экспорт \n←4: Отмена 
+
+' Линия 2: Ответы от Контроллера к UI
+vc -[thickness=1]-> UI : ← 1.5: Статус (Идет запись)\n← 2.3: Ошибка (Текст)\n← 4.3: Текст (Отменено)
+
+
+' === СВЯЗИ С МЕНЕДЖЕРАМИ (ВЕРХ) ===
+
+' Сценарий 2: Project Manager
+vc -up-> pm : ←2.1: Чтение (Путь) 
+pm -down-> vc : ← 2.2: Исключение
+
+' Сценарий 1: Event Controller
+vc -up-> ecc : ←1.3: Инициировать 
+ecc -down-> vc : ← 1.4: Успех
+' Самовызовы
+ecc -right-> ecc : ↻ 1.3.1: Статус\n↻ 1.3.2: Создать объект
+
+
+' === СВЯЗИ С ОБРАБОТЧИКАМИ (НИЗ) ===
+
+' Сценарий 1: Получение времени
+vc -down-> vp : ←1.1: Запрос позиции 
+vp -up-> vc : ← 1.2: Timestamp
+
+
+' === СВЯЗИ ЭКСПОРТА (ПРАВО/НИЗ) ===
+
+' Контроллер управляет Экспортером
+vc -right-> ve : 3.1: Список сегментов \n4.1: Стоп 
+ve -left-> vc :  4.2: Статус (Отменено)
+
+' Экспортер общается с Процессором
+ve -down-> vp : ←3.2: Запрос кадра 
+vp -up-> ve : ← 3.3: Изображение
+
+' Внутренние действия экспортера
+ve -right-> ve : ↻ 3.4: Запись на диск\n↻ 4.2: Флаг (Прервано)
+
+@enduml

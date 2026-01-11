@@ -1,143 +1,64 @@
-@startuml Package Diagram
-!theme plain
-top to bottom direction
+@startuml
+
+' == НАСТРОЙКИ ==
+skinparam monochrome true
+skinparam shadowing false
+skinparam packageStyle folder
+skinparam defaultFontName Arial
+' Используем ортогональные линии
 skinparam linetype ortho
-skinparam packageStyle rectangle
 
-title Диаграмма пакетов: 4-слойная архитектура Hockey Editor Pro
-
-' ================== LEVEL 1: PRESENTATION ==================
-package "Presentation Layer\n(Уровень презентации)" as Presentation {
-    
-    package "ui" as UI {
-        [MainWindow]
-        [TimelineGraphicsView]
-        [PreviewWindow]
-        [EditSegmentDialog]
-        [ExportDialog]
-        [SettingsDialog]
-        [VideoWindow]
-    }
-
-    package "assets" as Assets {
-        [Icons]
-        [Stylesheets]
-        [UI Resources]
-    }
-
-    note bottom of UI
-      **Обязанности:**
-      • UI компоненты и ввод
-      • Визуализация данных
-      • Управление диалогами
-    end note
+' Стиль прямоугольников (Слоев)
+skinparam rectangle {
+    BorderStyle solid
+    BorderColor Black
+    BackgroundColor White
+    FontSize 12
+    FontStyle Bold
 }
 
-' ================== LEVEL 2: APPLICATION LOGIC ==================
-package "Application Logic Layer\n(Уровень прикладной логики)" as ApplicationLogic {
-    package "core" as Core {
-        [VideoController]
-        [EventCreationController]
-        [ProjectManager]
-        [Exporter]
-        [VideoProcessor]
-        [VideoReaderThread]
-    }
+' == ЛЕВАЯ КОЛОНКА (ОСНОВНОЙ СТЕК) ==
 
-    package "utils" as Utils {
-        [ShortcutManager]
-        [UndoRedoManager]
-        [AutosaveManager]
-        [SettingsManager]
-        [TimeUtils]
-        [CustomEvents]
-    }
-
-    note bottom of Core
-      **Обязанности:**
-      • Оркестрация процессов
-      • Сквозной функционал
-      • Состояние приложения
-    end note
-}
-
-' ================== LEVEL 3: DOMAIN LOGIC ==================
-package "Domain Logic Layer\n(Уровень доменной логики)" as DomainLogic {
-    package "models" as Models {
-        [Marker]
-        [EventType]
-        [Project]
-        [RecordingMode]
-        [CustomEvent]
-    }
-
-    note bottom of Models
-      **Обязанности:**
-      • Бизнес-правила
-      • Валидация данных
-      • Поведение объектов
-    end note
-}
-
-' ================== LEVEL 4: DATA MODEL ==================
-package "Data Model Layer\n(Уровень модели данных)" as DataModel {
-    package "Persistence (Хранение)" as Persistence {
-        [Project File (.hep)]
-        [Settings Storage]
-        [Recent Projects]
-        [Autosave Recovery]
-    }
-
-    package "External Data (Внешние данные)" as External {
-        [Video Files]
-        [Export Formats]
-        [Configuration Files]
+rectangle "Presentation Layer" {
+    package "UI" {
+        rectangle "Пользовательский Интерфейс" as ui_impl
     }
 }
 
-' ================== ВНЕШНИЕ БИБЛИОТЕКИ ==================
-package "External Libraries (Библиотеки)" as Libs #F0F0F0 {
-    component "PySide6"
-    component "OpenCV"
-    component "FFmpeg"
-    component "moviepy"
+rectangle "Business Logic Layer" {
+    package "Core" {
+        rectangle "       Контроллеры        " as core_impl
+    }
 }
 
-' ================== ПРИНУДИТЕЛЬНАЯ ВЕРТИКАЛЬНАЯ СТРУКТУРА ==================
-' Эти скрытые связи выстраивают слои строго друг под другом
-Presentation -[hidden]-> ApplicationLogic
-ApplicationLogic -[hidden]-> DomainLogic
-DomainLogic -[hidden]-> DataModel
+rectangle "Data Layer" {
+    package "Models" {
+        rectangle "          Модели          " as models_impl
+    }
+}
 
-' ================== ЛОГИЧЕСКИЕ СВЯЗИ ==================
-Presentation --> ApplicationLogic : использует сервисы
-ApplicationLogic --> DomainLogic : управляет объектами
-ApplicationLogic --> DataModel : сохраняет/загружает
-DomainLogic ..> DataModel : определяет схему
+' == ПРАВАЯ КОЛОНКА ==
 
-' Дополнительные связи
-Presentation ..> DomainLogic : отображает
-ApplicationLogic ..> Presentation : обновляет UI
+rectangle "Global" {
+    package "Utils" {
+        ' Добавляем переносы строк, чтобы визуально увеличить высоту блока
+        rectangle "\n         Утилиты          \n" as utils_impl
+    }
+}
 
-' Связи с библиотеками
-ApplicationLogic ..> Libs
+' == ПОЗИЦИОНИРОВАНИЕ И СВЯЗИ ==
 
-' ================== ЛЕГЕНДА И ЗАМЕТКИ (СНИЗУ) ==================
-note as N1
-  **Паттерны взаимодействия:**
-  • Presentation → Application: Запуск операций
-  • Application → Domain: Логика и модели
-  • Application → Data: CRUD операции
-end note
+' 1. Видимые связи (только основной поток, как вы просили)
+ui_impl ..> core_impl
+core_impl ..> models_impl
 
-note as N2
-  **Принципы:**
-  • Separation of Concerns (Разделение ответственности)
-  • Dependency Inversion (Инверсия зависимостей)
-  • Single Responsibility (Единственная обязанность)
-end note
+' 2. Скрытые связи для выравнивания (Layout)
+' Выстраиваем левую колонку строго друг под другом
+ui_impl -[hidden]down- core_impl
+core_impl -[hidden]down- models_impl
 
-DataModel -[hidden]-> N1
-N1 -[hidden]-> N2
+' 3. Ставим Utils СПРАВА от Core (середины)
+' Используем hidden, чтобы не рисовать стрелку, но заставить блок встать справа
+core_impl -[hidden]right- utils_impl
 
 @enduml

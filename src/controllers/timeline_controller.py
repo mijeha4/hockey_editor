@@ -59,6 +59,10 @@ class TimelineController(QObject):
         self.history_manager = history_manager
         self.settings = settings
 
+        # --- ДОБАВИТЬ ЭТУ СТРОКУ ---
+        self._main_window = None
+        # ---------------------------
+
         # Состояние для Dynamic режима
         self.recording_start_frame = None
         self.is_recording = False
@@ -72,6 +76,12 @@ class TimelineController(QObject):
         if self.timeline_widget is not None:
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
         # segment_list_widget не имеет сигналов выбора, так что убираем эту строку
+
+    # --- ДОБАВИТЬ ЭТОТ МЕТОД ---
+    def set_main_window(self, window):
+        """Установить ссылку на главное окно."""
+        self._main_window = window
+    # ---------------------------
 
     def handle_hotkey(self, hotkey: str, current_frame: int, fps: float) -> None:
         """
@@ -211,7 +221,8 @@ class TimelineController(QObject):
 
     def edit_marker_requested(self, marker_idx: int):
         """Обработка запроса на редактирование маркера."""
-        if hasattr(self, '_main_window') and self._main_window:
+        # Упрощаем проверку, так как теперь переменная точно существует (равна None или окну)
+        if self._main_window:
             self._main_window.open_segment_editor(marker_idx)
 
     def init_tracks(self, total_frames: int):

@@ -5,13 +5,14 @@ Provides advanced interface for precise segment editing with visual timeline,
 loop playback, hotkeys, and professional NLE-style controls.
 """
 
+import cv2
 from typing import Optional
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QFrame, QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QPixmap, QKeySequence, QAction
+from PySide6.QtGui import QPixmap, QKeySequence, QAction, QImage, QPainter, QColor, QPen, QBrush
 
 # Используем абсолютные импорты для совместимости с run_test.py
 try:
@@ -274,7 +275,7 @@ class VisualTimeline(QWidget):
         self.update()
 
 
-class InstanceEditWindow(QMainWindow):
+class InstanceEditWindow(QDialog):
     """
     Deep segment editing window (Instance).
     Functions: Loop playback, Trim In/Out, Edit Labels.
@@ -333,9 +334,7 @@ class InstanceEditWindow(QMainWindow):
 
     def _setup_ui(self):
         """Создать интерфейс."""
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
+        layout = QVBoxLayout(self)
 
         # 1. Видеоплеер
         self.video_label = QLabel()

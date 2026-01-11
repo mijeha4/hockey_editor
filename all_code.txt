@@ -1,0 +1,2573 @@
+#!/usr/bin/env python3
+"""
+Hockey Editor - MVC Architecture
+Main entry point
+"""
+
+import sys
+import os
+
+# Добавить src и hockey_editor в путь для импортов
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'hockey_editor'))
+
+from PySide6.QtWidgets import QApplication
+from controllers.main_controller import MainController
+
+
+def main():
+    """Запуск приложения."""
+    app = QApplication(sys.argv)
+    app.setApplicationName("Hockey Editor")
+    app.setApplicationVersion("1.0.0")
+
+    # Создать главный контроллер (он создаст все компоненты)
+    controller = MainController()
+
+    # Запустить приложение
+    controller.run()
+
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
+from PySide6.QtCore import QObject, Signal, QTimer
+from typing import List, Optional, Dict
+from enum import Enum
+import json
+import os
+from .video_processor import VideoProcessor
+from .event_creation_controller import EventCreationController, RecordingMode
+from ..models.marker import Marker, EventType
+from ..utils.settings_manager import get_settings_manager
+from ..utils.custom_events import get_custom_event_manager
+
+
+class RecordingMode(Enum):
+    """Режимы расстановки отрезков."""
+    DYNAMIC = "dynamic"          # Два нажатия = начало и конец
+    FIXED_LENGTH = "fixed_length"  # Одно нажатие = отрезок фиксированной длины
+
+
+class VideoController(QObject):
+    """Главный контроллер видео с синхронизацией воспроизведения."""
+    
+    # Сигналы
+    playback_time_changed = Signal(int)  # frame_idx
+    markers_changed = Signal()
+    recording_status_changed = Signal(str, str)  # event_type (A/D/S), status (Recording/Complete)
+    timeline_update = Signal()
+    current_frame_update = Signal(int)  # frame_idx
+    frame_ready = Signal(object)  # np.ndarray (текущий кадр)
+
+    def __init__(self):
+        super().__init__()
+
+        self.processor = VideoProcessor()
+        self.markers: List[Marker] = []
+
+        # SettingsManager для персистентности
+        self.settings = get_settings_manager()
+
+        # CustomEventManager - менеджер событий
+        self.event_manager = get_custom_event_manager()
+
+        # EventCreationController - контроллер создания событий
+        self.event_creation_controller = EventCreationController(self)
+
+        # Подключить сигналы EventCreationController
+        self.event_creation_controller.recording_status_changed.connect(self.recording_status_changed)
+        self.event_creation_controller.markers_changed.connect(self.markers_changed)
+        self.event_creation_controller.timeline_update.connect(self.timeline_update)
+
+        # UndoRedoManager
+        from ..utils.undo_redo import UndoRedoManager
+        self.undo_redo = UndoRedoManager()
+
+        # Параметры воспроизведения
+        self.playing = False
+        self.playback_timer = QTimer()
+        self.playback_timer.timeout.connect(self._on_playback_tick)
+        self.frame_time_ms = 33  # ~30 FPS (рассчитывается на основе FPS видео)
+        self.playback_speed = 1.0  # Скорость воспроизведения (1.0 = нормальная скорость)
+
+        # Загрузить скорость воспроизведения
+        self.playback_speed = self.settings.load_playback_speed()
+
+    def load_video(self, video_path: str) -> bool:
+        """Загрузить видеофайл (ПАУЗИРОВАН!)."""
+        success = self.processor.load(video_path)
+        if success:
+            # Рассчитать frame_time_ms на основе FPS видео и скорости воспроизведения
+            fps = self.processor.get_fps()
+            if fps > 0:
+                self.frame_time_ms = int(1000 / (fps * self.playback_speed))
+
+            # Убедиться, что видео на паузе
+            self.playing = False
+            self.playback_timer.stop()
+
+            # Обновить маркеры и UI
+            self.markers = []
+            self.markers_changed.emit()
+            self.playback_time_changed.emit(0)
+            self.current_frame_update.emit(0)
+            self.timeline_update.emit()
+
+            # Отправить первый кадр на UI
+            frame = self.processor.get_current_frame()
+            if frame is not None:
+                self.frame_ready.emit(frame)
+
+        return success
+
+    def play(self):
+        """Начать воспроизведение."""
+        if self.processor.cap is None or self.playing:
+            return
+        
+        self.playing = True
+        self.playback_timer.start(self.frame_time_ms)
+
+    def pause(self):
+        """Пауза."""
+        self.playing = False
+        self.playback_timer.stop()
+
+    def toggle_play_pause(self):
+        """Переключить Play/Pause."""
+        if self.playing:
+            self.pause()
+        else:
+            self.play()
+
+    def stop(self):
+        """Остановка и возврат в начало."""
+        self.pause()
+        self.seek_frame(0)
+
+    def seek_frame(self, frame_idx: int):
+        """Перемотать на кадр (НЕ запускает воспроизведение)."""
+        if self.processor.cap is None:
+            return
+        
+        self.processor.seek(frame_idx)
+        
+        # Отправить сигналы об обновлении
+        self.playback_time_changed.emit(frame_idx)
+        self.current_frame_update.emit(frame_idx)
+        self.timeline_update.emit()
+        
+        # Отправить кадр на UI
+        frame = self.processor.get_current_frame()
+        if frame is not None:
+            self.frame_ready.emit(frame)
+
+    def _on_playback_tick(self):
+        """Таймер воспроизведения - вызывается каждый frame_time_ms."""
+        if not self.processor.cap or not self.playing:
+            return
+        
+        # Переместиться на следующий кадр
+        success = self.processor.advance_frame()
+        if not success:
+            # Конец видео
+            self.pause()
+            return
+        
+        # Получить текущий индекс кадра
+        current_frame_idx = self.processor.get_current_frame_idx()
+        
+        # Эмит сигналов об обновлении
+        self.playback_time_changed.emit(current_frame_idx)
+        self.current_frame_update.emit(current_frame_idx)
+        self.timeline_update.emit()
+        
+        # Отправить текущий кадр на UI
+        frame = self.processor.get_current_frame()
+        if frame is not None:
+            self.frame_ready.emit(frame)
+
+    def on_hotkey_pressed(self, key: str):
+        """Обработка нажатия горячей клавиши - делегировать EventCreationController."""
+        self.event_creation_controller.on_hotkey_pressed(key)
+
+    def delete_marker(self, idx: int):
+        """Удалить отрезок (с undo/redo)."""
+        if 0 <= idx < len(self.markers):
+            from ..utils.undo_redo import DeleteMarkerCommand
+            command = DeleteMarkerCommand(self.markers, idx)
+            self.undo_redo.push_command(command)
+            self.markers_changed.emit()
+            self.timeline_update.emit()
+
+    def clear_markers(self):
+        """Удалить все отрезки (с undo/redo)."""
+        from ..utils.undo_redo import ClearMarkersCommand
+        command = ClearMarkersCommand(self.markers)
+        self.undo_redo.push_command(command)
+        self.markers_changed.emit()
+        self.timeline_update.emit()
+
+    def cancel_recording(self):
+        """Отменить текущую запись - делегировать EventCreationController."""
+        self.event_creation_controller.cancel_recording()
+
+    def set_recording_mode(self, mode):
+        """Установить режим расстановки отрезков - делегировать EventCreationController."""
+        self.event_creation_controller.set_recording_mode(mode)
+
+    def set_fixed_duration(self, seconds: int):
+        """Установить фиксированную длину отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_fixed_duration(seconds)
+
+    def set_pre_roll(self, seconds: float):
+        """Установить откат перед началом отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_pre_roll(seconds)
+
+    def set_post_roll(self, seconds: float):
+        """Установить добавление в конец отрезка - делегировать EventCreationController."""
+        self.event_creation_controller.set_post_roll(seconds)
+
+    def set_playback_speed(self, speed: float):
+        """Установить скорость воспроизведения."""
+        if speed <= 0:
+            return  # Не допускаем нулевую или отрицательную скорость
+
+        self.playback_speed = speed
+
+        # Обновить frame_time_ms если видео загружено
+        fps = self.processor.get_fps()
+        if fps > 0:
+            self.frame_time_ms = int(1000 / (fps * self.playback_speed))
+
+        # Если воспроизведение активно, перезапустить таймер с новой скоростью
+        if self.playing:
+            self.playback_timer.start(self.frame_time_ms)
+
+        # Сохранить настройку
+        self.settings.save_playback_speed(speed)
+
+    def get_playback_speed(self) -> float:
+        """Получить текущую скорость воспроизведения."""
+        return self.playback_speed
+
+    @property
+    def recording_mode(self):
+        """Получить текущий режим записи."""
+        return self.event_creation_controller.recording_mode
+
+    @property
+    def fixed_duration_sec(self):
+        """Получить фиксированную длительность."""
+        return self.event_creation_controller.fixed_duration_sec
+
+    @property
+    def pre_roll_sec(self):
+        """Получить предварительный откат."""
+        return self.event_creation_controller.pre_roll_sec
+
+    @property
+    def post_roll_sec(self):
+        """Получить добавление в конец."""
+        return self.event_creation_controller.post_roll_sec
+
+    # Метод update_hotkeys убран - hotkeys теперь управляются через CustomEventManager
+
+    def get_current_frame_idx(self) -> int:
+        """Получить текущий индекс кадра."""
+        return self.processor.get_current_frame_idx()
+
+    def get_fps(self) -> float:
+        """Получить FPS видео."""
+        return self.processor.get_fps()
+
+    def get_total_frames(self) -> int:
+        """Получить общее количество кадров."""
+        return self.processor.get_total_frames()
+
+    def cleanup(self):
+        """Очистить ресурсы."""
+        self.pause()
+        self.processor.cleanup()
+        self.markers.clear()
+
+    # ===== ПРОЕКТЫ =====
+    
+    def save_project(self, file_path: str) -> bool:
+        """Сохранить проект в файл."""
+        from .project_manager import ProjectManager, Project
+
+        project = Project(
+            name=os.path.basename(self.processor.video_path) if self.processor.video_path else "Untitled",
+            video_path=self.processor.video_path,
+            fps=self.get_fps()
+        )
+        project.markers = self.markers.copy()
+        
+        success = ProjectManager.save_project(project, file_path)
+        if success:
+            ProjectManager.add_to_recent(file_path)
+        return success
+    
+    def load_project(self, file_path: str) -> tuple[bool, bool]:
+        """Загрузить проект из файла.
+        Returns: (success, video_missing) - успех загрузки, отсутствует ли видео
+        """
+        from .project_manager import ProjectManager
+
+        project = ProjectManager.load_project(file_path)
+        if not project:
+            return False, False
+
+        # Проверить наличие видео файла
+        if project.video_path and not os.path.exists(project.video_path):
+            # Сохранить проект для последующей установки пути к видео
+            self._pending_project = project
+            self._pending_project_path = file_path
+            ProjectManager.add_to_recent(file_path)
+            return True, True  # success=True, video_missing=True
+
+        # Загрузить видео
+        if project.video_path:
+            if not self.load_video(project.video_path):
+                return False, False
+
+        # Загрузить маркеры
+        self.markers = project.markers.copy()
+        self.markers_changed.emit()
+
+        ProjectManager.add_to_recent(file_path)
+        return True, False
+    
+    def set_video_path(self, new_path: str) -> bool:
+        """Установить новый путь к видео для загруженного проекта."""
+        if hasattr(self, '_pending_project') and self._pending_project:
+            self._pending_project.video_path = new_path
+            # Завершить загрузку проекта
+            return self._finish_project_loading()
+
+        # Если проект уже загружен, перезагрузить видео
+        return self.load_video(new_path)
+
+    def _finish_project_loading(self) -> bool:
+        """Завершить загрузку проекта после установки пути к видео."""
+        if not hasattr(self, '_pending_project'):
+            return False
+
+        project = self._pending_project
+        project_path = self._pending_project_path
+
+        # Загрузить видео
+        if project.video_path and os.path.exists(project.video_path):
+            if not self.load_video(project.video_path):
+                return False
+
+        # Загрузить маркеры
+        self.markers = project.markers.copy()
+        self.markers_changed.emit()
+
+        # Очистить pending
+        del self._pending_project
+        del self._pending_project_path
+
+        return True
+
+    def get_recent_projects(self) -> List[str]:
+        """Получить список недавних проектов."""
+        from .project_manager import ProjectManager
+        return ProjectManager.get_recent_projects()
+    
+    # ===== UNDO/REDO =====
+    
+    def undo(self):
+        """Отменить последнюю операцию."""
+        self.undo_redo.undo()
+        self.markers_changed.emit()
+    
+    def redo(self):
+        """Повторить последнюю отменённую операцию."""
+        self.undo_redo.redo()
+        self.markers_changed.emit()
+    
+    def can_undo(self) -> bool:
+        """Проверить, можно ли отменить."""
+        return self.undo_redo.can_undo()
+    
+    def can_redo(self) -> bool:
+        """Проверить, можно ли повторить."""
+        return self.undo_redo.can_redo()
+from PySide6.QtCore import QObject, Signal
+from typing import Optional
+from enum import Enum
+from ..models.marker import Marker
+from ..utils.settings_manager import get_settings_manager
+from ..utils.custom_events import get_custom_event_manager
+
+
+class RecordingMode(Enum):
+    """Режимы расстановки отрезков."""
+    DYNAMIC = "dynamic"          # Два нажатия = начало и конец
+    FIXED_LENGTH = "fixed_length"  # Одно нажатие = отрезок фиксированной длины
+
+
+class EventCreationController(QObject):
+    """Контроллер создания событий (отрезков)."""
+
+    # Сигналы
+    recording_status_changed = Signal(str, str)  # event_type (A/D/S), status (Recording/Complete)
+    markers_changed = Signal()
+    timeline_update = Signal()
+
+    def __init__(self, video_controller):
+        super().__init__()
+        self.video_controller = video_controller
+        self.settings = get_settings_manager()
+        self.event_manager = get_custom_event_manager()
+
+        # Параметры расстановки отрезков (загрузить из QSettings)
+        mode_str = self.settings.load_recording_mode()
+        self.recording_mode = RecordingMode(mode_str)
+        self.fixed_duration_sec = self.settings.load_fixed_duration()
+        self.pre_roll_sec = self.settings.load_pre_roll()
+        self.post_roll_sec = self.settings.load_post_roll()
+
+        # Состояние текущей записи
+        self.is_recording = False
+        self.recording_event_name: Optional[str] = None  # Имя события вместо EventType
+        self.recording_start_frame: Optional[int] = None
+
+    def on_hotkey_pressed(self, key: str):
+        """Обработка нажатия горячей клавиши для создания события."""
+        # Найти событие по клавише
+        event = self.event_manager.get_event_by_hotkey(key)
+        if not event:
+            return  # Нет события для этой клавиши
+
+        current_frame = self.video_controller.get_current_frame_idx()
+        event_name = event.name
+
+        if self.recording_mode == RecordingMode.DYNAMIC:
+            self._handle_dynamic_mode(event_name, current_frame)
+        elif self.recording_mode == RecordingMode.FIXED_LENGTH:
+            self._handle_fixed_length_mode(event_name, current_frame)
+
+    def _handle_dynamic_mode(self, event_name: str, current_frame: int):
+        """Динамический режим: два нажатия = начало и конец."""
+        if not self.is_recording:
+            # Начало записи
+            self.is_recording = True
+            self.recording_event_name = event_name
+            self.recording_start_frame = current_frame
+            self.recording_status_changed.emit(event_name, "Recording")
+            self.timeline_update.emit()
+        elif self.recording_event_name == event_name:
+            # Конец записи
+            pre_roll_frames = max(0, int(self.pre_roll_sec * self.video_controller.get_fps()))
+            start_frame = max(0, self.recording_start_frame - pre_roll_frames)
+
+            marker = Marker(
+                start_frame=start_frame,
+                end_frame=current_frame,
+                event_name=event_name,
+                note=""
+            )
+            self.video_controller.markers.append(marker)
+
+            # Автооткат начала отрезка
+            self.video_controller.seek_frame(start_frame)
+
+            self.is_recording = False
+            self.recording_event_name = None
+            self.recording_start_frame = None
+
+            self.recording_status_changed.emit(event_name, "Complete")
+            self.markers_changed.emit()
+            self.timeline_update.emit()
+
+    def _handle_fixed_length_mode(self, event_name: str, current_frame: int):
+        """Фиксированная длина: одно нажатие = отрезок фиксированной длины."""
+        # Рассчитать границы
+        fixed_frames = int(self.fixed_duration_sec * self.video_controller.get_fps())
+        pre_roll_frames = max(0, int(self.pre_roll_sec * self.video_controller.get_fps()))
+
+        start_frame = max(0, current_frame - pre_roll_frames)
+        end_frame = min(self.video_controller.get_total_frames() - 1, current_frame + fixed_frames - pre_roll_frames)
+
+        # Создать отрезок
+        marker = Marker(
+            start_frame=start_frame,
+            end_frame=end_frame,
+            event_name=event_name,
+            note=""
+        )
+        self.video_controller.markers.append(marker)
+
+        # Визуальная обратная связь
+        self.recording_status_changed.emit(event_name, "Fixed")
+
+        # Автооткат начала отрезка
+        self.video_controller.seek_frame(start_frame)
+
+        self.markers_changed.emit()
+        self.timeline_update.emit()
+
+    def cancel_recording(self):
+        """Отменить текущую запись."""
+        if self.is_recording:
+            self.is_recording = False
+            self.recording_event_name = None
+            self.recording_start_frame = None
+            self.recording_status_changed.emit("", "Cancelled")
+            self.timeline_update.emit()
+
+    def set_recording_mode(self, mode):
+        """Установить режим расстановки отрезков."""
+        self.recording_mode = mode
+        self.settings.save_recording_mode(mode.value)
+
+    def set_fixed_duration(self, seconds: int):
+        """Установить фиксированную длину отрезка."""
+        self.fixed_duration_sec = seconds
+        self.settings.save_fixed_duration(seconds)
+
+    def set_pre_roll(self, seconds: float):
+        """Установить откат перед началом отрезка."""
+        self.pre_roll_sec = seconds
+        self.settings.save_pre_roll(seconds)
+
+    def set_post_roll(self, seconds: float):
+        """Установить добавление в конец отрезка."""
+        self.post_roll_sec = seconds
+        self.settings.save_post_roll(seconds)
+"""
+Project Manager - система сохранения/загрузки проектов (.hep файлы).
+"""
+
+import json
+import zipfile
+import os
+from pathlib import Path
+from typing import List, Optional, Dict
+from datetime import datetime
+from ..models.marker import Marker, EventType
+
+
+class Project:
+    """Модель проекта Hockey Editor Pro."""
+    
+    def __init__(self, name: str, video_path: str = "", fps: float = 30.0):
+        self.name = name
+        self.video_path = video_path
+        self.fps = fps
+        self.markers: List[Marker] = []
+        self.created_at = datetime.now().isoformat()
+        self.modified_at = datetime.now().isoformat()
+        self.version = "1.0"
+    
+    def to_dict(self) -> Dict:
+        """Конвертировать проект в словарь."""
+        return {
+            "name": self.name,
+            "video_path": self.video_path,
+            "fps": self.fps,
+            "version": self.version,
+            "created_at": self.created_at,
+            "modified_at": self.modified_at,
+            "markers": [
+                {
+                    "event_name": marker.event_name,
+                    "start_frame": marker.start_frame,
+                    "end_frame": marker.end_frame,
+                    "note": marker.note or ""
+                }
+                for marker in self.markers
+            ]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Project':
+        """Создать проект из словаря."""
+        project = cls(data["name"], data.get("video_path", ""), data.get("fps", 30.0))
+        project.created_at = data.get("created_at", project.created_at)
+        project.modified_at = data.get("modified_at", project.modified_at)
+        project.version = data.get("version", "1.0")
+        
+        # Загрузить маркеры
+        for marker_data in data.get("markers", []):
+            marker = Marker(
+                event_name=marker_data["event_name"],
+                start_frame=marker_data["start_frame"],
+                end_frame=marker_data["end_frame"],
+                note=marker_data.get("note", "")
+            )
+            project.markers.append(marker)
+        
+        return project
+
+
+class ProjectManager:
+    """Управление проектами (.hep файлы = ZIP с project.json)."""
+    
+    HEP_VERSION = "1.0"
+    MANIFEST_FILE = "project.json"
+    
+    @staticmethod
+    def create_project(name: str, video_path: str = "", fps: float = 30.0) -> Project:
+        """Создать новый проект."""
+        return Project(name, video_path, fps)
+    
+    @staticmethod
+    def save_project(project: Project, file_path: str) -> bool:
+        """Сохранить проект в .hep файл."""
+        try:
+            file_path = Path(file_path)
+            
+            # Убедиться, что путь имеет расширение .hep
+            if file_path.suffix.lower() != ".hep":
+                file_path = file_path.with_suffix(".hep")
+            
+            # Обновить время модификации
+            project.modified_at = datetime.now().isoformat()
+            
+            # Создать ZIP архив
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as hep:
+                # Написать project.json
+                manifest = {
+                    "version": ProjectManager.HEP_VERSION,
+                    "project": project.to_dict()
+                }
+                
+                hep.writestr(ProjectManager.MANIFEST_FILE, 
+                           json.dumps(manifest, indent=2, ensure_ascii=False))
+            
+            return True
+        except Exception as e:
+            print(f"Error saving project: {e}")
+            return False
+    
+    @staticmethod
+    def load_project(file_path: str) -> Optional[Project]:
+        """Загрузить проект из .hep файла."""
+        try:
+            file_path = Path(file_path)
+            
+            if not file_path.exists():
+                print(f"Project file not found: {file_path}")
+                return None
+            
+            # Открыть ZIP архив
+            with zipfile.ZipFile(file_path, 'r') as hep:
+                # Прочитать project.json
+                manifest_data = hep.read(ProjectManager.MANIFEST_FILE)
+                manifest = json.loads(manifest_data)
+                
+                # Проверить версию
+                version = manifest.get("version", "1.0")
+                if version != ProjectManager.HEP_VERSION:
+                    print(f"Warning: Project version {version} may not be compatible")
+                
+                # Загрузить проект
+                project_data = manifest.get("project", {})
+                project = Project.from_dict(project_data)
+                
+                return project
+        except Exception as e:
+            print(f"Error loading project: {e}")
+            return None
+    
+    @staticmethod
+    def get_recent_projects(max_count: int = 5) -> List[str]:
+        """Получить список недавних проектов из конфига."""
+        from ..utils.settings_manager import get_settings_manager
+        settings = get_settings_manager()
+        recent = settings.load_recent_projects()
+        return recent[:max_count]
+    
+    @staticmethod
+    def add_to_recent(file_path: str):
+        """Добавить проект в список недавних."""
+        from ..utils.settings_manager import get_settings_manager
+        settings = get_settings_manager()
+        
+        recent = settings.load_recent_projects()
+        file_path = str(Path(file_path).absolute())
+        
+        # Удалить если уже есть
+        if file_path in recent:
+            recent.remove(file_path)
+        
+        # Добавить в начало
+        recent.insert(0, file_path)
+        
+        # Сохранить (макс 10 проектов)
+        settings.save_recent_projects(recent[:10])
+import cv2
+import numpy as np
+from typing import Optional, Tuple
+import os
+
+
+class VideoProcessor:
+    """Управление видео через OpenCV (cv2.VideoCapture) с буферизацией текущего кадра."""
+
+    def __init__(self):
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.video_path: Optional[str] = None
+        self.fps: float = 0.0
+        self.total_frames: int = 0
+        self.current_frame_idx: int = 0
+        self.frame_width: int = 0
+        self.frame_height: int = 0
+        self._current_frame_buffer: Optional[np.ndarray] = None  # Буфер текущего кадра
+
+    def load(self, video_path: str) -> bool:
+        """Загрузить видеофайл."""
+        if not os.path.exists(video_path):
+            return False
+        
+        # Закрыть предыдущее видео
+        self.cleanup()
+        
+        self.cap = cv2.VideoCapture(video_path)
+        if not self.cap.isOpened():
+            self.cap = None
+            return False
+        
+        self.video_path = video_path
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.current_frame_idx = 0
+        
+        # Загрузить первый кадр в буфер
+        self._read_and_buffer_frame()
+        
+        return True
+
+    def seek(self, frame_idx: int) -> bool:
+        """Перемотать на кадр (БЕЗ воспроизведения)."""
+        if not self.cap:
+            return False
+        
+        frame_idx = max(0, min(frame_idx, self.total_frames - 1))
+        ret = self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        if ret:
+            self.current_frame_idx = frame_idx
+            self._read_and_buffer_frame()
+        return ret
+
+    def advance_frame(self) -> bool:
+        """Перейти на следующий кадр (для воспроизведения)."""
+        if not self.cap:
+            return False
+        
+        # Просто читаем следующий кадр
+        ret, frame = self.cap.read()
+        if ret:
+            self.current_frame_idx = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+            self._current_frame_buffer = frame
+            return True
+        return False
+
+    def _read_and_buffer_frame(self) -> bool:
+        """Прочитать кадр с текущей позиции и сохранить в буфер."""
+        if not self.cap:
+            return False
+        
+        ret, frame = self.cap.read()
+        if ret:
+            self._current_frame_buffer = frame
+            return True
+        return False
+
+    def get_current_frame(self) -> Optional[np.ndarray]:
+        """Получить текущий кадр из буфера (БЕЗ чтения)."""
+        return self._current_frame_buffer
+
+    def get_frame_at(self, frame_idx: int) -> Optional[np.ndarray]:
+        """Получить кадр по индексу (вспомогательный метод)."""
+        if not self.cap:
+            return None
+        
+        self.seek(frame_idx)
+        return self.get_current_frame()
+
+    def get_current_time(self) -> float:
+        """Получить текущее время (секунды)."""
+        if self.fps == 0:
+            return 0.0
+        return self.current_frame_idx / self.fps
+
+    def get_fps(self) -> float:
+        """Получить FPS видео."""
+        return self.fps
+
+    def get_total_frames(self) -> int:
+        """Получить общее количество кадров."""
+        return self.total_frames
+
+    def get_total_time(self) -> float:
+        """Получить общую длину видео (секунды)."""
+        if self.fps == 0:
+            return 0.0
+        return self.total_frames / self.fps
+
+    def get_current_frame_idx(self) -> int:
+        """Получить индекс текущего кадра."""
+        return self.current_frame_idx
+
+    def get_resolution(self) -> Tuple[int, int]:
+        """Получить разрешение (width, height)."""
+        return self.frame_width, self.frame_height
+
+    def cleanup(self):
+        """Закрыть видеофайл."""
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        self.video_path = None
+        self.fps = 0.0
+        self.total_frames = 0
+        self.current_frame_idx = 0
+        self._current_frame_buffer = None
+
+    def __del__(self):
+        self.cleanup()
+"""
+VideoReaderThread - многопоточное чтение видеокадров.
+Читает кадры в отдельном потоке, главный поток свободен для UI.
+"""
+
+import cv2
+import numpy as np
+from queue import Queue, Empty
+from typing import Optional
+from PySide6.QtCore import QThread, Signal
+
+
+class VideoReaderThread(QThread):
+    """
+    Поток для параллельного чтения видеокадров.
+    Использует очередь для передачи кадров в главный поток.
+    """
+    
+    # Сигналы
+    frame_decoded = Signal(int, object)  # frame_number, np.ndarray
+    error_occurred = Signal(str)          # error_message
+    stopped = Signal()                    # поток остановлен
+    
+    def __init__(self, video_path: str, fps: float, queue_size: int = 5):
+        super().__init__()
+        self.video_path = video_path
+        self.fps = fps
+        self.queue_size = queue_size
+        self.frame_queue = Queue(maxsize=queue_size)
+        
+        self.is_running = False
+        self.is_paused = False
+        self.target_frame = None  # Если не None, перемотать на этот кадр
+        
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.current_frame_number = 0
+
+    def run(self):
+        """Главный цикл потока: читает и кладёт кадры в очередь."""
+        try:
+            self.cap = cv2.VideoCapture(self.video_path)
+            if not self.cap.isOpened():
+                self.error_occurred.emit(f"Cannot open video: {self.video_path}")
+                return
+            
+            self.is_running = True
+            frame_delay = int(1000 / self.fps) if self.fps > 0 else 33  # мс
+            
+            while self.is_running:
+                # Проверка на перемотку (seek)
+                if self.target_frame is not None:
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.target_frame)
+                    self.current_frame_number = self.target_frame
+                    self.target_frame = None
+                
+                # Если паузирован, спать
+                if self.is_paused:
+                    self.msleep(100)
+                    continue
+                
+                # Читать кадр
+                ret, frame = self.cap.read()
+                if ret:
+                    try:
+                        self.frame_queue.put_nowait((self.current_frame_number, frame))
+                        self.frame_decoded.emit(self.current_frame_number, frame)
+                        self.current_frame_number += 1
+                    except:
+                        pass  # Очередь переполнена, пропустить кадр
+                    
+                    self.msleep(frame_delay)
+                else:
+                    # Конец видео
+                    self.is_running = False
+        
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+        
+        finally:
+            if self.cap:
+                self.cap.release()
+            self.stopped.emit()
+
+    def stop(self):
+        """Остановить поток."""
+        self.is_running = False
+        self.wait()
+
+    def pause(self):
+        """Пауза (поток продолжает работать, но не читает кадры)."""
+        self.is_paused = True
+
+    def resume(self):
+        """Возобновить воспроизведение."""
+        self.is_paused = False
+
+    def seek(self, frame_number: int):
+        """Перемотать на кадр (выполнится в следующей итерации цикла)."""
+        self.target_frame = frame_number
+
+    def clear_queue(self):
+        """Очистить очередь кадров."""
+        try:
+            while not self.frame_queue.empty():
+                self.frame_queue.get_nowait()
+        except Empty:
+            pass
+from typing import List, Optional
+import os
+import tempfile
+import subprocess
+from ..models.marker import Marker
+
+class VideoExporter:
+    @staticmethod
+    def export(
+        video_path: str,
+        markers: List[Marker],
+        total_frames: int,
+        fps: float,
+        output_path: str,
+        codec: str = "libx264",
+        quality: int = 23,
+        resolution: Optional[str] = None,
+        include_audio: bool = True,
+        merge_segments: bool = True
+    ):
+        """
+        Экспорт видео сегментов.
+        Для codec="copy" использует быстрое перекодирование через ffmpeg (ultrafast preset).
+        Для других кодеков использует moviepy с перекодированием.
+        """
+        try:
+            # Проверяем, что входной файл существует
+            if not os.path.exists(video_path):
+                raise FileNotFoundError(f"Video file not found: {video_path}")
+
+            # Если выбран codec "copy", используем прямой вызов ffmpeg
+            if codec.lower() == "copy":
+                return VideoExporter._export_with_copy(video_path, markers, fps, output_path, merge_segments)
+
+            # Для других кодеков используем moviepy с перекодированием
+            return VideoExporter._export_with_moviepy(
+                video_path, markers, total_frames, fps, output_path,
+                codec, quality, resolution, include_audio, merge_segments
+            )
+
+        except ImportError as e:
+            raise ImportError(f"moviepy is required for video export. Install it with: pip install moviepy. Error: {e}")
+        except Exception as e:
+            print(f"Export error: {e}")
+            raise
+
+    @staticmethod
+    def _export_with_copy(video_path: str, markers: List[Marker], fps: float, output_path: str, merge_segments: bool = True):
+        """
+        Быстрый экспорт с использованием ffmpeg ultrafast preset для плавных стыков.
+        Если merge_segments=True, объединяет сегменты в один файл.
+        Если merge_segments=False, экспортирует каждый сегмент как отдельный файл.
+        """
+        print(f"Fast export using ultrafast encoding: {len(markers)} segments, merge_segments={merge_segments}")
+
+        if not markers:
+            # Если нет маркеров, создаем пустой файл (не имеет смысла для copy)
+            raise ValueError("Cannot create empty clip with codec='copy'")
+
+        # Создаем временную директорию для сегментов
+        with tempfile.TemporaryDirectory() as temp_dir:
+            segment_files = []
+
+            # Извлекаем каждый сегмент в отдельный файл
+            for i, marker in enumerate(markers):
+                start_time = marker.start_frame / fps
+                end_time = marker.end_frame / fps
+                duration = end_time - start_time
+
+                segment_path = os.path.join(temp_dir, f"segment_{i:03d}.mp4")
+
+                print(f"  Extracting segment {i+1}: {marker.event_name} ({start_time:.2f}s - {end_time:.2f}s)")
+
+                # Используем прямой вызов ffmpeg для быстрого извлечения сегмента с перекодированием
+                cmd = [
+                    'ffmpeg',
+                    '-ss', str(start_time),          # Время начала
+                    '-i', video_path,                # Входной файл
+                    '-t', str(duration),             # Длительность
+                    '-c:v', 'libx264',               # Кодек видео
+                    '-preset', 'ultrafast',          # Сверхбыстрый preset
+                    '-crf', '23',                    # Качество (низкая потеря)
+                    '-c:a', 'aac',                   # Перекодируем аудио для плавных стыков
+                    '-avoid_negative_ts', 'make_zero', # Сбрасываем временные метки
+                    '-y',                            # Перезаписываем выходной файл
+                    segment_path                     # Выходной файл
+                ]
+
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+
+                if result.returncode != 0:
+                    raise RuntimeError(f"FFmpeg segment extraction failed: {result.stderr}")
+
+                segment_files.append(segment_path)
+
+            # Выбор режима экспорта на основе merge_segments
+            if merge_segments:
+                # Объединяем сегменты в один файл
+                if len(segment_files) == 1:
+                    # Просто копируем единственный файл
+                    import shutil
+                    shutil.copy2(segment_files[0], output_path)
+                else:
+                    # Для нескольких сегментов выполняем конкатенацию через concat demuxer
+                    VideoExporter._concatenate_segments(segment_files, output_path)
+                print(f"Fast export completed successfully: {output_path}")
+            else:
+                # Экспортируем каждый сегмент как отдельный файл
+                output_dir = os.path.dirname(output_path)
+                base_name = os.path.splitext(os.path.basename(output_path))[0]
+
+                exported_files = []
+                for i, (segment_file, marker) in enumerate(zip(segment_files, markers)):
+                    # Генерируем имя файла для каждого сегмента
+                    segment_output_path = os.path.join(
+                        output_dir,
+                        f"{base_name}_segment_{i+1:03d}_{marker.event_name}.mp4"
+                    )
+
+                    # Копируем сегмент в финальное место
+                    import shutil
+                    shutil.copy2(segment_file, segment_output_path)
+                    exported_files.append(segment_output_path)
+                    print(f"  Exported segment {i+1}: {segment_output_path}")
+
+                print(f"Fast export completed successfully: {len(exported_files)} separate files in {output_dir}")
+
+        return True
+
+    @staticmethod
+    def _concatenate_segments(segment_files: List[str], output_path: str):
+        """
+        Конкатенирует несколько видео файлов с быстрым перекодированием используя ffmpeg.
+        """
+        # Создаем файл со списком для конкатенации
+        concat_file = output_path + ".txt"
+        try:
+            with open(concat_file, 'w', encoding='utf-8') as f:
+                for segment in segment_files:
+                    f.write(f"file '{segment}'\n")
+
+            # Запускаем ffmpeg для конкатенации с быстрым перекодированием
+            cmd = [
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_file,
+                '-c:v', 'libx264',       # Кодек видео
+                '-preset', 'ultrafast',  # Сверхбыстрый preset
+                '-crf', '23',            # Качество (низкая потеря)
+                '-c:a', 'copy',          # Копируем аудио без изменений
+                '-y',                    # Перезаписываем выходной файл
+                output_path
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg concatenation failed: {result.stderr}")
+
+        finally:
+            # Удаляем временный файл
+            if os.path.exists(concat_file):
+                os.remove(concat_file)
+
+    @staticmethod
+    def _export_with_moviepy(
+        video_path: str,
+        markers: List[Marker],
+        total_frames: int,
+        fps: float,
+        output_path: str,
+        codec: str,
+        quality: int,
+        resolution: Optional[str],
+        include_audio: bool,
+        merge_segments: bool
+    ):
+        """
+        Экспорт с использованием moviepy (для перекодирования).
+        Если merge_segments=True, объединяет сегменты в один файл.
+        Если merge_segments=False, экспортирует каждый сегмент как отдельный файл.
+        """
+        import moviepy as mp
+
+        # Загружаем видео
+        video = mp.VideoFileClip(video_path)
+
+        # Настраиваем параметры экспорта
+        export_params = {}
+
+        # Кодек
+        if codec.lower() in ["h264", "libx264"]:
+            export_params["codec"] = "libx264"
+        elif codec.lower() in ["h265", "libx265"]:
+            export_params["codec"] = "libx265"
+        elif codec.lower() == "mpeg4":
+            export_params["codec"] = "libx264"  # Fallback to h264
+        else:
+            export_params["codec"] = codec
+
+        # Аудио
+        if include_audio:
+            export_params["audio_codec"] = "aac"
+        else:
+            export_params["audio_codec"] = None
+
+        # Качество (CRF для h264/h265)
+        if quality >= 0 and quality <= 51:
+            export_params["bitrate"] = None  # Используем CRF
+            # Для moviepy CRF устанавливается через preset и quality
+            if quality <= 18:
+                export_params["preset"] = "slow"
+            elif quality <= 23:
+                export_params["preset"] = "medium"
+            else:
+                export_params["preset"] = "fast"
+
+        if markers:
+            print(f"Exporting {len(markers)} segments with re-encoding, merge_segments={merge_segments}")
+
+            clips = []
+            for marker in markers:
+                # Конвертируем кадры в секунды
+                start_time = marker.start_frame / fps
+                end_time = marker.end_frame / fps
+
+                # Создаем субклип
+                subclip = video.subclipped(start_time, end_time)
+                clips.append(subclip)
+
+                print(f"  Segment: {marker.event_name} ({start_time:.2f}s - {end_time:.2f}s)")
+
+            if merge_segments:
+                # Объединяем сегменты в один файл
+                if len(clips) > 1:
+                    final_clip = mp.concatenate_videoclips(clips)
+                else:
+                    final_clip = clips[0]
+
+                # Применяем разрешение к финальному клипу
+                if resolution and resolution != "source":
+                    if resolution == "2160p":
+                        final_clip = final_clip.resized(height=2160)
+                    elif resolution == "1080p":
+                        final_clip = final_clip.resized(height=1080)
+                    elif resolution == "720p":
+                        final_clip = final_clip.resized(height=720)
+                    elif resolution == "480p":
+                        final_clip = final_clip.resized(height=480)
+                    elif resolution == "360p":
+                        final_clip = final_clip.resized(height=360)
+
+                # Экспортируем объединенный клип
+                final_clip.write_videofile(
+                    output_path,
+                    fps=fps,
+                    threads=4,
+                    logger=None,  # Отключаем verbose вывод
+                    **export_params
+                )
+
+                # Освобождаем финальный клип
+                final_clip.close()
+
+                print(f"Re-encoding export completed successfully: {output_path}")
+            else:
+                # Экспортируем каждый сегмент как отдельный файл
+                output_dir = os.path.dirname(output_path)
+                base_name = os.path.splitext(os.path.basename(output_path))[0]
+
+                exported_files = []
+                for i, (clip, marker) in enumerate(zip(clips, markers)):
+                    # Применяем разрешение к каждому клипу
+                    segment_clip = clip
+                    if resolution and resolution != "source":
+                        if resolution == "2160p":
+                            segment_clip = clip.resized(height=2160)
+                        elif resolution == "1080p":
+                            segment_clip = clip.resized(height=1080)
+                        elif resolution == "720p":
+                            segment_clip = clip.resized(height=720)
+                        elif resolution == "480p":
+                            segment_clip = clip.resized(height=480)
+                        elif resolution == "360p":
+                            segment_clip = clip.resized(height=360)
+
+                    # Генерируем имя файла для каждого сегмента
+                    segment_output_path = os.path.join(
+                        output_dir,
+                        f"{base_name}_segment_{i+1:03d}_{marker.event_name}.mp4"
+                    )
+
+                    # Экспортируем сегмент
+                    segment_clip.write_videofile(
+                        segment_output_path,
+                        fps=fps,
+                        threads=4,
+                        logger=None,  # Отключаем verbose вывод
+                        **export_params
+                    )
+
+                    exported_files.append(segment_output_path)
+                    print(f"  Exported segment {i+1}: {segment_output_path}")
+
+                    # Освобождаем клип, если он был изменен (изменение размера)
+                    if segment_clip is not clip:
+                        segment_clip.close()
+
+                print(f"Re-encoding export completed successfully: {len(exported_files)} separate files in {output_dir}")
+
+        else:
+            # Если нет маркеров, создаем пустой клип (минимальная длительность)
+            print(f"Creating empty clip: {output_path}")
+            final_clip = video.subclipped(0, 0.1)
+
+            # Экспортируем пустой клип
+            final_clip.write_videofile(
+                output_path,
+                fps=fps,
+                threads=4,
+                logger=None,  # Отключаем verbose вывод
+                **export_params
+            )
+
+            final_clip.close()
+
+        # Освобождаем ресурсы
+        video.close()
+
+        return True
+from dataclasses import dataclass
+from enum import Enum
+
+@dataclass
+class Marker:
+    start_frame: int
+    end_frame: int
+    event_name: str  # Новое поле: имя события (например, "Attack", "Defense", "MyCustomEvent")
+    note: str = ""
+
+    def to_dict(self):
+        return {
+            "start_frame": self.start_frame,
+            "end_frame": self.end_frame,
+            "event_name": self.event_name,  # Сохраняем имя события
+            "note": self.note
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        # Backwards compatibility: если есть поле "type" вместо "event_name"
+        if "type" in data and "event_name" not in data:
+            # Конвертировать старый enum value в имя события
+            event_type_value = data["type"]
+            # Маппинг старых значений на имена
+            type_to_name = {
+                "Атака": "Attack",
+                "Защита": "Defense",
+                "Смена": "Shift"
+            }
+            event_name = type_to_name.get(event_type_value, event_type_value)
+        else:
+            event_name = data.get("event_name", "Attack")  # Default to Attack
+
+        return cls(
+            start_frame=data["start_frame"],
+            end_frame=data["end_frame"],
+            event_name=event_name,
+            note=data.get("note", "")
+        )
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Dict, Any
+from .marker import Marker
+
+
+@dataclass
+class Project:
+    """Модель проекта Hockey Editor."""
+
+    name: str
+    video_path: str = ""
+    fps: float = 30.0
+    markers: List[Marker] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    modified_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    version: str = "1.0"
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Конвертировать проект в словарь."""
+        return {
+            "name": self.name,
+            "video_path": self.video_path,
+            "fps": self.fps,
+            "version": self.version,
+            "created_at": self.created_at,
+            "modified_at": self.modified_at,
+            "markers": [marker.to_dict() for marker in self.markers]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Project':
+        """Создать проект из словаря."""
+        project = cls(
+            name=data["name"],
+            video_path=data.get("video_path", ""),
+            fps=data.get("fps", 30.0)
+        )
+        project.created_at = data.get("created_at", project.created_at)
+        project.modified_at = data.get("modified_at", project.modified_at)
+        project.version = data.get("version", "1.0")
+
+        # Загрузить маркеры
+        for marker_data in data.get("markers", []):
+            marker = Marker.from_dict(marker_data)
+            project.markers.append(marker)
+
+        return project
+from dataclasses import dataclass
+from typing import Dict, Any
+
+
+@dataclass
+class EventType:
+    """Модель типа события."""
+
+    name: str
+    color: str  # Hex color (e.g., "#FF0000")
+    shortcut: str = ""
+    description: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Конвертировать в словарь для сериализации."""
+        return {
+            'name': self.name,
+            'color': self.color,
+            'shortcut': self.shortcut,
+            'description': self.description
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EventType':
+        """Создать из словаря."""
+        return cls(
+            name=data.get('name', ''),
+            color=data.get('color', '#CCCCCC'),
+            shortcut=data.get('shortcut', ''),
+            description=data.get('description', '')
+        )
+
+    def get_localized_name(self) -> str:
+        """Получить локализованное имя события."""
+        # Хардкод русские переводы для стандартных событий
+        name_map = {
+            'Goal': 'Гол',
+            'Shot on Goal': 'Бросок в створ',
+            'Missed Shot': 'Бросок мимо',
+            'Blocked Shot': 'Заблокированный бросок',
+            'Zone Entry': 'Вход в зону',
+            'Zone Exit': 'Выход из зоны',
+            'Dump In': 'Вброс',
+            'Turnover': 'Потеря',
+            'Takeaway': 'Перехват',
+            'Faceoff Win': 'Вбрасывание: Победа',
+            'Faceoff Loss': 'Вбрасывание: Поражение',
+            'Defensive Block': 'Блокшот в обороне',
+            'Penalty': 'Удаление'
+        }
+        return name_map.get(self.name, self.name)
+
+    def get_localized_description(self) -> str:
+        """Получить локализованное описание события."""
+        desc_map = {
+            'Goal': 'Забитый гол',
+            'Shot on Goal': 'Бросок в створ ворот',
+            'Missed Shot': 'Бросок мимо ворот',
+            'Blocked Shot': 'Бросок заблокирован',
+            'Zone Entry': 'Вход в зону атаки',
+            'Zone Exit': 'Выход из зоны защиты',
+            'Dump In': 'Вброс шайбы в зону',
+            'Turnover': 'Потеря владения шайбой',
+            'Takeaway': 'Перехват шайбы',
+            'Faceoff Win': 'Выигранное вбрасывание',
+            'Faceoff Loss': 'Проигранное вбрасывание',
+            'Defensive Block': 'Блокшот в обороне',
+            'Penalty': 'Назначенное удаление'
+        }
+        return desc_map.get(self.name, self.description)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPixmap, QImage, QFont, QKeySequence, QShortcut
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider,
+    QLabel, QListWidget, QListWidgetItem, QFileDialog, QComboBox, QSpinBox,
+    QMessageBox, QSpinBox, QMenu, QCheckBox, QSplitter
+)
+import cv2
+import numpy as np
+from pathlib import Path
+from .timeline_graphics import TimelineWidget
+from .instance_edit_window import InstanceEditWindow
+from .settings_dialog import SettingsDialog
+from .event_shortcut_list_widget import EventShortcutListWidget
+from .segment_list_widget import SegmentListWidget
+from .player_controls import PlayerControls
+from ..models.marker import EventType
+from ..utils.settings_manager import get_settings_manager
+from ..utils.custom_events import get_custom_event_manager
+from ..utils.shortcut_manager import ShortcutManager
+
+
+
+class MainWindow(QMainWindow):
+    """Главное окно приложения."""
+
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+        self.settings_manager = get_settings_manager()
+        self.event_manager = get_custom_event_manager()
+        self.event_manager.setParent(self)  # Ensure proper Qt object ownership
+        self.shortcut_manager = ShortcutManager(self)
+
+        # Автосохранение
+        from ..utils.autosave import AutosaveManager
+        self.autosave_manager = AutosaveManager(controller)
+        self.autosave_manager.autosave_completed.connect(self._on_autosave_completed)
+
+        self.setWindowTitle("Хоккейный Редактор")
+        self.setGeometry(0, 0, 1800, 1000)
+
+        # Поддержка drag-drop для видео
+        self.setAcceptDrops(True)
+
+        # Инициализация фильтров
+        self._init_filters()
+
+        self.setup_ui()
+        self.connect_signals()
+        self._setup_shortcuts()
+        self._create_menu()
+
+    def _init_filters(self):
+        """Инициализация состояния фильтров."""
+        self.filter_event_types = set()  # Множество выбранных типов событий
+        self.filter_has_notes = False    # Фильтр по наличию заметок
+
+    def _setup_filters(self, parent_layout):
+        """Создать элементы управления фильтрами."""
+        # Контейнер для фильтров
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(5)
+
+        # Фильтр по типу события
+        event_filter_label = QLabel("Тип:")
+        event_filter_label.setMaximumWidth(30)
+        filters_layout.addWidget(event_filter_label)
+
+        self.event_filter_combo = QComboBox()
+        self.event_filter_combo.setToolTip("Фильтр по типу события")
+        self.event_filter_combo.setMaximumWidth(120)
+        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        filters_layout.addWidget(self.event_filter_combo)
+
+        # Чекбокс для фильтра заметок
+        self.notes_filter_checkbox = QCheckBox("Заметки")
+        self.notes_filter_checkbox.setToolTip("Показывать только отрезки с заметками")
+        self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
+        filters_layout.addWidget(self.notes_filter_checkbox)
+
+        # Кнопка сброса фильтров
+        reset_btn = QPushButton("Сброс")
+        reset_btn.setMaximumWidth(50)
+        reset_btn.setToolTip("Сбросить все фильтры")
+        reset_btn.clicked.connect(self._reset_filters)
+        filters_layout.addWidget(reset_btn)
+
+        filters_layout.addStretch()
+
+        parent_layout.addLayout(filters_layout)
+
+        # Заполнить фильтр событий
+        self._update_event_filter()
+
+    def _update_event_filter(self):
+        """Обновить список доступных типов событий в фильтре."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.clear()
+
+        # Добавить опцию "Все"
+        self.event_filter_combo.addItem("Все", None)
+
+        # Добавить все доступные типы событий
+        events = self.event_manager.get_all_events()
+        for event in events:
+            localized_name = event.get_localized_name()
+            self.event_filter_combo.addItem(localized_name, event.name)
+
+        self.event_filter_combo.blockSignals(False)
+
+    def _on_event_filter_changed(self):
+        """Обработка изменения фильтра типов событий."""
+        current_data = self.event_filter_combo.currentData()
+        if current_data is None:  # "Все"
+            self.filter_event_types.clear()
+        else:
+            self.filter_event_types = {current_data}
+
+        self._on_markers_changed()
+
+    def _on_notes_filter_changed(self):
+        """Обработка изменения фильтра заметок."""
+        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
+        self._on_markers_changed()
+
+    def _reset_filters(self):
+        """Сбросить все фильтры."""
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.setCurrentIndex(0)  # "Все"
+        self.event_filter_combo.blockSignals(False)
+
+        self.notes_filter_checkbox.setChecked(False)
+
+        self.filter_event_types.clear()
+        self.filter_has_notes = False
+
+        self._on_markers_changed()
+
+    def _create_menu(self):
+        """Создать меню приложения и сохранить ссылки на действия."""
+        self.menubar = self.menuBar()
+        self.menubar.clear() # Очистка на всякий случай
+
+        # === File Menu ===
+        self.file_menu = self.menubar.addMenu("Файл")
+
+        self.action_new = self.file_menu.addAction("Новый проект")
+        self.action_new.setShortcut("Ctrl+N")
+        self.action_new.triggered.connect(self._on_new_project)
+
+        self.action_open = self.file_menu.addAction("Открыть проект")
+        self.action_open.setShortcut("Ctrl+O")
+        self.action_open.triggered.connect(self._on_open_project)
+
+        self.action_open_video = self.file_menu.addAction("Открыть видео")
+        self.action_open_video.triggered.connect(self._on_open_video)
+
+        self.action_save = self.file_menu.addAction("Сохранить проект")
+        self.action_save.setShortcut("Ctrl+S")
+        self.action_save.triggered.connect(self._on_save_project)
+
+        self.action_save_as = self.file_menu.addAction("Сохранить проект как...")
+        self.action_save_as.setShortcut("Ctrl+Shift+S")
+        self.action_save_as.triggered.connect(self._on_save_project_as)
+
+        self.file_menu.addSeparator()
+
+        # Recent Projects
+        self.recent_menu = self.file_menu.addMenu("Недавние проекты")
+        self._update_recent_menu()
+
+        self.file_menu.addSeparator()
+
+        self.action_exit = self.file_menu.addAction("Выход")
+        self.action_exit.triggered.connect(self.close)
+
+        # === Action buttons in menu bar ===
+        self.action_preview = self.menubar.addAction("Предпросмотр")
+        self.action_preview.setShortcut("Ctrl+P")
+        self.action_preview.triggered.connect(self._on_preview_clicked)
+
+        self.action_settings = self.menubar.addAction("Настройки")
+        self.action_settings.setShortcut("Ctrl+,")
+        self.action_settings.triggered.connect(self._on_settings_clicked)
+
+        self.action_export = self.menubar.addAction("Экспорт")
+        self.action_export.setShortcut("Ctrl+E")
+        self.action_export.triggered.connect(self._on_export_clicked)
+
+        # === Help Menu ===
+        self.help_menu = self.menubar.addMenu("Справка")
+
+        self.action_about = self.help_menu.addAction("О программе")
+        self.action_about.triggered.connect(self._on_about)
+
+    def setup_ui(self):
+        """Создать UI."""
+        central = QWidget()
+        self.setCentralWidget(central)
+        
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(5)
+        
+        # ===== ВЕРХНЯЯ ЧАСТЬ (видео + список справа) =====
+        # Используем QSplitter для возможности изменения пропорций
+        self.top_splitter = QSplitter(Qt.Horizontal)
+        self.top_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #333333;
+                border: 1px solid #555555;
+            }
+            QSplitter::handle:hover {
+                background-color: #444444;
+            }
+        """)
+
+        # Видео контейнер с интегрированными элементами управления
+        video_container = QWidget()
+        video_container_layout = QVBoxLayout(video_container)
+        video_container_layout.setContentsMargins(0, 0, 0, 0)
+        video_container_layout.setSpacing(0)  # Убираем промежутки между элементами
+
+        # Видео виджет
+        self.video_label = QLabel()
+        self.video_label.setMinimumSize(640, 360)
+        # Убрано ограничение максимального размера для занятия всей доступной высоты верхней половины экрана
+        self.video_label.setStyleSheet("background-color: black; border: 1px solid grey;")
+        self.video_label.setAlignment(Qt.AlignCenter)  # Центрирование содержимого
+        video_container_layout.addWidget(self.video_label, 1)  # stretch factor 1 для занятия основного пространства
+
+        # Профессиональная панель управления (интегрирована в нижнюю часть видео-фрейма)
+        self.player_controls = PlayerControls()
+        self.player_controls.playClicked.connect(self._on_play_pause_clicked)
+        self.player_controls.speedStepChanged.connect(self._on_speed_step_changed)
+        self.player_controls.skipSeconds.connect(self._on_skip_seconds)
+        self.player_controls.speedChanged.connect(self._on_speed_changed)
+        self.player_controls.fullscreenClicked.connect(self._on_fullscreen_clicked)
+        video_container_layout.addWidget(self.player_controls, 0, Qt.AlignBottom)  # Приклеена к нижней части
+
+        self.top_splitter.addWidget(video_container)
+
+        # Список отрезков
+        list_container = QWidget()
+        list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)  # Убираем отступы для плотного прилегания
+        list_layout.addWidget(QLabel("Отрезки:"))
+
+        # ===== ФИЛЬТРЫ =====
+        self._setup_filters(list_layout)
+
+        # Новый виджет списка сегментов
+        self.segment_list_widget = SegmentListWidget()
+        self.segment_list_widget.segment_edit_requested.connect(self._on_segment_edit_requested)
+        self.segment_list_widget.segment_delete_requested.connect(self._on_segment_delete_requested)
+        self.segment_list_widget.segment_jump_requested.connect(self._on_segment_jump_requested)
+        list_layout.addWidget(self.segment_list_widget)
+
+        self.top_splitter.addWidget(list_container)
+
+        # Установить начальные пропорции (60:40)
+        self.top_splitter.setSizes([600, 400])
+
+        main_layout.addWidget(self.top_splitter)
+
+        # ===== ТАЙМЛАЙН =====
+        main_layout.addWidget(QLabel("Таймлайн:"))
+
+        # 1. Передаем контроллер СРАЗУ в скобках
+        self.timeline_widget = TimelineWidget(self.controller)
+
+        # 2. Настраиваем ссылку на главное окно (для двойного клика)
+        # В новом коде мы обращаемся к scene внутри виджета
+        self.timeline_widget.scene.main_window = self
+
+        # 3. Добавляем виджет на форму
+        main_layout.addWidget(self.timeline_widget)
+
+        # ===== НИЖНЯЯ ЧАСТЬ: СПИСОК СОБЫТИЙ И СТАТУС-БАР =====
+        bottom_layout = QHBoxLayout()
+
+        # Виджет списка событий с горячими клавишами
+        self.event_shortcut_list_widget = EventShortcutListWidget()
+        self.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
+        bottom_layout.addWidget(self.event_shortcut_list_widget)
+
+        bottom_layout.addStretch()
+
+        # Статус-бар с фиксированной высотой
+        self.status_label = QLabel("Готов")
+        self.status_label.setStyleSheet("color: #ffcc00;")
+        self.status_label.setMinimumWidth(400)
+        self.status_label.setFixedHeight(22)  # Фиксированная высота 20-24px
+        bottom_layout.addWidget(self.status_label)
+
+        main_layout.addLayout(bottom_layout)
+        
+        central.setLayout(main_layout)
+        
+        # Подключить сигнал frame_ready для обновления видео
+        self.controller.frame_ready.connect(self._on_frame_ready)
+
+
+
+    def connect_signals(self):
+        """Подключить сигналы контроллера."""
+        self.controller.playback_time_changed.connect(self._on_playback_time_changed)
+        self.controller.markers_changed.connect(self._on_markers_changed)
+        self.controller.recording_status_changed.connect(self._on_recording_status_changed)
+        self.controller.timeline_update.connect(self._on_timeline_update)
+        self.controller.frame_ready.connect(self._on_frame_ready)
+
+        # Подключить сигнал изменения событий
+        self.event_manager.events_changed.connect(self._on_events_changed)
+        self.event_manager.events_changed.connect(self._on_events_changed_timeline)
+
+        # Запустить автосохранение
+        self.autosave_manager.start()
+
+    def _on_play_pause_clicked(self):
+        """Кнопка Play/Pause - переключение."""
+        self.controller.toggle_play_pause()
+        self._update_play_btn_text()
+
+    def _update_play_btn_text(self):
+        """Обновить текст кнопки Play/Pause."""
+        if hasattr(self, 'player_controls'):
+            self.player_controls.update_play_pause_button(self.controller.playing)
+
+    def _on_seek_frame(self, frames: int):
+        """Перемотка на кадры (±1)."""
+        current_frame = self.controller.get_current_frame_idx()
+        new_frame = max(0, min(self.controller.get_total_frames() - 1, current_frame + frames))
+        self.controller.seek_frame(new_frame)
+
+    def _on_skip_seconds(self, seconds: int):
+        """Перемотка на секунды."""
+        fps = self.controller.get_fps()
+        if fps <= 0:
+            return
+
+        # Обработка специальных значений для начала/конца
+        if seconds == -999999:  # В начало
+            self.controller.seek_frame(0)
+            return
+        elif seconds == 999999:  # В конец
+            self.controller.seek_frame(self.controller.get_total_frames() - 1)
+            return
+
+        # Обычная перемотка
+        frames_to_skip = int(seconds * fps)
+        current_frame = self.controller.get_current_frame_idx()
+        new_frame = max(0, min(self.controller.get_total_frames() - 1, current_frame + frames_to_skip))
+        self.controller.seek_frame(new_frame)
+
+    def _on_speed_step_changed(self, step: int):
+        """Изменение скорости на шаг (±1)."""
+        current_speed = self.controller.get_playback_speed()
+        speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+
+        # Найти текущую скорость в списке
+        try:
+            current_idx = speeds.index(current_speed)
+        except ValueError:
+            # Если точного совпадения нет, найти ближайшую
+            current_idx = min(range(len(speeds)), key=lambda i: abs(speeds[i] - current_speed))
+
+        # Изменить индекс
+        new_idx = max(0, min(len(speeds) - 1, current_idx + step))
+        new_speed = speeds[new_idx]
+
+        # Установить новую скорость
+        self.controller.set_playback_speed(new_speed)
+
+        # Обновить отображение в PlayerControls
+        if hasattr(self, 'player_controls'):
+            self.player_controls.set_speed(new_speed)
+
+    def _on_fullscreen_clicked(self):
+        """Переключение полноэкранного режима."""
+        # Пока не реализовано - заглушка
+        pass
+
+
+
+    def _on_open_video(self):
+        """Открыть видео."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Video", "", "Videos (*.mp4 *.avi *.mov *.mkv);;All (*.*)"
+        )
+        if path:
+            if self.controller.load_video(path):
+                self.status_label.setText(f"✓ Loaded: {path.split('/')[-1]}")
+                self._update_play_btn_text()
+                # Инициализировать PlayerControls
+                self._init_player_controls()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to load video")
+
+    def _on_event_btn_clicked(self, event_name: str):
+        """Нажатие кнопки события."""
+        self.controller.on_hotkey_pressed(event_name.upper())  # Контроллер ожидает key (строка)
+
+    def _on_undo_clicked(self):
+        """Отменить операцию."""
+        self.controller.undo()
+        self._on_markers_changed()
+    
+    def _on_redo_clicked(self):
+        """Повторить операцию."""
+        self.controller.redo()
+        self._on_markers_changed()
+
+    def _on_preview_clicked(self):
+        """Открыть окно предпросмотра отрезков."""
+        if not self.controller.markers:
+            QMessageBox.warning(self, "Warning", "No segments to preview")
+            return
+
+        from .preview_window import PreviewWindow
+        self.preview_window = PreviewWindow(self.controller, self)
+        self.preview_window.show()
+
+        # Исправление проблемы с масштабированием видео при первом показе окна
+        # Принудительно обновить геометрию после show()
+        QTimer.singleShot(0, lambda: (
+            self.preview_window.layout().activate(),
+            self.preview_window.updateGeometry(),
+            self.preview_window._display_current_frame()
+        ))
+
+    def _on_settings_clicked(self):
+        """Открыть настройки."""
+        dialog = SettingsDialog(self.controller, self)
+        if dialog.exec():
+            # Переподключить горячие клавиши, если они изменились
+            self._rebind_hotkeys()
+
+    def _on_export_clicked(self):
+        """Экспортировать видео."""
+        if not self.controller.markers:
+            QMessageBox.warning(self, "Warning", "No segments to export")
+            return
+        
+        from .export_dialog import ExportDialog
+        dialog = ExportDialog(self.controller, self)
+        dialog.exec()
+
+    def _on_marker_double_clicked(self, item: QListWidgetItem):
+        """Двойной клик на отрезок = редактирование."""
+        marker_idx = item.data(Qt.ItemDataRole.UserRole)
+        marker = self.controller.markers[marker_idx]
+
+        # Создать InstanceEditWindow вместо EditSegmentDialog
+        if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+            self.instance_edit_window.close()
+
+        self.instance_edit_window = InstanceEditWindow(marker, self.controller, self)
+        # Сохраняем индекс маркера для обновления
+        self.instance_edit_window._marker_idx = marker_idx
+        self.instance_edit_window.marker_updated.connect(
+            lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+        )
+        self.instance_edit_window.show()
+
+    def _on_delete_marker(self):
+        """Удалить выбранный отрезок."""
+        current_idx = self.markers_list.currentRow()
+        if current_idx >= 0:
+            marker_idx = self.markers_list.item(current_idx).data(Qt.ItemDataRole.UserRole)
+            self.controller.delete_marker(marker_idx)
+
+    def _on_clear_markers(self):
+        """Удалить все отрезки."""
+        reply = QMessageBox.question(self, "Confirm", "Delete all segments?")
+        if reply == QMessageBox.StandardButton.Yes:
+            self.controller.clear_markers()
+
+    def _on_segment_edit_requested(self, marker_idx: int):
+        """Обработка запроса редактирования сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+
+            # Создать InstanceEditWindow вместо EditSegmentDialog
+            if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+                self.instance_edit_window.close()
+
+            # Получить отфильтрованные маркеры и найти индекс текущего маркера в фильтре
+            filtered_markers = self._get_filtered_markers()
+            current_filtered_idx = self._find_marker_in_filtered_list(marker_idx, filtered_markers)
+
+            self.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, filtered_markers, current_filtered_idx, self
+            )
+            # Сохраняем индекс маркера для обновления
+            self.instance_edit_window._marker_idx = marker_idx
+            self.instance_edit_window.marker_updated.connect(
+                lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+            )
+            self.instance_edit_window.show()
+
+    def _on_segment_delete_requested(self, marker_idx: int):
+        """Обработка запроса удаления сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            reply = QMessageBox.question(
+                self, "Удалить сегмент",
+                "Вы уверены, что хотите удалить этот сегмент?"
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self.controller.delete_marker(marker_idx)
+
+    def _on_segment_jump_requested(self, marker_idx: int):
+        """Обработка запроса перехода к моменту времени сегмента."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+            # Перейти к началу сегмента
+            self.controller.seek_frame(marker.start_frame)
+
+    def _on_playback_time_changed(self, frame_idx: int):
+        """Обновление при изменении времени воспроизведения."""
+        fps = self.controller.get_fps()
+        total_frames = self.controller.get_total_frames()
+
+        # Обновить PlayerControls
+        if hasattr(self, 'player_controls') and fps > 0:
+            current_sec = frame_idx / fps
+            total_sec = total_frames / fps
+            self.player_controls.update_time_label(current_sec, total_sec)
+
+        # Обновить расширенный статус-бар
+        self._update_status_bar()
+
+    def _on_markers_changed(self):
+        """Обновление списка отрезков с применением фильтров."""
+        fps = self.controller.get_fps()
+        filtered_segments = []
+
+        for idx, marker in enumerate(self.controller.markers):
+            # Применить фильтры
+            if not self._passes_filters(marker):
+                continue
+            filtered_segments.append((idx, marker))
+
+        # Обновить виджет сегментов
+        self.segment_list_widget.set_fps(fps)
+        self.segment_list_widget.set_segments(filtered_segments)
+
+        # Обновить расширенный статус-бар
+        self._update_status_bar()
+
+    def _passes_filters(self, marker):
+        """Проверить, проходит ли маркер через текущие фильтры."""
+        # Фильтр по типу события
+        if self.filter_event_types and marker.event_name not in self.filter_event_types:
+            return False
+
+        # Фильтр по заметкам
+        if self.filter_has_notes and not marker.note.strip():
+            return False
+
+        return True
+
+    def _get_filtered_markers(self):
+        """Получить список отфильтрованных маркеров в формате (original_idx, marker)."""
+        filtered_markers = []
+        for idx, marker in enumerate(self.controller.markers):
+            if self._passes_filters(marker):
+                filtered_markers.append((idx, marker))
+        return filtered_markers
+
+    def _find_marker_in_filtered_list(self, original_marker_idx: int, filtered_markers: list):
+        """Найти индекс маркера в отфильтрованном списке по оригинальному индексу."""
+        for filtered_idx, (orig_idx, marker) in enumerate(filtered_markers):
+            if orig_idx == original_marker_idx:
+                return filtered_idx
+        return 0  # По умолчанию первый, если не найден
+
+    def _on_recording_status_changed(self, event_type: str, status: str):
+        """Изменение статуса записи."""
+        if status == "Recording":
+            self.status_label.setText(f"🔴 Recording: {event_type}")
+            self.status_label.setStyleSheet("color: #ff0000;")
+        elif status == "Complete":
+            self.status_label.setText(f"✓ Complete: {event_type}")
+            self.status_label.setStyleSheet("color: #00ff00;")
+        elif status == "Fixed":
+            self.status_label.setText(f"✓ Fixed: {event_type}")
+            self.status_label.setStyleSheet("color: #00ff00;")
+        elif status == "Cancelled":
+            self.status_label.setText("⏹️ Cancelled")
+            self.status_label.setStyleSheet("color: #ffcc00;")
+        else:
+            self.status_label.setText("Ready")
+            self.status_label.setStyleSheet("color: #ffcc00;")
+
+    def _on_timeline_update(self):
+        """Обновление таймлайна при изменении фрейма."""
+        if hasattr(self.timeline_widget, 'scene_obj'):
+            current_frame = self.controller.get_current_frame_idx()
+            self.timeline_widget.scene_obj.update_playhead(current_frame)
+
+    def _on_events_changed(self):
+        """Обработка изменения событий - обновить shortcuts и фильтры."""
+        self._setup_event_shortcuts()
+        self._update_event_filter()
+
+    def _on_events_changed_timeline(self):
+        """Обработка изменения событий для таймлайна."""
+        if hasattr(self.timeline_widget, 'scene_obj'):
+            self.timeline_widget.scene_obj.update_scene()
+
+
+
+    def _setup_shortcuts(self):
+        """Инициализировать горячие клавиши через ShortcutManager."""
+        # Очистить старые shortcuts для событий (если есть)
+        for event in self.event_manager.get_all_events():
+            self.shortcut_manager.unregister_shortcut(event.name.upper())
+
+        # Зарегистрировать shortcuts для всех событий
+        self._setup_event_shortcuts()
+
+        # Регистрировать shortcuts для основных функций
+        self.shortcut_manager.register_shortcut('PLAY_PAUSE', 'Space', self._on_play_pause_clicked)
+        self.shortcut_manager.register_shortcut('OPEN_VIDEO', 'Ctrl+O', self._on_open_video)
+        self.shortcut_manager.register_shortcut('CANCEL', 'Escape', self._on_cancel_recording)
+        # SETTINGS, EXPORT, PREVIEW теперь обрабатываются через меню
+        self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z', self._on_undo_clicked)
+        self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z', self._on_redo_clicked)
+
+        # Добавить горячие клавиши для перемотки на 5 секунд
+        self.shortcut_manager.register_shortcut('SKIP_LEFT', 'Left', lambda: self._on_skip_seconds(-5))
+        self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right', lambda: self._on_skip_seconds(5))
+
+    def _setup_event_shortcuts(self):
+        """Создаёт глобальные горячие клавиши для всех событий (A, D, S и кастомные)."""
+        if hasattr(self, '_event_shortcuts'):
+            for s in self._event_shortcuts:
+                s.activated.disconnect()
+                s.setParent(None)
+            self._event_shortcuts.clear()
+        else:
+            self._event_shortcuts = []
+
+        for event in self.event_manager.get_all_events():
+            if not event.shortcut:
+                continue
+
+            shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self)
+            # ПРАВИЛЬНЫЙ вызов — передаём только строку с клавишей
+            shortcut.activated.connect(
+                lambda checked=False, key=event.shortcut.upper(): self.controller.on_hotkey_pressed(key)
+            )
+            self._event_shortcuts.append(shortcut)
+
+    def _rebind_hotkeys(self):
+        """Переподключить горячие клавиши после изменений в настройках."""
+        # Перерегистрировать все shortcuts
+        self._setup_shortcuts()
+
+    def _on_cancel_recording(self):
+        """Отмена записи (Escape)."""
+        self.controller.cancel_recording()
+        self._update_play_btn_text()
+
+
+
+    def _update_video_frame(self):
+        """Обновить видео кадр на экране (через сигнал frame_ready)."""
+        pass  # Видео обновляется через frame_ready сигнал
+
+    def _on_frame_ready(self, frame):
+        """Обработка готового кадра из контроллера."""
+        if frame is None:
+            return
+        
+        # Конвертировать BGR в RGB
+        import cv2
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        
+        # Масштабировать под размер label
+        pixmap = QPixmap.fromImage(qt_image)
+        pixmap = pixmap.scaledToWidth(800, Qt.TransformationMode.SmoothTransformation)
+        self.video_label.setPixmap(pixmap)
+
+    def _format_time(self, current_sec: float, total_sec: float) -> str:
+        """Форматировать время MM:SS / MM:SS."""
+        def fmt(s):
+            m = int(s) // 60
+            s = int(s) % 60
+            return f"{m:02d}:{s:02d}"
+        return f"{fmt(current_sec)} / {fmt(total_sec)}"
+
+    def _format_time_single(self, seconds: float) -> str:
+        """Форматировать время MM:SS."""
+        minutes = int(seconds) // 60
+        secs = int(seconds) % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+
+
+    # ===== MENU HANDLERS =====
+    
+    def _on_new_project(self):
+        """Создать новый проект."""
+        self.controller.markers.clear()
+        self.controller.markers_changed.emit()
+        QMessageBox.information(self, "New Project", "Project cleared")
+    
+    def _on_open_project(self):
+        """Открыть сохраненный проект."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", "", "Hockey Editor Projects (*.hep);;All Files (*)"
+        )
+
+        if path:
+            success, video_missing = self.controller.load_project(path)
+
+            if success and not video_missing:
+                QMessageBox.information(self, "Success", f"Project loaded: {path}")
+                self.current_project_path = path
+                self.setWindowTitle(f"Hockey Editor Pro - {Path(path).name}")
+            elif success and video_missing:
+                # Предложить выбрать новый путь к видео
+                self._prompt_video_path(path)
+            else:
+                QMessageBox.critical(self, "Error", f"Failed to load project: {path}")
+    
+    def _on_save_project(self):
+        """Сохранить проект."""
+        if not hasattr(self, 'current_project_path') or not self.current_project_path:
+            self._on_save_project_as()
+        else:
+            if self.controller.save_project(self.current_project_path):
+                QMessageBox.information(self, "Success", "Project saved")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+    
+    def _on_save_project_as(self):
+        """Сохранить проект как новый файл."""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", "", "Hockey Editor Projects (*.hep);;All Files (*)"
+        )
+        
+        if path:
+            if self.controller.save_project(path):
+                self.current_project_path = path
+                self.setWindowTitle(f"Hockey Editor Pro - {Path(path).name}")
+                QMessageBox.information(self, "Success", "Project saved")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save project")
+    
+    def _update_recent_menu(self):
+        """Обновить меню недавних проектов."""
+        self.recent_menu.clear()
+        
+        recent_projects = self.controller.get_recent_projects()
+        if not recent_projects:
+            self.recent_menu.addAction("(No recent projects)")
+            return
+        
+        for path in recent_projects:
+            action = self.recent_menu.addAction(Path(path).name)
+            action.triggered.connect(lambda checked, p=path: self._on_recent_project(p))
+    
+    def _prompt_video_path(self, project_path: str):
+        """Показать диалог выбора нового пути к видео."""
+        reply = QMessageBox.question(
+            self, "Video not found",
+            f"Video file not found for project {Path(project_path).name}.\n"
+            "Would you like to select a new video file?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            video_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Video File", "",
+                "Videos (*.mp4 *.avi *.mov *.mkv);;All (*.*)"
+            )
+
+            if video_path:
+                if self.controller.set_video_path(video_path):
+                    QMessageBox.information(self, "Success", "Project loaded with new video")
+                    self.current_project_path = project_path
+                    self.setWindowTitle(f"Hockey Editor Pro - {Path(project_path).name}")
+                    self._update_recent_menu()
+                else:
+                    QMessageBox.critical(self, "Error", "Failed to load video")
+            else:
+                QMessageBox.warning(self, "Warning", "Project loaded without video")
+        else:
+            QMessageBox.warning(self, "Warning", "Project loaded without video")
+
+    def _on_recent_project(self, path: str):
+        """Открыть недавний проект."""
+        success, video_missing = self.controller.load_project(path)
+
+        if success and not video_missing:
+            QMessageBox.information(self, "Success", f"Project loaded: {path}")
+            self.current_project_path = path
+            self.setWindowTitle(f"Hockey Editor Pro - {Path(path).name}")
+            self._update_recent_menu()
+        elif success and video_missing:
+            self._prompt_video_path(path)
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to load project: {path}")
+    
+    def _on_about(self):
+        """О приложении."""
+        QMessageBox.information(
+            self, "About Hockey Editor Pro",
+            "Hockey Editor Pro v1.0\n"
+            "Professional Video Analysis Tool\n\n"
+            "Hotkeys:\n"
+            "A - Attack\n"
+            "D - Defense\n"
+            "S - Shift\n"
+            "Space - Play/Pause\n"
+            "Ctrl+O - Open Video\n"
+            "Ctrl+E - Export\n"
+            "Ctrl+, - Settings"
+        )
+
+    def _on_autosave_completed(self, success: bool, message: str):
+        """Обработка завершения автосохранения."""
+        if success:
+            self.status_label.setText(f"✓ {message}")
+        else:
+            print(f"Autosave error: {message}")
+
+    def dragEnterEvent(self, event):
+        """Обработка входа drag-drop."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Обработка drop видеофайла."""
+        for url in event.mimeData().urls():
+            file_path = url.toLocalFile()
+            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv')):
+                self.controller.load_video(file_path)
+                break
+
+    def open_segment_editor(self, marker_idx: int):
+        """Открыть редактор сегмента (вызывается из timeline при double-click)."""
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+
+            # Создать InstanceEditWindow вместо EditSegmentDialog
+            if hasattr(self, 'instance_edit_window') and self.instance_edit_window.isVisible():
+                self.instance_edit_window.close()
+
+            # Получить отфильтрованные маркеры и найти индекс текущего маркера в фильтре
+            filtered_markers = self._get_filtered_markers()
+            current_filtered_idx = self._find_marker_in_filtered_list(marker_idx, filtered_markers)
+
+            self.instance_edit_window = InstanceEditWindow(
+                marker, self.controller, filtered_markers, current_filtered_idx, self
+            )
+            # Сохраняем индекс маркера для обновления
+            self.instance_edit_window._marker_idx = marker_idx
+            self.instance_edit_window.marker_updated.connect(
+                lambda: self._on_instance_updated(self.instance_edit_window._marker_idx)
+            )
+            self.instance_edit_window.show()
+
+    def _on_instance_updated(self, marker_idx: int):
+        """Обработка обновления маркера из InstanceEditWindow."""
+        # Маркер уже обновлен через ссылку, просто обновить UI
+        self.controller.markers_changed.emit()
+        self.controller.timeline_update.emit()
+    
+    def _update_status_bar(self):
+        """Обновить расширенный статус-бар с подробной информацией."""
+        fps = self.controller.get_fps()
+        current_frame = self.controller.get_current_frame_idx()
+        total_frames = self.controller.get_total_frames()
+        speed = self.controller.get_playback_speed()
+
+        if fps > 0 and total_frames > 0:
+            current_time = self._format_time_single(current_frame / fps)
+            total_time = self._format_time_single(total_frames / fps)
+            segment_count = len(self.controller.markers)
+
+            status = f"{current_time}/{total_time} | {segment_count} отрезков | FPS: {fps:.2f} | Speed: {speed:.2f}x"
+
+            # Если воспроизведение, добавить индикатор
+            if self.controller.playing:
+                status = "▶ " + status
+
+            self.status_label.setText(status)
+        else:
+            self.status_label.setText("Готов")
+
+    def _on_speed_changed(self, speed: float):
+        """Обработка изменения скорости из PlayerControls."""
+        self.controller.set_playback_speed(speed)
+
+    def _init_player_controls(self):
+        """Инициализировать PlayerControls после загрузки видео."""
+        if hasattr(self, 'player_controls'):
+            # Установить начальное состояние
+            self.player_controls.update_play_pause_button(self.controller.playing)
+
+            # Установить скорость
+            current_speed = self.controller.get_playback_speed()
+            self.player_controls.set_speed(current_speed)
+
+            # Установить время
+            fps = self.controller.get_fps()
+            total_frames = self.controller.get_total_frames()
+            if fps > 0 and total_frames > 0:
+                current_frame = self.controller.get_current_frame_idx()
+                current_sec = current_frame / fps
+                total_sec = total_frames / fps
+                self.player_controls.update_time_label(current_sec, total_sec)
+
+
+
+    def closeEvent(self, event):
+        """Закрытие окна."""
+        self.autosave_manager.stop()
+        self.controller.cleanup()
+        event.accept()
+def format_time(seconds: float) -> str:
+    mins = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{mins:02d}:{secs:02d}"
+
+
+def frames_to_time(frames: int, fps: float) -> str:
+    """Convert frame number to time string in format MM:SS.FF"""
+    if fps <= 0:
+        return "00:00.00"
+
+    total_seconds = frames / fps
+    minutes = int(total_seconds // 60)
+    seconds = int(total_seconds % 60)
+    frames_remainder = frames % int(fps)
+    return f"{minutes:02d}:{seconds:02d}.{frames_remainder:02d}"
+
+
+def time_to_frames(time_str: str, fps: float) -> int:
+    """Convert time string in format MM:SS.FF to frame number"""
+    if fps <= 0:
+        return 0
+
+    try:
+        # Handle different time formats
+        if ':' in time_str:
+            parts = time_str.split(':')
+            if len(parts) == 2:
+                # MM:SS format
+                minutes = int(parts[0])
+                seconds_part = parts[1]
+                if '.' in seconds_part:
+                    seconds, frames = seconds_part.split('.')
+                    seconds = int(seconds)
+                    frames = int(frames)
+                else:
+                    seconds = int(seconds_part)
+                    frames = 0
+            elif len(parts) == 3:
+                # HH:MM:SS format - convert to minutes
+                hours = int(parts[0])
+                minutes = int(parts[1]) + hours * 60
+                seconds_part = parts[2]
+                if '.' in seconds_part:
+                    seconds, frames = seconds_part.split('.')
+                    seconds = int(seconds)
+                    frames = int(frames)
+                else:
+                    seconds = int(seconds_part)
+                    frames = 0
+            else:
+                return 0
+        else:
+            # Assume seconds only
+            total_seconds = float(time_str)
+            minutes = int(total_seconds // 60)
+            seconds = int(total_seconds % 60)
+            frames = int((total_seconds % 1) * fps)
+
+        # Convert to frames
+        total_frames = int((minutes * 60 + seconds) * fps + frames)
+        return max(0, total_frames)
+    except (ValueError, IndexError):
+        return 0
+
+
+def validate_time_format(time_str: str) -> bool:
+    """Validate time string format (MM:SS.FF)"""
+    import re
+    # Match patterns like 00:00.00, 1:23.45, 12:34.56, etc.
+    # Must have minutes:seconds.frames format
+    pattern = r'^\d{1,3}:\d{1,2}\.\d{1,2}$'
+    return bool(re.match(pattern, time_str))
+"""
+ShortcutManager - управление глобальными горячими клавишами через QShortcut.
+Позволяет переназначить клавиши и применить их без перезагрузки приложения.
+"""
+
+from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import Qt
+from typing import Callable, Dict, List, Optional
+
+
+class ShortcutManager:
+    """
+    Менеджер для управления QShortcut'ами.
+    Позволяет динамически переподключать горячие клавиши.
+    """
+    
+    def __init__(self, parent: QWidget):
+        """
+        Инициализировать менеджер.
+        
+        Args:
+            parent: Виджет, к которому привязаны shortcuts
+        """
+        self.parent = parent
+        self.shortcuts: Dict[str, tuple] = {}  # {name: (QShortcut, callback)}
+    
+    def register_shortcut(self, name: str, key: str, callback: Callable) -> None:
+        """
+        Зарегистрировать новый shortcut.
+        
+        Args:
+            name: Уникальное имя shortcut'а (например, 'ATTACK', 'PLAY', 'EXPORT')
+            key: Клавиша или комбинация (например, 'A', 'Ctrl+S', 'F11')
+            callback: Функция обратного вызова
+        """
+        # Если shortcut с таким именем уже существует, удалить его
+        self.unregister_shortcut(name)
+        
+        # Создать новый shortcut
+        from PySide6.QtGui import QShortcut
+        shortcut = QShortcut(QKeySequence(key), self.parent)
+        shortcut.activated.connect(callback)
+        
+        self.shortcuts[name] = (shortcut, callback)
+    
+    def unregister_shortcut(self, name: str) -> None:
+        """
+        Удалить shortcut по имени.
+        
+        Args:
+            name: Имя shortcut'а
+        """
+        if name in self.shortcuts:
+            shortcut, _ = self.shortcuts[name]
+            shortcut.setEnabled(False)
+            del self.shortcuts[name]
+    
+    def rebind_shortcut(self, name: str, new_key: str) -> None:
+        """
+        Переподключить shortcut на новую клавишу.
+        
+        Args:
+            name: Имя shortcut'а
+            new_key: Новая клавиша или комбинация
+        """
+        if name not in self.shortcuts:
+            return
+        
+        _, callback = self.shortcuts[name]
+        self.register_shortcut(name, new_key, callback)
+    
+    def rebind_multiple(self, hotkeys: Dict[str, str]) -> None:
+        """
+        Переподключить несколько shortcut'ов сразу.
+        
+        Args:
+            hotkeys: Словарь {name: key}
+                    Пример: {'ATTACK': 'A', 'DEFENSE': 'D', 'EXPORT': 'Ctrl+E'}
+        """
+        for name, key in hotkeys.items():
+            if name in self.shortcuts:
+                self.rebind_shortcut(name, key)
+    
+    def enable_shortcut(self, name: str) -> None:
+        """Включить shortcut."""
+        if name in self.shortcuts:
+            shortcut, _ = self.shortcuts[name]
+            shortcut.setEnabled(True)
+    
+    def disable_shortcut(self, name: str) -> None:
+        """Отключить shortcut."""
+        if name in self.shortcuts:
+            shortcut, _ = self.shortcuts[name]
+            shortcut.setEnabled(False)
+    
+    def enable_all(self) -> None:
+        """Включить все shortcuts."""
+        for name in self.shortcuts:
+            self.enable_shortcut(name)
+    
+    def disable_all(self) -> None:
+        """Отключить все shortcuts."""
+        for name in self.shortcuts:
+            self.disable_shortcut(name)
+    
+    def get_shortcut_key(self, name: str) -> Optional[str]:
+        """
+        Получить текущую клавишу для shortcut'а.
+        
+        Args:
+            name: Имя shortcut'а
+            
+        Returns:
+            Строка с клавишей или None если not found
+        """
+        if name not in self.shortcuts:
+            return None
+        
+        shortcut, _ = self.shortcuts[name]
+        return shortcut.key().toString()
+    
+    def list_shortcuts(self) -> Dict[str, str]:
+        """
+        Получить список всех shortcuts и их клавиш.
+        
+        Returns:
+            Словарь {name: key}
+        """
+        result = {}
+        for name, (shortcut, _) in self.shortcuts.items():
+            result[name] = shortcut.key().toString()
+        return result
+    
+    def clear_all(self) -> None:
+        """Удалить все shortcuts."""
+        for name in list(self.shortcuts.keys()):
+            self.unregister_shortcut(name)

@@ -13,9 +13,10 @@ from controllers.export import ExportController
 from controllers.shortcut_controller import ShortcutController
 from controllers.filter_controller import FilterController
 from hockey_editor.utils.autosave import AutosaveManager
+from PySide6.QtCore import QObject
 
 
-class MainController:
+class MainController(QObject):
     """Главный контроллер приложения."""
 
     def __init__(self):
@@ -62,8 +63,9 @@ class MainController:
         # Сохранить ссылку на timeline_controller в main_window для доступа из open_segment_editor
         self.main_window._timeline_controller = self.timeline_controller
 
-        # Сохранить ссылку на main_window в timeline_controller для edit_marker_requested
-        self.timeline_controller._main_window = self.main_window
+        # --- ДОБАВИТЬ ЭТУ СТРОКУ ---
+        self.timeline_controller.set_main_window(self.main_window)
+        # ---------------------------
 
         # Сохранить ссылку на main_controller в timeline_controller для InstanceEditWindow
         self.timeline_controller._main_controller = self

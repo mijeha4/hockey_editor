@@ -316,6 +316,10 @@ class MainWindow(QMainWindow):
         # Создать timeline widget с controller
         self.timeline_widget = TimelineWidget(controller)
 
+        # --- НУЖНО ДОБАВИТЬ ЭТУ СТРОКУ: ---
+        self._timeline_controller = controller
+        # ----------------------------------
+
         # Добавить timeline widget в splitter
         central_widget = self.centralWidget()
         main_layout = central_widget.layout()
