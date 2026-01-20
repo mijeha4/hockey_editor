@@ -57,6 +57,12 @@ class MainController(QObject):
             self.settings
         )
 
+        # Связать timeline_controller с playback_controller
+        self.timeline_controller.set_playback_controller(self.playback_controller)
+
+        # Подключить сигналы для синхронизации плейхеда
+        self.playback_controller.frame_changed.connect(lambda f: self.timeline_controller.seek_frame(f, update_playback=False))
+
         # Теперь создать timeline_widget с controller
         self.main_window.set_timeline_controller(self.timeline_controller)
 

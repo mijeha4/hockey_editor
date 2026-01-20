@@ -17,6 +17,9 @@ except ImportError:
 class PlaybackController(QObject):
     """Контроллер управления воспроизведением видео."""
 
+    # Сигнал для синхронизации плейхеда с timeline
+    frame_changed = Signal(int)
+
     def __init__(self, video_service: VideoService,
                  player_controls: PlayerControls,
                  main_window: MainWindow):
@@ -82,6 +85,16 @@ class PlaybackController(QObject):
         self.current_frame = frame_idx
         self._display_current_frame()
 
+        # Синхронизировать плейхед на таймлайне
+        self.frame_changed.emit(self.current_frame)
+
+    def toggle_play_pause(self):
+        """Переключить воспроизведение/паузу."""
+        if self.playing:
+            self.pause()
+        else:
+            self.play()
+
     def get_speed(self) -> float:
         """Возвращает текущую скорость воспроизведения."""
         return self._speed
@@ -133,6 +146,9 @@ class PlaybackController(QObject):
         # Обновить UI
         self.player_controls.set_current_frame(self.current_frame)
         self._display_current_frame()
+
+        # Синхронизировать плейхед на таймлайне
+        self.frame_changed.emit(self.current_frame)
 
     def _display_current_frame(self):
         """Показать текущий кадр."""

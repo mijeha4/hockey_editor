@@ -10,15 +10,27 @@ try:
     from views.widgets.segment_list import SegmentListWidget
     # Используем новую профессиональную timeline из hockey_editor/ui/
     from hockey_editor.ui.timeline_graphics import TimelineWidget
+    from utils.commands.modify_marker_command import ModifyMarkerCommand
 except ImportError:
     # Для случаев, когда запускаем из src/
-    from ..models.domain.marker import Marker
-    from ..models.domain.project import Project
-    from ..models.config.app_settings import AppSettings
-    from ..services.history import HistoryManager, Command
-    from ..views.widgets.segment_list import SegmentListWidget
-    # Используем новую профессиональную timeline из hockey_editor/ui/
-    from hockey_editor.ui.timeline_graphics import TimelineWidget
+    try:
+        from ..models.domain.marker import Marker
+        from ..models.domain.project import Project
+        from ..models.config.app_settings import AppSettings
+        from ..services.history import HistoryManager, Command
+        from ..views.widgets.segment_list import SegmentListWidget
+        # Используем новую профессиональную timeline из hockey_editor/ui/
+        from hockey_editor.ui.timeline_graphics import TimelineWidget
+        from hockey_editor.utils.commands.modify_marker_command import ModifyMarkerCommand
+    except ImportError:
+        # Fallback для тестирования
+        from models.domain.marker import Marker
+        from models.domain.project import Project
+        from models.config.app_settings import AppSettings
+        from services.history import HistoryManager, Command
+        from views.widgets.segment_list import SegmentListWidget
+        from hockey_editor.ui.timeline_graphics import TimelineWidget
+        from hockey_editor.utils.commands.modify_marker_command import ModifyMarkerCommand
 
 
 class AddMarkerCommand(Command):
@@ -72,6 +84,9 @@ class TimelineController(QObject):
         self.fps = 30.0
         self.total_frames = 0
 
+        # Ссылка на playback controller для синхронизации
+        self.playback_controller = None
+
         # Подключить сигналы от View (если timeline_widget уже создан)
         if self.timeline_widget is not None:
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
@@ -82,6 +97,10 @@ class TimelineController(QObject):
         """Установить ссылку на главное окно."""
         self._main_window = window
     # ---------------------------
+
+    def set_playback_controller(self, playback_controller):
+        """Установить ссылку на playback controller для синхронизации."""
+        self.playback_controller = playback_controller
 
     def handle_hotkey(self, hotkey: str, current_frame: int, fps: float) -> None:
         """
@@ -167,10 +186,22 @@ class TimelineController(QObject):
         # Обновить View
         self.refresh_view()
 
+    def modify_marker(self, marker_idx: int, new_marker):
+        """Изменить существующий маркер."""
+        if 0 <= marker_idx < len(self.project.markers):
+            old_marker = self.project.markers[marker_idx]
+
+            # Создать команду модификации
+            command = ModifyMarkerCommand(self.project.markers, marker_idx, old_marker, new_marker)
+            self.history_manager.execute_command(command)
+
+            # Обновить View
+            self.refresh_view()
+
     def _on_timeline_seek(self, frame: int):
         """Обработка клика по таймлайну для перемотки."""
         print(f"Timeline seek to frame: {frame}")
-        # Здесь можно добавить логику перемотки видео
+        self.seek_frame(frame)
 
     @property
     def markers(self):
@@ -189,9 +220,19 @@ class TimelineController(QObject):
         """Получить текущий кадр воспроизведения."""
         return self.current_frame
 
-    def seek_frame(self, frame_idx: int):
-        """Перемотать к указанному кадру."""
+    def seek_frame(self, frame_idx: int, update_playback: bool = True):
+        """Перемотать к указанному кадру.
+
+        Args:
+            frame_idx: Кадр для перемотки
+            update_playback: Флаг, нужно ли обновлять playback controller
+        """
         self.current_frame = max(0, min(frame_idx, self.total_frames - 1))
+
+        # Синхронизировать с playback controller только если флаг установлен
+        if update_playback and self.playback_controller:
+            self.playback_controller.seek_to_frame(self.current_frame)
+
         self.playback_time_changed.emit(self.current_frame)
 
     def set_fps(self, fps: float):

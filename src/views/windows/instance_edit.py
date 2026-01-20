@@ -565,8 +565,8 @@ class InstanceEditWindow(QDialog):
         self.instance_controller.set_timeline_range(start, end)
 
     def _on_timeline_seek(self, frame):
-        """Клик по слайдеру для перемотки"""
-        self.controller.playback_controller.seek_to_frame(frame)
+        """Клик по таймлайну для перемотки видео"""
+        self.instance_controller.seek_to_frame(frame)
         self._display_current_frame()
 
     def _nudge_in(self, delta):

@@ -870,9 +870,12 @@ class MainWindow(QMainWindow):
 
     def _on_instance_updated(self, marker_idx: int):
         """Обработка обновления маркера из InstanceEditWindow."""
-        # Маркер уже обновлен через ссылку, просто обновить UI
-        self.controller.markers_changed.emit()
-        self.controller.timeline_update.emit()
+        if 0 <= marker_idx < len(self.controller.markers):
+            # Создать копию измененного маркера для команды
+            modified_marker = self.controller.markers[marker_idx]
+
+            # Использовать timeline_controller для фиксации изменений через команду
+            self.controller.timeline_controller.modify_marker(marker_idx, modified_marker)
     
     def _update_status_bar(self):
         """Обновить расширенный статус-бар с подробной информацией."""
