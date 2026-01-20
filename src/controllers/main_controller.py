@@ -268,14 +268,14 @@ class MainController(QObject):
         file_path, _ = QFileDialog.getSaveFileName(
             self.main_window,
             "Save Project",
-            "project.json",
-            "Project Files (*.json);;All Files (*)"
+            "project.hep",
+            "Project Files (*.hep);;All Files (*)"
         )
 
         if file_path:
-            # Убедимся, что расширение .json
-            if not file_path.endswith('.json'):
-                file_path += '.json'
+            # Убедимся, что расширение .hep
+            if not file_path.endswith('.hep'):
+                file_path += '.hep'
 
             success = self.project_controller.save_project(file_path)
             if success:
@@ -289,7 +289,7 @@ class MainController(QObject):
             self.main_window,
             "Open Project",
             "",
-            "Project Files (*.json);;All Files (*)"
+            "Project Files (*.hep);;All Files (*)"
         )
 
         if file_path:
