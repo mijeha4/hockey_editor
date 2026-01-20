@@ -104,7 +104,41 @@ class StyleManager(QObject):
 
             # Effects
             'shadow_color': 'rgba(0, 0, 0, 0.3)',
-            'transition_time': '0.2s'
+            'transition_time': '0.2s',
+
+            # Modern Dialog Colors (Glassmorphism)
+            'dialog_bg': 'rgba(255, 255, 255, 0.95)',
+            'dialog_border': 'rgba(0, 128, 128, 0.3)',
+            'dialog_shadow': 'rgba(0, 0, 0, 0.2)',
+
+            # Teal Accent Colors
+            'teal_primary': '#00A896',
+            'teal_light': '#02C39A',
+            'teal_dark': '#028090',
+            'teal_accent': '#F77F00',
+
+            # Modern Typography
+            'font_family_modern': '"Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif',
+            'font_weight_light': '300',
+            'font_weight_regular': '400',
+            'font_weight_medium': '500',
+            'font_weight_semibold': '600',
+            'font_weight_bold': '700',
+
+            # Glassmorphism Effects
+            'glass_bg': 'rgba(255, 255, 255, 0.25)',
+            'glass_border': 'rgba(255, 255, 255, 0.18)',
+            'glass_shadow': 'rgba(0, 0, 0, 0.1)',
+            'backdrop_blur': '10px',
+
+            # Light Theme Colors
+            'light_bg': '#FFFFFF',
+            'light_surface': '#F8F9FA',
+            'light_text_primary': '#212529',
+            'light_text_secondary': '#6C757D',
+            'light_border': '#DEE2E6',
+            'light_hover': '#E9ECEF',
+            'light_accent': '#00A896'
         }
 
     def set_variable(self, name: str, value: str):

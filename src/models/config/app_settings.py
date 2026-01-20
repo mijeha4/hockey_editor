@@ -3,6 +3,12 @@ from typing import Dict, List
 from enum import Enum
 
 
+class Theme(Enum):
+    """Available UI themes."""
+    DARK = "dark"
+    LIGHT = "light"
+
+
 class RecordingMode(Enum):
     """Режимы расстановки маркеров."""
     DYNAMIC = "dynamic"          # Два нажатия = начало и конец
@@ -86,6 +92,9 @@ class AppSettings:
     # Скорость воспроизведения
     playback_speed: float = 1.0
 
+    # Тема интерфейса
+    theme: str = Theme.DARK.value
+
     def to_dict(self) -> Dict:
         """Конвертировать в словарь."""
         return {
@@ -105,6 +114,7 @@ class AppSettings:
             'custom_events': self.custom_events,
             'language': self.language,
             'playback_speed': self.playback_speed,
+            'theme': self.theme,
         }
 
     @classmethod
@@ -127,4 +137,5 @@ class AppSettings:
             custom_events=data.get('custom_events', cls.custom_events),
             language=data.get('language', cls.language),
             playback_speed=data.get('playback_speed', cls.playback_speed),
+            theme=data.get('theme', cls.theme),
         )
