@@ -17,6 +17,7 @@ from controllers.settings_controller import SettingsController
 from controllers.custom_event_controller import CustomEventController
 from hockey_editor.utils.autosave import AutosaveManager
 from PySide6.QtCore import QObject
+from PySide6.QtGui import QPixmap
 
 
 class MainController(QObject):
@@ -80,6 +81,7 @@ class MainController(QObject):
         self.timeline_controller._main_controller = self
 
         self.project_controller = ProjectController(self.project_io)
+        self.project_controller.current_project = self.project  # Установить текущий проект
 
         # Создать менеджер автосохранения
         self.autosave_manager = AutosaveManager(self)
@@ -299,6 +301,9 @@ class MainController(QObject):
                 self.project = loaded_project
                 self.project.file_path = file_path
 
+                # Обновляем project_controller с новым проектом
+                self.project_controller.current_project = self.project
+
                 # Обновляем timeline controller с новым проектом
                 self.timeline_controller.project = self.project
                 self.timeline_controller.refresh_view()
@@ -315,19 +320,27 @@ class MainController(QObject):
         # Создаем новый проект
         self.project = Project(name="Untitled")
 
+        # Обновляем project_controller с новым проектом
+        self.project_controller.current_project = self.project
+
         # Очищаем timeline controller
         self.timeline_controller.project = self.project
         self.timeline_controller.refresh_view()
 
-        # Останавливаем видео
+        # Останавливаем видео и очищаем VideoService
         self.playback_controller.pause()
+        self.video_service.cleanup()
+
+        # Сбрасываем состояние playback controller
+        self.playback_controller.current_frame = 0
+        self.playback_controller.playing = False
 
         # Очищаем интерфейс
         self.main_window.set_video_image(QPixmap())  # Очищаем видео экран
         self.main_window.set_window_title("Untitled")
 
         # Очищаем историю
-        self.history_manager.clear()
+        self.history_manager.clear_history()
 
     def _on_open_settings(self):
         """Обработка открытия окна настроек."""
