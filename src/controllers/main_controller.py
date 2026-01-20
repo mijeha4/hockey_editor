@@ -15,9 +15,18 @@ from controllers.filter_controller import FilterController
 from controllers.instance_edit_controller import InstanceEditController
 from controllers.settings_controller import SettingsController
 from controllers.custom_event_controller import CustomEventController
+from controllers.application_controller import get_application_controller
 from hockey_editor.utils.autosave import AutosaveManager
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QPixmap
+
+# Импорты диалогов
+try:
+    from views.dialogs.new_project_dialog import NewProjectDialog
+    from views.dialogs.save_changes_dialog import SaveChangesDialog
+except ImportError:
+    from ..views.dialogs.new_project_dialog import NewProjectDialog
+    from ..views.dialogs.save_changes_dialog import SaveChangesDialog
 
 
 class MainController(QObject):
@@ -64,6 +73,13 @@ class MainController(QObject):
         # Подключить сигналы для синхронизации плейхеда
         self.playback_controller.frame_changed.connect(lambda f: self.timeline_controller.seek_frame(f, update_playback=False))
 
+        # Создать project_controller ПЕРЕД подключением сигнала
+        self.project_controller = ProjectController(self.project_io)
+        self.project_controller.current_project = self.project  # Установить текущий проект
+
+        # Подключить сигнал об изменении проекта
+        self.timeline_controller.project_modified.connect(self.project_controller.mark_as_modified)
+
         # Теперь создать timeline_widget с controller
         self.main_window.set_timeline_controller(self.timeline_controller)
 
@@ -79,9 +95,6 @@ class MainController(QObject):
 
         # Сохранить ссылку на main_controller в timeline_controller для InstanceEditWindow
         self.timeline_controller._main_controller = self
-
-        self.project_controller = ProjectController(self.project_io)
-        self.project_controller.current_project = self.project  # Установить текущий проект
 
         # Создать менеджер автосохранения
         self.autosave_manager = AutosaveManager(self)
@@ -210,15 +223,21 @@ class MainController(QObject):
             # Обновить заголовок
             self.main_window.set_window_title(path.split('/')[-1])
 
+            # НЕ помечаем проект как измененный при загрузке видео
+            # Это происходит только при явном выборе видео пользователем
+            # self.project_controller.mark_as_modified()
+
         return success
 
     def add_marker(self, start_frame: int, end_frame: int, event_name: str):
         """Добавить маркер."""
         self.timeline_controller.add_marker(start_frame, end_frame, event_name)
+        self.project_controller.mark_as_modified()
 
     def delete_marker(self, marker_idx: int):
         """Удалить маркер."""
         self.timeline_controller.delete_marker(marker_idx)
+        self.project_controller.mark_as_modified()
 
     def get_fps(self):
         """Получить FPS видео."""
@@ -256,6 +275,8 @@ class MainController(QObject):
 
         if file_path:
             self.load_video(file_path)
+            # Пометить проект как измененный при явном выборе видео пользователем
+            self.project_controller.mark_as_modified()
 
     def _on_save_project(self):
         """Обработка сохранения проекта."""
@@ -316,7 +337,39 @@ class MainController(QObject):
                 self.main_window.set_window_title(f"{self.project.name} - {file_path.split('/')[-1]}")
 
     def _on_new_project(self):
-        """Обработка создания нового проекта."""
+        """Обработка создания нового проекта с улучшенной логикой."""
+        # ШАГ 1: Проверяем несохраненные изменения
+        if self.project_controller.has_unsaved_changes():
+            # Показываем диалог сохранения изменений
+            result = SaveChangesDialog.ask_save_changes(
+                self.project.name, self.main_window
+            )
+
+            if result == SaveChangesDialog.CANCEL:
+                # Пользователь отменил операцию
+                return
+            elif result == SaveChangesDialog.SAVE:
+                # Пользователь хочет сохранить изменения
+                if not self.project_controller.save_project_auto(self.main_window):
+                    # Сохранение не удалось, отменяем операцию
+                    return
+
+        # ШАГ 2: Показываем диалог выбора режима создания проекта
+        mode = NewProjectDialog.get_new_project_mode(self.main_window)
+        if mode is None:
+            # Пользователь отменил
+            return
+
+        # ШАГ 3: Создаем проект в зависимости от выбранного режима
+        if mode == NewProjectDialog.MODE_CURRENT_WINDOW:
+            # Создание в текущем окне
+            self._create_new_project_in_current_window()
+        elif mode == NewProjectDialog.MODE_NEW_WINDOW:
+            # Создание в новом окне
+            self._create_new_project_in_new_window()
+
+    def _create_new_project_in_current_window(self):
+        """Создать новый проект в текущем окне."""
         # Создаем новый проект
         self.project = Project(name="Untitled")
 
@@ -341,6 +394,15 @@ class MainController(QObject):
 
         # Очищаем историю
         self.history_manager.clear_history()
+
+    def _create_new_project_in_new_window(self):
+        """Создать новый проект в новом окне."""
+        # Получаем ApplicationController и создаем новое окно
+        app_controller = get_application_controller()
+        new_controller = app_controller.create_new_window()
+
+        # Новое окно уже инициализировано с новым проектом
+        # Ничего дополнительно делать не нужно
 
     def _on_open_settings(self):
         """Обработка открытия окна настроек."""
@@ -405,10 +467,29 @@ class MainController(QObject):
         return self._custom_event_controller
 
     def closeEvent(self, event):
-        """Закрытие окна."""
+        """Закрытие окна с проверкой несохраненных изменений."""
+        # ШАГ 1: Проверить несохраненные изменения
+        if self.project_controller.has_unsaved_changes():
+            # Показать диалог сохранения изменений
+            result = SaveChangesDialog.ask_save_changes(
+                self.project.name, self.main_window
+            )
+
+            if result == SaveChangesDialog.CANCEL:
+                # Пользователь отменил закрытие
+                event.ignore()
+                return
+            elif result == SaveChangesDialog.SAVE:
+                # Пользователь хочет сохранить изменения
+                if not self.project_controller.save_project_auto(self.main_window):
+                    # Сохранение не удалось, отменяем закрытие
+                    event.ignore()
+                    return
+
+        # ШАГ 2: Остановить автосохранение
         self.autosave_manager.stop()
 
-        # Cleanup controllers
+        # ШАГ 3: Cleanup controllers
         if self._instance_edit_controller:
             self._instance_edit_controller.cleanup()
         if self._settings_controller:
@@ -416,5 +497,5 @@ class MainController(QObject):
         if self._custom_event_controller:
             self._custom_event_controller.cleanup()
 
-        # self.playback_controller.cleanup()  # Метод cleanup не существует
+        # ШАГ 4: Разрешить закрытие
         event.accept()

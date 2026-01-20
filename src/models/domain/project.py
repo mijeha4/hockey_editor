@@ -16,6 +16,10 @@ class Project:
     modified_at: str = field(default_factory=lambda: datetime.now().isoformat())
     version: str = "1.0"
 
+    # Поля для отслеживания изменений
+    file_path: str = ""  # Путь к файлу проекта
+    is_modified: bool = False  # Флаг несохраненных изменений
+
     def to_dict(self) -> Dict[str, Any]:
         """Конвертировать проект в словарь."""
         return {

@@ -59,6 +59,9 @@ class TimelineController(QObject):
     playback_time_changed = Signal(int)
     timeline_update = Signal()
 
+    # Сигнал для уведомления об изменениях проекта
+    project_modified = Signal()
+
     def __init__(self, project: Project,
                  timeline_widget: TimelineWidget,
                  segment_list_widget: SegmentListWidget,
@@ -186,6 +189,9 @@ class TimelineController(QObject):
         # Обновить View
         self.refresh_view()
 
+        # Уведомить об изменении проекта
+        self.project_modified.emit()
+
     def modify_marker(self, marker_idx: int, new_marker):
         """Изменить существующий маркер."""
         if 0 <= marker_idx < len(self.project.markers):
@@ -197,6 +203,9 @@ class TimelineController(QObject):
 
             # Обновить View
             self.refresh_view()
+
+            # Уведомить об изменении проекта
+            self.project_modified.emit()
 
     def _on_timeline_seek(self, frame: int):
         """Обработка клика по таймлайну для перемотки."""
