@@ -331,6 +331,7 @@ class InstanceEditWindow(QDialog):
 
         # Connect controller signals
         self.instance_controller.marker_updated.connect(self.marker_updated.emit)
+        self.instance_controller.marker_saved.connect(self.controller.timeline_controller.refresh_view)
         self.instance_controller.playback_position_changed.connect(self._on_playback_position_changed)
         self.instance_controller.timeline_range_changed.connect(self._on_timeline_range_changed)
         self.instance_controller.active_point_changed.connect(self._on_active_point_changed)

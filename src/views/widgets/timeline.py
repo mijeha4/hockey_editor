@@ -14,12 +14,10 @@ from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter
 try:
     from views.styles import AppColors
     from models.domain.marker import Marker
-    from models.domain.observable_marker import ObservableMarker
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ..styles import AppColors
     from ...models.domain.marker import Marker
-    from ...models.domain.observable_marker import ObservableMarker
 
 
 class TimelineWidget(QGraphicsView):
@@ -200,6 +198,35 @@ class TimelineWidget(QGraphicsView):
         self.draw_ruler()
         if self.playhead:
             self.draw_playhead(int(self.playhead.line().x1() / self.pixels_per_frame))
+
+    def update_segment(self, index: int, marker: Marker) -> None:
+        """Update a specific segment by index without full redraw.
+
+        Args:
+            index: Index of the segment to update
+            marker: The marker data to update with
+        """
+        if 0 <= index < len(self.segment_items):
+            self._update_segment_item(self.segment_items[index], marker)
+        else:
+            # If index is out of range, add new segment
+            self._add_segment_item(marker)
+
+    def remove_segment(self, index: int) -> None:
+        """Remove a specific segment by index.
+
+        Args:
+            index: Index of the segment to remove
+        """
+        if 0 <= index < len(self.segment_items):
+            item = self.segment_items.pop(index)
+            self.scene.removeItem(item)
+
+    def clear_segments(self) -> None:
+        """Clear all segments from the timeline."""
+        for item in self.segment_items:
+            self.scene.removeItem(item)
+        self.segment_items.clear()
 
     def update_segment_optimized(self, marker: Marker, index: int) -> None:
         """Optimized update of a specific segment without full redraw."""
@@ -413,159 +440,3 @@ class TimelineWidget(QGraphicsView):
         current_rect = self.scene.sceneRect()
         self.scene.setSceneRect(0, 0, scene_width, current_rect.height())
         self.draw_ruler()
-
-    def set_fps(self, fps: float) -> None:
-        """Set the frames per second for time calculations."""
-        self.fps = fps
-        self.draw_ruler()
-
-    # --- РЕАКТИВНЫЕ МЕТОДЫ ДЛЯ ДИНАМИЧЕСКОГО ОБНОВЛЕНИЯ ---
-
-    def update_segment(self, marker: Marker, index: int) -> None:
-        """Update a specific segment without redrawing the entire timeline."""
-        if 0 <= index < len(self.segment_items):
-            # Update existing segment
-            self._update_segment_item(self.segment_items[index], marker)
-        else:
-            # Add new segment
-            self._add_segment_item(marker)
-
-    def _update_segment_item(self, rect_item: QGraphicsRectItem, marker: Marker) -> None:
-        """Update an existing segment item with new marker data."""
-        # Group segments by event type for tracks
-        event_tracks = {}
-        track_index = 0
-        
-        # Find track for this event type
-        for seg in self._get_current_segments():
-            if seg.event_name not in event_tracks:
-                event_tracks[seg.event_name] = track_index
-                track_index += 1
-
-        # Get track for current marker
-        if marker.event_name not in event_tracks:
-            event_tracks[marker.event_name] = track_index
-
-        track_y = self.ruler_height + (event_tracks[marker.event_name] * self.track_height)
-
-        # Calculate new position and size
-        start_x = marker.start_frame * self.pixels_per_frame
-        width = (marker.end_frame - marker.start_frame + 1) * self.pixels_per_frame
-        if width < 5:  # Minimum width
-            width = 5
-
-        # Update rectangle
-        rect_item.setRect(start_x, track_y + 5, width, self.track_height - 10)
-
-        # Update color based on event type
-        segment_color = QColor(AppColors.ACCENT)  # Default color
-        try:
-            from hockey_editor.utils.custom_events import get_custom_event_manager
-            event_manager = get_custom_event_manager()
-            if event_manager:
-                event = event_manager.get_event(marker.event_name)
-                if event:
-                    segment_color = QColor(event.color)
-        except ImportError:
-            pass
-
-        # Semi-transparent fill
-        segment_color.setAlpha(180)
-        rect_item.setBrush(QBrush(segment_color))
-        rect_item.setPen(QPen(QColor(AppColors.TEXT), 1))
-
-        # Update tooltip
-        rect_item.setToolTip(f"{marker.event_name}: {marker.start_frame}-{marker.end_frame}")
-
-    def _add_segment_item(self, marker: Marker) -> None:
-        """Add a new segment item to the timeline."""
-        # Group segments by event type for tracks
-        event_tracks = {}
-        track_index = 0
-        
-        # Include new marker in track calculation
-        all_markers = self._get_current_segments() + [marker]
-        
-        for seg in all_markers:
-            if seg.event_name not in event_tracks:
-                event_tracks[seg.event_name] = track_index
-                track_index += 1
-
-        track_y = self.ruler_height + (event_tracks[marker.event_name] * self.track_height)
-
-        # Calculate position and size
-        start_x = marker.start_frame * self.pixels_per_frame
-        width = (marker.end_frame - marker.start_frame + 1) * self.pixels_per_frame
-        if width < 5:  # Minimum width
-            width = 5
-
-        # Create rectangle for segment
-        rect_item = QGraphicsRectItem(start_x, track_y + 5, width, self.track_height - 10)
-
-        # Set color based on event type
-        segment_color = QColor(AppColors.ACCENT)  # Default color
-        try:
-            from hockey_editor.utils.custom_events import get_custom_event_manager
-            event_manager = get_custom_event_manager()
-            if event_manager:
-                event = event_manager.get_event(marker.event_name)
-                if event:
-                    segment_color = QColor(event.color)
-        except ImportError:
-            pass
-
-        # Semi-transparent fill
-        segment_color.setAlpha(180)
-        rect_item.setBrush(QBrush(segment_color))
-        rect_item.setPen(QPen(QColor(AppColors.TEXT), 1))
-
-        # Add tooltip
-        rect_item.setToolTip(f"{marker.event_name}: {marker.start_frame}-{marker.end_frame}")
-
-        # Add to scene and list
-        self.scene.addItem(rect_item)
-        self.segment_items.append(rect_item)
-
-        # Update scene height if needed
-        self._update_scene_height(event_tracks)
-
-    def _get_current_segments(self) -> List[Marker]:
-        """Get current segments from the timeline."""
-        # This is a simplified version - in practice, you might want to store
-        # the original markers list or use a different approach
-        return []
-
-    def _update_scene_height(self, event_tracks: dict) -> None:
-        """Update scene height based on number of tracks."""
-        scene_height = self.ruler_height + (len(event_tracks) * self.track_height) + 20
-        current_rect = self.scene.sceneRect()
-        self.scene.setSceneRect(0, 0, current_rect.width(), scene_height)
-
-    def set_observable_segments(self, observable_markers: List[ObservableMarker]) -> None:
-        """Set segments from observable markers and connect their signals."""
-        # Clear existing segments
-        for item in self.segment_items:
-            self.scene.removeItem(item)
-        self.segment_items.clear()
-
-        # Store reference to observable markers for signal connections
-        self._observable_markers = observable_markers
-
-        # Connect signals from observable markers
-        for marker in observable_markers:
-            marker.marker_changed.connect(lambda m=marker: self._on_marker_changed(m))
-
-        # Initial draw
-        regular_markers = [marker.to_marker() for marker in observable_markers]
-        self.set_segments(regular_markers)
-
-    def _on_marker_changed(self, marker: ObservableMarker) -> None:
-        """Handle marker changes from observable markers."""
-        # Find index of marker in our list
-        try:
-            index = self._observable_markers.index(marker)
-            # Update corresponding segment
-            self.update_segment(marker.to_marker(), index)
-        except ValueError:
-            # Marker not found, redraw everything
-            self.set_segments([m.to_marker() for m in self._observable_markers])

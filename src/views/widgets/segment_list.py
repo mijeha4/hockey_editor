@@ -204,6 +204,56 @@ class SegmentListWidget(QWidget):
         segments_with_idx = [(i, marker) for i, marker in enumerate(segments)]
         self.set_segments(segments_with_idx)
 
+    def update_row(self, index: int, marker: Marker) -> None:
+        """Update a specific row in the table without full rebuild.
+
+        Args:
+            index: Index of the row to update
+            marker: The marker data to update with
+        """
+        if 0 <= index < self.table.rowCount():
+            # Update Column 1: Название (Event name)
+            event = self.event_manager.get_event(marker.event_name)
+            event_name = event.get_localized_name() if event else marker.event_name
+            event_color = event.get_qcolor().name() if event else "#ffffff"
+
+            name_item = self.table.item(index, 1)
+            if name_item:
+                name_item.setText(event_name)
+                name_item.setForeground(QColor(event_color))
+
+            # Update Column 2: Начало (Start time)
+            start_time = self._format_time(marker.start_frame / self.fps)
+            start_item = self.table.item(index, 2)
+            if start_item:
+                start_item.setText(start_time)
+
+            # Update Column 3: Конец (End time)
+            end_time = self._format_time(marker.end_frame / self.fps)
+            end_item = self.table.item(index, 3)
+            if end_item:
+                end_item.setText(end_time)
+
+            # Update Column 4: Длительность (Duration)
+            duration_frames = marker.end_frame - marker.start_frame
+            duration_time = self._format_time(duration_frames / self.fps)
+            duration_item = self.table.item(index, 4)
+            if duration_item:
+                duration_item.setText(duration_time)
+
+    def remove_row(self, index: int) -> None:
+        """Remove a specific row from the table.
+
+        Args:
+            index: Index of the row to remove
+        """
+        if 0 <= index < self.table.rowCount():
+            self.table.removeRow(index)
+
+    def clear_rows(self) -> None:
+        """Clear all rows from the table."""
+        self.table.setRowCount(0)
+
     def _apply_filters(self, segments) -> list:
         """Apply current filters to the segments list.
 

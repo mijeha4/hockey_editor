@@ -12,20 +12,17 @@ from PySide6.QtGui import QPixmap
 # Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 try:
     from models.domain.marker import Marker
-    from models.domain.observable_marker import ObservableMarker
     from utils.time_utils import frames_to_time
     from utils.custom_events import get_custom_event_manager
 except ImportError:
     # Для случаев, когда запускаем из src/
     try:
         from ..models.domain.marker import Marker
-        from ..models.domain.observable_marker import ObservableMarker
         from hockey_editor.utils.time_utils import frames_to_time
         from hockey_editor.utils.custom_events import get_custom_event_manager
     except ImportError:
         # Fallback для тестирования
         from models.domain.marker import Marker
-        from models.domain.observable_marker import ObservableMarker
         from hockey_editor.utils.time_utils import frames_to_time
         from hockey_editor.utils.custom_events import get_custom_event_manager
 
@@ -79,7 +76,7 @@ class InstanceEditController(QObject):
 
     def get_marker(self) -> Optional[Marker]:
         """Get the current marker."""
-        return self.marker
+        return self.marker.to_marker() if self.marker else None
 
     def get_fps(self) -> float:
         """Get video FPS."""
@@ -332,95 +329,3 @@ class InstanceEditController(QObject):
         self._pause_playback()
         self.marker = None
         self.filtered_markers.clear()
-
-    # --- РЕАКТИВНЫЕ МЕТОДЫ ДЛЯ OBSERVABLE MARKER ---
-
-    def set_observable_marker(self, observable_marker: ObservableMarker, 
-                             filtered_markers: List[Tuple[int, ObservableMarker]] = None,
-                             current_idx: int = 0):
-        """Set the observable marker to edit."""
-        self.observable_marker = observable_marker
-        self.filtered_markers = filtered_markers or []
-        self.current_marker_idx = current_idx
-
-        # Connect signals from observable marker
-        observable_marker.marker_changed.connect(self._on_observable_marker_changed)
-
-        # Seek to marker start
-        self.playback_controller.seek_to_frame(observable_marker.start_frame)
-        self._update_current_frame()
-
-    def _on_observable_marker_changed(self):
-        """Handle changes from observable marker."""
-        # Update UI to reflect marker changes
-        self.marker_updated.emit()
-        self.timeline_range_changed.emit(
-            self.observable_marker.start_frame, 
-            self.observable_marker.end_frame
-        )
-
-    def set_observable_timeline_range(self, start_frame: int, end_frame: int):
-        """Update observable marker range from timeline drag."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        # Validate range
-        total_frames = self.get_total_frames()
-        start_frame = max(0, min(start_frame, total_frames - 1))
-        end_frame = max(start_frame + 1, min(end_frame, total_frames))
-
-        # Update observable marker
-        self.observable_marker.set_range(start_frame, end_frame)
-
-    def nudge_observable_in_point(self, frames: int):
-        """Nudge IN point of observable marker by specified frames."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        new_start = max(0, self.observable_marker.start_frame + frames)
-        if new_start < self.observable_marker.end_frame:
-            self.observable_marker.start_frame = new_start
-            self.seek_to_frame(new_start)
-
-    def nudge_observable_out_point(self, frames: int):
-        """Nudge OUT point of observable marker by specified frames."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        total_frames = self.get_total_frames()
-        new_end = min(total_frames, self.observable_marker.end_frame + frames)
-        if new_end > self.observable_marker.start_frame:
-            self.observable_marker.end_frame = new_end
-            self.seek_to_frame(new_end)
-
-    def set_observable_in_point(self):
-        """Set IN point of observable marker to current playback position."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        current_frame = self.playback_controller.current_frame
-        if current_frame < self.observable_marker.end_frame:
-            self.observable_marker.start_frame = current_frame
-
-    def set_observable_out_point(self):
-        """Set OUT point of observable marker to current playback position."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        current_frame = self.playback_controller.current_frame
-        if current_frame > self.observable_marker.start_frame:
-            self.observable_marker.end_frame = current_frame
-
-    def update_observable_event_type(self, event_name: str):
-        """Update observable marker event type."""
-        if hasattr(self, 'observable_marker') and self.observable_marker:
-            self.observable_marker.event_name = event_name
-
-    def update_observable_note(self, note: str):
-        """Update observable marker note."""
-        if hasattr(self, 'observable_marker') and self.observable_marker:
-            self.observable_marker.note = note
-
-    def get_observable_marker(self) -> Optional[ObservableMarker]:
-        """Get the current observable marker."""
-        return getattr(self, 'observable_marker', None)

@@ -42,7 +42,7 @@ class ProjectController:
             self.current_project = project
             self.current_project.file_path = filepath
             self.current_project.is_modified = False  # Новый загруженный проект не имеет изменений
-        return project
+        return self.current_project
 
     def get_current_project(self) -> Project:
         """Получить текущий проект."""

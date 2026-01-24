@@ -5,8 +5,6 @@ from PySide6.QtCore import Signal, QObject
 try:
     from models.domain.marker import Marker
     from models.domain.project import Project
-    from models.domain.observable_project import ObservableProject
-    from models.domain.observable_marker import ObservableMarker
     from models.config.app_settings import AppSettings
     from services.history import HistoryManager, Command
     from views.widgets.segment_list import SegmentListWidget
@@ -19,8 +17,6 @@ except ImportError:
     try:
         from ..models.domain.marker import Marker
         from ..models.domain.project import Project
-        from ..models.domain.observable_project import ObservableProject
-        from ..models.domain.observable_marker import ObservableMarker
         from ..models.config.app_settings import AppSettings
         from ..services.history import HistoryManager, Command
         from ..views.widgets.segment_list import SegmentListWidget
@@ -32,8 +28,6 @@ except ImportError:
         # Fallback для тестирования
         from models.domain.marker import Marker
         from models.domain.project import Project
-        from models.domain.observable_project import ObservableProject
-        from models.domain.observable_marker import ObservableMarker
         from models.config.app_settings import AppSettings
         from services.history import HistoryManager, Command
         from views.widgets.segment_list import SegmentListWidget
@@ -48,15 +42,17 @@ class AddMarkerCommand(Command):
         super().__init__(f"Add {marker.event_name} marker")
         self.project = project
         self.marker = marker
+        self.index = -1  # Индекс, куда был добавлен маркер
 
     def execute(self):
         """Добавить маркер."""
-        self.project.markers.append(self.marker)
+        self.index = len(self.project.markers)
+        self.project.add_marker(self.marker, self.index)
 
     def undo(self):
         """Удалить маркер."""
-        if self.marker in self.project.markers:
-            self.project.markers.remove(self.marker)
+        if self.index >= 0:
+            self.project.remove_marker(self.index)
 
 
 class TimelineController(QObject):
@@ -101,9 +97,16 @@ class TimelineController(QObject):
         # Ссылка на playback controller для синхронизации
         self.playback_controller = None
 
+        # Подключить сигналы проекта для реактивности
+        self.project.marker_added.connect(self.on_marker_added)
+        self.project.marker_removed.connect(self.on_marker_removed)
+        self.project.marker_changed.connect(self.on_marker_changed)
+        self.project.markers_cleared.connect(self.on_markers_cleared)
+
         # Подключить сигналы от View (если timeline_widget уже создан)
         if self.timeline_widget is not None:
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
+
         # segment_list_widget не имеет сигналов выбора, так что убираем эту строку
 
         # Подключить сигналы от CustomEventController для синхронизации событий
@@ -111,7 +114,6 @@ class TimelineController(QObject):
             self.custom_event_controller.events_changed.connect(self._on_events_changed)
             self.custom_event_controller.event_added.connect(self._on_event_added)
             self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
-
     # --- ДОБАВИТЬ ЭТОТ МЕТОД ---
     def set_main_window(self, window):
         """Установить ссылку на главное окно."""
@@ -121,6 +123,38 @@ class TimelineController(QObject):
     def set_playback_controller(self, playback_controller):
         """Установить ссылку на playback controller для синхронизации."""
         self.playback_controller = playback_controller
+
+    def on_marker_added(self, index: int, marker: Marker):
+        """Обработчик добавления маркера."""
+        # Отправить сигнал об изменении маркеров для timeline
+        self.markers_changed.emit()
+        # Обновить segment_list
+        if self.segment_list_widget:
+            self.segment_list_widget.update_row(index)
+
+    def on_marker_removed(self, index: int):
+        """Обработчик удаления маркера."""
+        # Отправить сигнал об изменении маркеров для timeline
+        self.markers_changed.emit()
+        # Удалить строку из segment_list
+        if self.segment_list_widget:
+            self.segment_list_widget.remove_row(index)
+
+    def on_marker_changed(self, index: int, marker: Marker):
+        """Обработчик изменения маркера."""
+        # Отправить сигнал об изменении маркеров для timeline
+        self.markers_changed.emit()
+        # Обновить строку в segment_list
+        if self.segment_list_widget:
+            self.segment_list_widget.update_row(index)
+
+    def on_markers_cleared(self):
+        """Обработчик очистки всех маркеров."""
+        # Отправить сигнал об изменении маркеров для timeline
+        self.markers_changed.emit()
+        # Очистить segment_list
+        if self.segment_list_widget:
+            self.segment_list_widget.clear_rows()
 
     def handle_hotkey(self, hotkey: str, current_frame: int, fps: float) -> None:
         """
@@ -212,9 +246,6 @@ class TimelineController(QObject):
         command = AddMarkerCommand(self.project, marker)
         self.history_manager.execute_command(command)
 
-        # Обновить View
-        self.refresh_view()
-
         # Уведомить об изменении проекта
         self.project_modified.emit()
 
@@ -226,9 +257,6 @@ class TimelineController(QObject):
             # Создать команду модификации
             command = ModifyMarkerCommand(self.project.markers, marker_idx, old_marker, new_marker)
             self.history_manager.execute_command(command)
-
-            # Обновить View
-            self.refresh_view()
 
             # Уведомить об изменении проекта
             self.project_modified.emit()
@@ -283,11 +311,13 @@ class TimelineController(QObject):
         # Отправить сигнал об изменении маркеров
         self.markers_changed.emit()
 
-        # Обновить таймлайн
-        self.timeline_widget.set_segments(self.project.markers)
+        # Обновить таймлайн - полная перерисовка для совместимости
+        if self.timeline_widget:
+            self.timeline_widget.set_segments([marker.to_marker() for marker in self.project.markers])
 
-        # Обновить таблицу сегментов
-        self.segment_list_widget.update_segments(self.project.markers)
+        # Обновить таблицу сегментов - полная перерисовка для совместимости
+        if self.segment_list_widget:
+            self.segment_list_widget.update_segments([marker.to_marker() for marker in self.project.markers])
 
     def set_timeline_widget(self, timeline_widget):
         """Установить timeline widget и подключить сигналы."""
@@ -324,134 +354,23 @@ class TimelineController(QObject):
         print(f"TimelineController: Event deleted: {event_name}")
 
         # Удалить все маркеры с этим событием
-        markers_to_remove = []
-        for marker in self.project.markers:
+        indices_to_remove = []
+        for i, marker in enumerate(self.project.markers):
             if marker.event_name == event_name:
-                markers_to_remove.append(marker)
+                indices_to_remove.append(i)
 
         # Удалить найденные маркеры через команды (для поддержки undo/redo)
-        for marker in markers_to_remove:
+        for index in reversed(indices_to_remove):  # Удаляем с конца, чтобы индексы оставались корректными
+            marker = self.project.markers[index]
             # Создать команду удаления для каждого маркера
             delete_command = DeleteMarkerCommand(self.project.markers, marker)
             self.history_manager.execute_command(delete_command)
 
         # Обновить UI если были удалены маркеры
-        if markers_to_remove:
-            print(f"TimelineController: Removed {len(markers_to_remove)} markers with deleted event '{event_name}'")
-            self.refresh_view()
+        if indices_to_remove:
+            print(f"TimelineController: Removed {len(indices_to_remove)} markers with deleted event '{event_name}'")
             # Уведомить об изменении проекта
             self.project_modified.emit()
-
-    # --- РЕАКТИВНЫЕ МЕТОДЫ ДЛЯ OBSERVABLE PROJECT ---
-
-    def set_observable_project(self, observable_project: ObservableProject):
-        """Установить реактивный проект и подключить сигналы."""
-        self._disconnect_project_signals()
-        
-        self.observable_project = observable_project
-        self.project = observable_project.to_project()  # Для совместимости
-        
-        self._connect_project_signals()
-        self._connect_markers_signals()
-
-    def _connect_project_signals(self):
-        """Подключить сигналы реактивного проекта."""
-        if hasattr(self, 'observable_project'):
-            self.observable_project.markers_changed.connect(self._on_markers_changed_reactive)
-            self.observable_project.marker_added.connect(self._on_marker_added_reactive)
-            self.observable_project.marker_removed.connect(self._on_marker_removed_reactive)
-            self.observable_project.marker_modified.connect(self._on_marker_modified_reactive)
-            self.observable_project.project_modified.connect(self.project_modified)
-
-    def _disconnect_project_signals(self):
-        """Отключить сигналы реактивного проекта."""
-        if hasattr(self, 'observable_project'):
-            try:
-                self.observable_project.markers_changed.disconnect(self._on_markers_changed_reactive)
-                self.observable_project.marker_added.disconnect(self._on_marker_added_reactive)
-                self.observable_project.marker_removed.disconnect(self._on_marker_removed_reactive)
-                self.observable_project.marker_modified.disconnect(self._on_marker_modified_reactive)
-                self.observable_project.project_modified.disconnect(self.project_modified)
-            except TypeError:
-                pass  # Сигналы не были подключены
-
-    def _connect_markers_signals(self):
-        """Подключить сигналы изменений маркеров."""
-        if hasattr(self, 'observable_project'):
-            for marker in self.observable_project.markers:
-                marker.marker_changed.connect(self._on_marker_changed_reactive)
-
-    def _disconnect_markers_signals(self):
-        """Отключить сигналы изменений маркеров."""
-        if hasattr(self, 'observable_project'):
-            for marker in self.observable_project.markers:
-                try:
-                    marker.marker_changed.disconnect(self._on_marker_changed_reactive)
-                except TypeError:
-                    pass  # Сигнал не был подключен
-
-    def _on_markers_changed_reactive(self):
-        """Обработка изменения списка маркеров в реактивном проекте."""
-        # Обновляем обычный project для совместимости
-        self.project = self.observable_project.to_project()
-        self.refresh_view()
-
-    def _on_marker_added_reactive(self, marker: ObservableMarker):
-        """Обработка добавления маркера в реактивном проекте."""
-        self.project = self.observable_project.to_project()
-        self.refresh_view()
-
-    def _on_marker_removed_reactive(self, marker: ObservableMarker):
-        """Обработка удаления маркера из реактивного проекта."""
-        self.project = self.observable_project.to_project()
-        self.refresh_view()
-
-    def _on_marker_modified_reactive(self, marker: ObservableMarker):
-        """Обработка изменения маркера в реактивном проекте."""
-        self.project = self.observable_project.to_project()
-        self.refresh_view()
-
-    def _on_marker_changed_reactive(self):
-        """Обработка изменения свойств маркера."""
-        self.project = self.observable_project.to_project()
-        self.refresh_view()
-
-    def add_observable_marker(self, start_frame: int, end_frame: int, event_name: str, note: str = ""):
-        """Добавить маркер в реактивный проект."""
-        if hasattr(self, 'observable_project'):
-            marker = ObservableMarker(start_frame, end_frame, event_name, note)
-            self.observable_project.add_marker(marker)
-            
-            # Создать команду для истории
-            regular_marker = marker.to_marker()
-            command = AddMarkerCommand(self.project, regular_marker)
-            self.history_manager.execute_command(command)
-        else:
-            # Резервный вариант для обычного проекта
-            self.add_marker(start_frame, end_frame, event_name, note)
-
-    def modify_observable_marker(self, marker_idx: int, new_start: int, new_end: int, new_event_name: str, new_note: str):
-        """Изменить маркер в реактивном проекте."""
-        if hasattr(self, 'observable_project'):
-            if 0 <= marker_idx < len(self.observable_project.markers):
-                marker = self.observable_project.markers[marker_idx]
-                
-                # Создать команду для истории
-                old_marker = marker.to_marker()
-                new_marker = Marker(new_start, new_end, new_event_name, new_note)
-                command = ModifyMarkerCommand(self.project.markers, marker_idx, old_marker, new_marker)
-                self.history_manager.execute_command(command)
-                
-                # Применить изменения
-                marker.start_frame = new_start
-                marker.end_frame = new_end
-                marker.event_name = new_event_name
-                marker.note = new_note
-        else:
-            # Резервный вариант для обычного проекта
-            if 0 <= marker_idx < len(self.project.markers):
-                new_marker = Marker(new_start, new_end, new_event_name, new_note)
-                self.modify_marker(marker_idx, new_marker)
 
     def update_marker_optimized(self, marker_idx: int, new_start: int, new_end: int, new_event_name: str = None, new_note: str = None):
         """Оптимизированное обновление конкретного маркера без полной перерисовки."""
