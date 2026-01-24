@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QGraphicsObject, QScrollArea, QWidget, QVBoxLayout, QMenu
 )
 from PySide6.QtWidgets import QGraphicsItem
-from PySide6.QtCore import Qt, QRectF, Signal
+from PySide6.QtCore import Qt, QRectF, Signal, QTimer, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QAction, QFontMetrics
 from ..utils.custom_events import get_custom_event_manager
 
@@ -38,7 +38,7 @@ class TimelineScrollArea(QScrollArea):
 
 
 class SegmentGraphicsItem(QGraphicsRectItem):
-    def __init__(self, marker, timeline_scene):
+    def __init__(self, marker, timeline_scene, animate: bool = True):
         super().__init__()
         self.marker = marker
         self.timeline_scene = timeline_scene
@@ -52,6 +52,10 @@ class SegmentGraphicsItem(QGraphicsRectItem):
 
         # Устанавливаем tooltip с полным текстом
         self.setToolTip(self._get_full_text())
+
+        # Анимация появления (плавное увеличение прозрачности)
+        if animate:
+            self._animate_appearance()
 
     def boundingRect(self):
         """Возвращает bounding rect с отступами для предотвращения слипания."""
@@ -78,6 +82,40 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         else:
             return event_name
 
+    def hoverEnterEvent(self, event):
+        self.is_hovered = True
+        self.update()  # Перерисовываем
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.is_hovered = False
+        self.update()  # Перерисовываем
+        super().hoverLeaveEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        try:
+            idx = self.timeline_scene.controller.markers.index(self.marker)
+            self.timeline_scene.segment_edit_requested.emit(idx)
+        except ValueError:
+            pass
+
+    def _animate_appearance(self):
+        """Анимация появления маркера с плавным увеличением прозрачности."""
+        self._opacity = 0.0
+        self._animation_step = 0
+        self._animation_timer = QTimer()
+        self._animation_timer.timeout.connect(self._update_opacity)
+        self._animation_timer.start(16)  # ~60 FPS
+
+    def _update_opacity(self):
+        """Обновление прозрачности в процессе анимации."""
+        self._animation_step += 1
+        self._opacity = min(1.0, self._animation_step / 20.0)  # 20 кадров для полной прозрачности
+        self.update()
+
+        if self._opacity >= 1.0:
+            self._animation_timer.stop()
+
     def paint(self, painter, option, widget):
         """Отрисовка сегмента в стиле Hudl Sportscode."""
         rect = self.rect()
@@ -87,8 +125,9 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         if self.is_hovered:
             fill_color = fill_color.lighter(120)  # Светлее при наведении
 
-        # Устанавливаем полупрозрачность
-        fill_color.setAlpha(200)
+        # Устанавливаем прозрачность с учетом анимации
+        alpha = int(200 * getattr(self, '_opacity', 1.0))
+        fill_color.setAlpha(alpha)
 
         # Рисуем скругленный прямоугольник с заливкой
         painter.setPen(Qt.NoPen)  # Без обводки
@@ -120,23 +159,6 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         text_y = rect.center().y() + font_metrics.ascent() / 2
 
         painter.drawText(int(text_x), int(text_y), text)
-
-    def hoverEnterEvent(self, event):
-        self.is_hovered = True
-        self.update()  # Перерисовываем
-        super().hoverEnterEvent(event)
-
-    def hoverLeaveEvent(self, event):
-        self.is_hovered = False
-        self.update()  # Перерисовываем
-        super().hoverLeaveEvent(event)
-
-    def mouseDoubleClickEvent(self, event):
-        try:
-            idx = self.timeline_scene.controller.markers.index(self.marker)
-            self.timeline_scene.segment_edit_requested.emit(idx)
-        except ValueError:
-            pass
 
 
 class TrackHeaderItem(QGraphicsObject):
@@ -197,6 +219,14 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.track_height = 45
         self.header_height = 40
 
+        # Состояние записи для визуальной индикации
+        self.is_recording = False
+        self.recording_event_name = ""
+        self.recording_start_frame = 0
+        self.recording_blink_state = False
+        self.recording_timer = QTimer(self)
+        self.recording_timer.timeout.connect(self._blink_recording_indicator)
+
         # Playhead создаём один раз и больше НИКОГДА не удаляем!
         self.playhead = QGraphicsLineItem()
         self.playhead.setPen(QPen(QColor("#FFFF00"), 4, Qt.SolidLine, Qt.RoundCap))
@@ -215,6 +245,21 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.video_end_label.setFont(font)
         self.video_end_label.setZValue(900)
         self.addItem(self.video_end_label)
+
+        # Индикатор записи (создаем один раз)
+        self.recording_indicator = QGraphicsLineItem()
+        self.recording_indicator.setPen(QPen(QColor("#FF4444"), 3, Qt.DashLine))
+        self.recording_indicator.setZValue(950)
+        self.recording_indicator.setVisible(False)
+        self.addItem(self.recording_indicator)
+
+        self.recording_label = QGraphicsTextItem("● REC")
+        self.recording_label.setDefaultTextColor(QColor("#FF4444"))
+        rec_font = QFont("Segoe UI", 10, QFont.Bold)
+        self.recording_label.setFont(rec_font)
+        self.recording_label.setZValue(950)
+        self.recording_label.setVisible(False)
+        self.addItem(self.recording_label)
 
         self.rebuild()  # первый рендер
 
@@ -314,13 +359,19 @@ class TimelineGraphicsScene(QGraphicsScene):
 
                 current_seconds += 5
 
-    def rebuild(self):
+    def rebuild(self, animate_new: bool = False):
+        """Перестроить сцену с маркерами.
+
+        Args:
+            animate_new: Если True, новые сегменты будут анимированы при появлении
+        """
         total_frames = max(self.controller.get_total_frames(), 1)
         events = get_custom_event_manager().get_all_events()
 
-        # Очищаем всё КРОМЕ playhead, video_end_line и video_end_label
+        # Очищаем всё КРОМЕ playhead, video_end_line, video_end_label и recording_indicator
         for item in self.items():
-            if item not in (self.playhead, self.video_end_line, self.video_end_label):
+            if item not in (self.playhead, self.video_end_line, self.video_end_label,
+                           self.recording_indicator, self.recording_label):
                 self.removeItem(item)
 
         scene_width = total_frames * self.pixels_per_frame + 300
@@ -350,7 +401,7 @@ class TimelineGraphicsScene(QGraphicsScene):
                 w = (marker.end_frame - marker.start_frame + 1) * self.pixels_per_frame
                 if w < 10: w = 10
 
-                segment = SegmentGraphicsItem(marker, self)
+                segment = SegmentGraphicsItem(marker, self, animate=animate_new)
                 segment.setRect(x + 150, y + 8, w, self.track_height - 16)
                 self.addItem(segment)
 
@@ -367,6 +418,59 @@ class TimelineGraphicsScene(QGraphicsScene):
         end_x = (total_frames - 1) * self.pixels_per_frame + 150
         self.video_end_line.setLine(end_x, 0, end_x, self.sceneRect().height())
         self.video_end_label.setPos(end_x - 35, -5)
+
+        # Обновляем индикатор записи если активен
+        if self.is_recording:
+            self._update_recording_indicator()
+
+    def _blink_recording_indicator(self):
+        """Мигание индикатора записи."""
+        self.recording_blink_state = not self.recording_blink_state
+        if self.recording_blink_state:
+            self.recording_indicator.setPen(QPen(QColor("#FF4444"), 3, Qt.SolidLine))
+            self.recording_label.setDefaultTextColor(QColor("#FF4444"))
+        else:
+            self.recording_indicator.setPen(QPen(QColor("#FF4444"), 3, Qt.DashLine))
+            self.recording_label.setDefaultTextColor(QColor("#AA2222"))
+        self.update()
+
+    def _update_recording_indicator(self):
+        """Обновить позицию индикатора записи."""
+        if not self.is_recording:
+            return
+
+        x = self.recording_start_frame * self.pixels_per_frame + 150
+        scene_height = self.sceneRect().height()
+        self.recording_indicator.setLine(x, 0, x, scene_height)
+        self.recording_label.setPos(x + 5, 5)
+
+    def set_recording_state(self, is_recording: bool, event_name: str = "", start_frame: int = 0):
+        """Установить состояние записи для визуальной индикации.
+
+        Args:
+            is_recording: True если запись активна
+            event_name: Название события для записи
+            start_frame: Начальный кадр записи
+        """
+        self.is_recording = is_recording
+        self.recording_event_name = event_name
+        self.recording_start_frame = start_frame
+
+        if is_recording:
+            # Показать индикатор записи
+            self.recording_indicator.setVisible(True)
+            self.recording_label.setVisible(True)
+            self.recording_label.setPlainText(f"● REC: {event_name}")
+            self._update_recording_indicator()
+            # Запустить мигание
+            self.recording_timer.start(500)  # Мигать каждые 500 мс
+        else:
+            # Скрыть индикатор записи
+            self.recording_indicator.setVisible(False)
+            self.recording_label.setVisible(False)
+            self.recording_timer.stop()
+
+        self.update()
 
 
 class TimelineWidget(QWidget):
@@ -399,6 +503,9 @@ class TimelineWidget(QWidget):
         controller.timeline_update.connect(lambda: self.scene.update_playhead(self.controller.get_current_frame_idx()))
         get_custom_event_manager().events_changed.connect(self.scene.rebuild)
 
+        # Подключаем сигнал состояния записи для визуальной индикации
+        controller.recording_state_changed.connect(self.scene.set_recording_state)
+
         # Подключаем сигналы от scene
         self.scene.segment_edit_requested.connect(controller.edit_marker_requested)
 
@@ -411,17 +518,17 @@ class TimelineWidget(QWidget):
     def set_total_frames(self, total_frames: int):
         """Установить общее количество кадров видео."""
         self.controller.set_total_frames(total_frames)
-        self.scene.rebuild()
+        self.scene.rebuild(animate_new=False)
 
     def set_fps(self, fps: float):
         """Установить FPS видео."""
         self.controller.set_fps(fps)
-        self.scene.rebuild()
+        self.scene.rebuild(animate_new=False)
 
     def set_segments(self, segments):
         """Установить сегменты для отображения."""
         # Этот метод нужен для совместимости, но в новой реализации сегменты берутся из controller.markers
-        self.scene.rebuild()
+        self.scene.rebuild(animate_new=False)
 
     def draw_playhead(self, frame: int):
         """Нарисовать плейхед на указанном кадре."""
@@ -432,7 +539,7 @@ class TimelineWidget(QWidget):
             factor = 1.25 if event.angleDelta().y() > 0 else 0.8
             self.scale_factor *= factor
             self.scene.pixels_per_frame *= factor
-            self.scene.rebuild()
+            self.scene.rebuild(animate_new=False)
 
             # Автоскролл к плейхеду
             current_x = self.controller.get_current_frame_idx() * self.scene.pixels_per_frame + 150

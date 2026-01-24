@@ -316,9 +316,11 @@ class MainWindow(QMainWindow):
         # Создать timeline widget с controller
         self.timeline_widget = TimelineWidget(controller)
 
-        # --- НУЖНО ДОБАВИТЬ ЭТУ СТРОКУ: ---
+        # Сохранить ссылку на контроллер
         self._timeline_controller = controller
-        # ----------------------------------
+
+        # Установить ссылку на главное окно в контроллере для корректной работы сигналов
+        controller.set_main_window(self)
 
         # Добавить timeline widget в splitter
         central_widget = self.centralWidget()

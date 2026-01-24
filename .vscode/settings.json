@@ -1,6 +1,9 @@
 {
     "python.analysis.extraPaths": [
-        "."
+        ".",
+        "./hockey_editor",
+        "./src",
+        "./src"
     ],
     "python.defaultInterpreterPath": "python",
     "python-envs.defaultEnvManager": "ms-python.python:system",

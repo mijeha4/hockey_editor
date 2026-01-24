@@ -1,3 +1,4 @@
+import logging
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap, QImage, QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -5,9 +6,10 @@ from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QFileDialog, QComboBox, QSpinBox,
     QMessageBox, QSpinBox, QMenu, QCheckBox, QSplitter
 )
-import cv2
 import numpy as np
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from .timeline_graphics import TimelineWidget
 from .instance_edit_window import InstanceEditWindow
 from .settings_dialog import SettingsDialog
@@ -297,9 +299,24 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(bottom_layout)
         
         central.setLayout(main_layout)
-        
+
         # Подключить сигнал frame_ready для обновления видео
         self.controller.frame_ready.connect(self._on_frame_ready)
+
+    def set_timeline_controller(self, timeline_controller):
+        """Установить timeline controller."""
+        self.timeline_controller = timeline_controller
+        # Если timeline_widget уже создан, обновить его controller
+        if hasattr(self, 'timeline_widget') and self.timeline_widget:
+            self.timeline_widget.controller = timeline_controller
+
+    def get_timeline_widget(self):
+        """Получить timeline widget."""
+        return self.timeline_widget
+
+    def get_segment_list_widget(self):
+        """Получить segment list widget."""
+        return self.segment_list_widget
 
 
 
@@ -830,7 +847,7 @@ class MainWindow(QMainWindow):
         if success:
             self.status_label.setText(f"✓ {message}")
         else:
-            print(f"Autosave error: {message}")
+            logger.error(f"Autosave error: {message}")
 
     def dragEnterEvent(self, event):
         """Обработка входа drag-drop."""
@@ -870,8 +887,17 @@ class MainWindow(QMainWindow):
 
     def _on_instance_updated(self, marker_idx: int):
         """Обработка обновления маркера из InstanceEditWindow."""
+        # Логирование деталей обновленного маркера
+        if 0 <= marker_idx < len(self.controller.markers):
+            marker = self.controller.markers[marker_idx]
+            logger.info(f"Marker updated: idx={marker_idx}, event='{marker.event_name}', "
+                       f"frames={marker.start_frame}-{marker.end_frame}, note='{marker.note}'")
+
         # Обновить отображение после изменений в редакторе
         self.controller.timeline_controller.refresh_view()
+
+        # Обновить список сегментов
+        self._on_markers_changed()
     
     def _update_status_bar(self):
         """Обновить расширенный статус-бар с подробной информацией."""

@@ -6,6 +6,13 @@ Main entry point
 
 import sys
 import os
+import logging
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Добавить src и hockey_editor в путь для импортов
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))

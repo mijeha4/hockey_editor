@@ -301,8 +301,10 @@ class InstanceEditWindow(QDialog):
 
         # Use event_name for title with progress
         event_manager = get_custom_event_manager()
-        event = event_manager.get_event(marker.event_name)
-        event_display_name = event.get_localized_name() if event else marker.event_name
+        event_display_name = marker.event_name
+        if event_manager:
+            event = event_manager.get_event(marker.event_name)
+            event_display_name = event.get_localized_name() if event else marker.event_name
 
         # Add progress if there are filtered markers
         if filtered_markers:
@@ -331,7 +333,8 @@ class InstanceEditWindow(QDialog):
 
         # Connect controller signals
         self.instance_controller.marker_updated.connect(self.marker_updated.emit)
-        self.instance_controller.marker_saved.connect(self.controller.timeline_controller.refresh_view)
+        # НЕ нужно вызывать refresh_view - изменения маркера автоматически распространяются через сигналы
+        # self.instance_controller.marker_saved.connect(self.controller.timeline_controller.refresh_view)
         self.instance_controller.playback_position_changed.connect(self._on_playback_position_changed)
         self.instance_controller.timeline_range_changed.connect(self._on_timeline_range_changed)
         self.instance_controller.active_point_changed.connect(self._on_active_point_changed)

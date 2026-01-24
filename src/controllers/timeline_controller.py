@@ -67,6 +67,9 @@ class TimelineController(QObject):
     # Сигнал для уведомления об изменениях проекта
     project_modified = Signal()
 
+    # Сигнал для уведомления о состоянии записи (dynamic mode)
+    recording_state_changed = Signal(bool, str, int)  # is_recording, event_name, start_frame
+
     def __init__(self, project: Project,
                  timeline_widget: TimelineWidget,
                  segment_list_widget: SegmentListWidget,
@@ -105,9 +108,10 @@ class TimelineController(QObject):
 
         # Подключить сигналы от View (если timeline_widget уже создан)
         if self.timeline_widget is not None:
-            self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
+            self._connect_timeline_signals()
 
-        # segment_list_widget не имеет сигналов выбора, так что убираем эту строку
+        # Подключить сигнал markers_changed к обновлению timeline
+        self.markers_changed.connect(self._on_markers_changed_internal)
 
         # Подключить сигналы от CustomEventController для синхронизации событий
         if self.custom_event_controller is not None:
@@ -126,35 +130,27 @@ class TimelineController(QObject):
 
     def on_marker_added(self, index: int, marker: Marker):
         """Обработчик добавления маркера."""
-        # Отправить сигнал об изменении маркеров для timeline
+        # Отправить сигнал об изменении маркеров для timeline и segment_list
         self.markers_changed.emit()
-        # Обновить segment_list
-        if self.segment_list_widget:
-            self.segment_list_widget.update_row(index)
+
+        # Обновить timeline с анимацией для нового маркера
+        if self.timeline_widget:
+            self.timeline_widget.scene.rebuild(animate_new=True)
 
     def on_marker_removed(self, index: int):
         """Обработчик удаления маркера."""
-        # Отправить сигнал об изменении маркеров для timeline
+        # Отправить сигнал об изменении маркеров для timeline и segment_list
         self.markers_changed.emit()
-        # Удалить строку из segment_list
-        if self.segment_list_widget:
-            self.segment_list_widget.remove_row(index)
 
     def on_marker_changed(self, index: int, marker: Marker):
         """Обработчик изменения маркера."""
-        # Отправить сигнал об изменении маркеров для timeline
+        # Отправить сигнал об изменении маркеров для timeline и segment_list
         self.markers_changed.emit()
-        # Обновить строку в segment_list
-        if self.segment_list_widget:
-            self.segment_list_widget.update_row(index)
 
     def on_markers_cleared(self):
         """Обработчик очистки всех маркеров."""
-        # Отправить сигнал об изменении маркеров для timeline
+        # Отправить сигнал об изменении маркеров для timeline и segment_list
         self.markers_changed.emit()
-        # Очистить segment_list
-        if self.segment_list_widget:
-            self.segment_list_widget.clear_rows()
 
     def handle_hotkey(self, hotkey: str, current_frame: int, fps: float) -> None:
         """
@@ -200,6 +196,8 @@ class TimelineController(QObject):
             self.recording_start_frame = current_frame
             self.is_recording = True
             print(f"Started recording {event_name} at frame {current_frame}")
+            # Уведомить о начале записи
+            self.recording_state_changed.emit(True, event_name, current_frame)
         else:
             # Второе нажатие - конец записи
             if self.recording_start_frame is not None:
@@ -218,6 +216,8 @@ class TimelineController(QObject):
             # Сбросить состояние
             self.recording_start_frame = None
             self.is_recording = False
+            # Уведомить о завершении записи
+            self.recording_state_changed.emit(False, "", 0)
 
     def _handle_fixed_length_mode(self, event_name: str, current_frame: int, fps: float) -> None:
         """
@@ -311,9 +311,9 @@ class TimelineController(QObject):
         # Отправить сигнал об изменении маркеров
         self.markers_changed.emit()
 
-        # Обновить таймлайн - полная перерисовка для совместимости
+        # Обновить таймлайн - полная перерисовка для совместимости (без анимации)
         if self.timeline_widget:
-            self.timeline_widget.set_segments([marker.to_marker() for marker in self.project.markers])
+            self.timeline_widget.scene.rebuild(animate_new=False)
 
         # Обновить таблицу сегментов - полная перерисовка для совместимости
         if self.segment_list_widget:
@@ -323,7 +323,30 @@ class TimelineController(QObject):
         """Установить timeline widget и подключить сигналы."""
         self.timeline_widget = timeline_widget
         if self.timeline_widget is not None:
+            self._connect_timeline_signals()
+
+    def _connect_timeline_signals(self):
+        """Подключить сигналы timeline widget."""
+        if self.timeline_widget is None:
+            return
+        
+        # Проверяем, какой тип timeline widget используется
+        # Новый TimelineWidget из hockey_editor.ui.timeline_graphics имеет scene.seek_requested
+        if hasattr(self.timeline_widget, 'scene') and hasattr(self.timeline_widget.scene, 'seek_requested'):
             self.timeline_widget.scene.seek_requested.connect(self._on_timeline_seek)
+        # Старый TimelineWidget из src/views/widgets/timeline.py имеет seek_requested напрямую
+        elif hasattr(self.timeline_widget, 'seek_requested'):
+            self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
+
+    def _on_markers_changed_internal(self):
+        """Внутренний обработчик изменения маркеров для обновления UI."""
+        if self.timeline_widget:
+            # Обновить timeline с текущими маркерами (без анимации)
+            self.timeline_widget.scene.rebuild(animate_new=False)
+
+        if self.segment_list_widget:
+            # Обновить таблицу сегментов
+            self.segment_list_widget.update_segments([marker.to_marker() for marker in self.project.markers])
 
     def edit_marker_requested(self, marker_idx: int):
         """Обработка запроса на редактирование маркера."""
@@ -337,6 +360,8 @@ class TimelineController(QObject):
         if self.timeline_widget is not None:
             self.timeline_widget.set_total_frames(total_frames)
             self.timeline_widget.set_fps(self.fps)
+            # Обновить сцену без анимации при инициализации
+            self.timeline_widget.scene.rebuild(animate_new=False)
 
     def _on_events_changed(self):
         """Обработка изменения списка событий."""
