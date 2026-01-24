@@ -192,7 +192,8 @@ class SegmentListWidget(QWidget):
         jump_btn.setFixedSize(20, 20)
         jump_btn.setToolTip("Перейти к началу сегмента")
         jump_btn.setStyleSheet(self._get_action_button_style())
-        jump_btn.clicked.connect(lambda: self.segment_jump_requested.emit(marker_idx))
+        jump_btn.setProperty("marker_idx", marker_idx)
+        jump_btn.clicked.connect(self._on_jump_button_clicked)
         layout.addWidget(jump_btn)
 
         # Edit button
@@ -201,7 +202,8 @@ class SegmentListWidget(QWidget):
         edit_btn.setFixedSize(20, 20)
         edit_btn.setToolTip("Редактировать сегмент")
         edit_btn.setStyleSheet(self._get_action_button_style())
-        edit_btn.clicked.connect(lambda: self.segment_edit_requested.emit(marker_idx))
+        edit_btn.setProperty("marker_idx", marker_idx)
+        edit_btn.clicked.connect(self._on_edit_button_clicked)
         layout.addWidget(edit_btn)
 
         # Delete button
@@ -210,7 +212,8 @@ class SegmentListWidget(QWidget):
         delete_btn.setFixedSize(20, 20)
         delete_btn.setToolTip("Удалить сегмент")
         delete_btn.setStyleSheet(self._get_action_button_style())
-        delete_btn.clicked.connect(lambda: self.segment_delete_requested.emit(marker_idx))
+        delete_btn.setProperty("marker_idx", marker_idx)
+        delete_btn.clicked.connect(self._on_delete_button_clicked)
         layout.addWidget(delete_btn)
 
         layout.addStretch()
@@ -267,6 +270,30 @@ class SegmentListWidget(QWidget):
             marker_idx = item.data(Qt.ItemDataRole.UserRole)
             if marker_idx is not None:
                 self.segment_edit_requested.emit(marker_idx)
+
+    def _on_jump_button_clicked(self):
+        """Handle jump button click."""
+        button = self.sender()
+        if button:
+            marker_idx = button.property("marker_idx")
+            if marker_idx is not None:
+                self.segment_jump_requested.emit(marker_idx)
+
+    def _on_edit_button_clicked(self):
+        """Handle edit button click."""
+        button = self.sender()
+        if button:
+            marker_idx = button.property("marker_idx")
+            if marker_idx is not None:
+                self.segment_edit_requested.emit(marker_idx)
+
+    def _on_delete_button_clicked(self):
+        """Handle delete button click."""
+        button = self.sender()
+        if button:
+            marker_idx = button.property("marker_idx")
+            if marker_idx is not None:
+                self.segment_delete_requested.emit(marker_idx)
 
     def _on_context_menu_requested(self, pos):
         """Handle right-click context menu."""
