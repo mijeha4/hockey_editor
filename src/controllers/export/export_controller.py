@@ -5,13 +5,13 @@ from typing import List, Dict
 try:
     from models.domain.marker import Marker
     from models.domain.project import Project
-    from services.export import VideoExporter
+    from services.export.video_exporter import VideoExporter
     from views.windows.export_dialog import ExportDialog
 except ImportError:
     # Для случаев, когда запускаем из src/
     from ...models.domain.marker import Marker
     from ...models.domain.project import Project
-    from ...services.export import VideoExporter
+    from ...services.export.video_exporter import VideoExporter
     from ...views.windows.export_dialog import ExportDialog
 
 
@@ -34,11 +34,8 @@ class ExportWorker(QThread):
         try:
             self.progress.emit(0)
 
-            # Создать экспортер
-            exporter = VideoExporter()
-
-            # Запустить экспорт
-            success = exporter.export_segments(
+        # Запустить экспорт
+            success = VideoExporter.export_segments(
                 video_path=self.video_path,
                 markers=self.markers,
                 fps=self.fps,

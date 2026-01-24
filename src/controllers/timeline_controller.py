@@ -11,6 +11,7 @@ try:
     # Используем новую профессиональную timeline из hockey_editor/ui/
     from hockey_editor.ui.timeline_graphics import TimelineWidget
     from utils.commands.modify_marker_command import ModifyMarkerCommand
+    from utils.commands.delete_marker_command import DeleteMarkerCommand
 except ImportError:
     # Для случаев, когда запускаем из src/
     try:
@@ -22,6 +23,7 @@ except ImportError:
         # Используем новую профессиональную timeline из hockey_editor/ui/
         from hockey_editor.ui.timeline_graphics import TimelineWidget
         from hockey_editor.utils.commands.modify_marker_command import ModifyMarkerCommand
+        from hockey_editor.utils.commands.delete_marker_command import DeleteMarkerCommand
     except ImportError:
         # Fallback для тестирования
         from models.domain.marker import Marker
@@ -66,13 +68,15 @@ class TimelineController(QObject):
                  timeline_widget: TimelineWidget,
                  segment_list_widget: SegmentListWidget,
                  history_manager: HistoryManager,
-                 settings: AppSettings):
+                 settings: AppSettings,
+                 custom_event_controller=None):
         super().__init__()
         self.project = project
         self.timeline_widget = timeline_widget
         self.segment_list_widget = segment_list_widget
         self.history_manager = history_manager
         self.settings = settings
+        self.custom_event_controller = custom_event_controller
 
         # --- ДОБАВИТЬ ЭТУ СТРОКУ ---
         self._main_window = None
@@ -94,6 +98,12 @@ class TimelineController(QObject):
         if self.timeline_widget is not None:
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
         # segment_list_widget не имеет сигналов выбора, так что убираем эту строку
+
+        # Подключить сигналы от CustomEventController для синхронизации событий
+        if self.custom_event_controller is not None:
+            self.custom_event_controller.events_changed.connect(self._on_events_changed)
+            self.custom_event_controller.event_added.connect(self._on_event_added)
+            self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
 
     # --- ДОБАВИТЬ ЭТОТ МЕТОД ---
     def set_main_window(self, window):
@@ -126,9 +136,18 @@ class TimelineController(QObject):
 
     def _find_event_by_hotkey(self, hotkey: str) -> str:
         """Найти тип события по горячей клавише."""
+        # Сначала проверить кастомные события через контроллер
+        if self.custom_event_controller:
+            all_events = self.custom_event_controller.get_all_events()
+            for event in all_events:
+                if event.shortcut.upper() == hotkey.upper():
+                    return event.name
+
+        # Затем проверить дефолтные события
         for event in self.settings.default_events:
             if event.shortcut.upper() == hotkey.upper():
                 return event.name
+
         return None
 
     def _handle_dynamic_mode(self, event_name: str, current_frame: int, fps: float) -> None:
@@ -281,3 +300,37 @@ class TimelineController(QObject):
         if self.timeline_widget is not None:
             self.timeline_widget.set_total_frames(total_frames)
             self.timeline_widget.set_fps(self.fps)
+
+    def _on_events_changed(self):
+        """Обработка изменения списка событий."""
+        print("TimelineController: Events list changed, updating hotkey mappings")
+        # Список событий изменился, но нам не нужно предпринимать специальных действий
+        # TimelineController будет использовать актуальный список при следующем вызове _find_event_by_hotkey
+
+    def _on_event_added(self, event):
+        """Обработка добавления нового события."""
+        print(f"TimelineController: New event added: {event.name} (shortcut: {event.shortcut})")
+        # Новое событие добавлено, оно будет доступно при следующем поиске по горячим клавишам
+
+    def _on_event_deleted(self, event_name: str):
+        """Обработка удаления события."""
+        print(f"TimelineController: Event deleted: {event_name}")
+
+        # Удалить все маркеры с этим событием
+        markers_to_remove = []
+        for marker in self.project.markers:
+            if marker.event_name == event_name:
+                markers_to_remove.append(marker)
+
+        # Удалить найденные маркеры через команды (для поддержки undo/redo)
+        for marker in markers_to_remove:
+            # Создать команду удаления для каждого маркера
+            delete_command = DeleteMarkerCommand(self.project.markers, marker)
+            self.history_manager.execute_command(delete_command)
+
+        # Обновить UI если были удалены маркеры
+        if markers_to_remove:
+            print(f"TimelineController: Removed {len(markers_to_remove)} markers with deleted event '{event_name}'")
+            self.refresh_view()
+            # Уведомить об изменении проекта
+            self.project_modified.emit()

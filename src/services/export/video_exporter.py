@@ -14,8 +14,8 @@ except ImportError:
 class VideoExporter:
     """Сервис для экспорта видео сегментов."""
 
+    @staticmethod
     def export_segments(
-        self,
         video_path: str,
         markers: List[Marker],
         fps: float,
@@ -49,13 +49,14 @@ class VideoExporter:
                 raise FileNotFoundError(f"Video file not found: {video_path}")
 
             if not markers:
-                raise ValueError("No markers to export")
+                # Создаем пустой клип для moviepy
+                return VideoExporter._export_empty_clip(video_path, fps, output_path)
 
             # Выбираем метод экспорта
             if codec.lower() == "copy":
-                return self._export_with_copy(video_path, markers, fps, output_path, merge_segments)
+                return VideoExporter._export_with_copy(video_path, markers, fps, output_path, merge_segments)
             else:
-                return self._export_with_moviepy(
+                return VideoExporter._export_with_moviepy(
                     video_path, markers, fps, output_path,
                     codec, quality, resolution, include_audio, merge_segments
                 )
@@ -66,8 +67,8 @@ class VideoExporter:
             print(f"Export error: {e}")
             raise
 
+    @staticmethod
     def _export_with_copy(
-        self,
         video_path: str,
         markers: List[Marker],
         fps: float,
@@ -78,6 +79,9 @@ class VideoExporter:
         Быстрый экспорт с использованием ffmpeg ultrafast preset.
         """
         print(f"Fast export using ultrafast encoding: {len(markers)} segments, merge_segments={merge_segments}")
+
+        if not markers:
+            raise ValueError("Cannot create empty clip with codec='copy'")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             segment_files = []
@@ -120,16 +124,17 @@ class VideoExporter:
                     import shutil
                     shutil.copy2(segment_files[0], output_path)
                 else:
-                    self._concatenate_segments(segment_files, output_path)
+                    VideoExporter._concatenate_segments(segment_files, output_path)
                 print(f"Fast export completed successfully: {output_path}")
             else:
-                self._export_separate_files(segment_files, markers, output_path)
+                VideoExporter._export_separate_files(segment_files, markers, output_path)
                 output_dir = os.path.dirname(output_path)
                 print(f"Fast export completed successfully: {len(segment_files)} separate files in {output_dir}")
 
         return True
 
-    def _concatenate_segments(self, segment_files: List[str], output_path: str) -> None:
+    @staticmethod
+    def _concatenate_segments(segment_files: List[str], output_path: str) -> None:
         """Конкатенирует сегменты с помощью ffmpeg."""
         concat_file = output_path + ".txt"
         try:
@@ -159,8 +164,8 @@ class VideoExporter:
             if os.path.exists(concat_file):
                 os.remove(concat_file)
 
+    @staticmethod
     def _export_separate_files(
-        self,
         segment_files: List[str],
         markers: List[Marker],
         output_path: str
@@ -179,8 +184,8 @@ class VideoExporter:
             shutil.copy2(segment_file, segment_output_path)
             print(f"  Exported segment {i+1}: {segment_output_path}")
 
+    @staticmethod
     def _export_with_moviepy(
-        self,
         video_path: str,
         markers: List[Marker],
         fps: float,
@@ -197,7 +202,7 @@ class VideoExporter:
         video = mp.VideoFileClip(video_path)
 
         # Настраиваем параметры экспорта
-        export_params = self._prepare_export_params(codec, quality, include_audio)
+        export_params = VideoExporter._prepare_export_params(codec, quality, include_audio)
 
         print(f"Exporting {len(markers)} segments with re-encoding, merge_segments={merge_segments}")
 
@@ -214,7 +219,7 @@ class VideoExporter:
         if merge_segments:
             # Объединяем в один файл
             final_clip = mp.concatenate_videoclips(clips) if len(clips) > 1 else clips[0]
-            final_clip = self._apply_resolution(final_clip, resolution)
+            final_clip = VideoExporter._apply_resolution(final_clip, resolution)
 
             final_clip.write_videofile(
                 output_path,
@@ -228,12 +233,13 @@ class VideoExporter:
             print(f"Re-encoding export completed successfully: {output_path}")
         else:
             # Экспортируем отдельно
-            self._export_separate_clips(clips, markers, output_path, fps, export_params, resolution)
+            VideoExporter._export_separate_clips(clips, markers, output_path, fps, export_params, resolution)
 
         video.close()
         return True
 
-    def _prepare_export_params(self, codec: str, quality: int, include_audio: bool) -> dict:
+    @staticmethod
+    def _prepare_export_params(codec: str, quality: int, include_audio: bool) -> dict:
         """Подготавливает параметры экспорта для moviepy."""
         params = {}
 
@@ -259,7 +265,8 @@ class VideoExporter:
 
         return params
 
-    def _apply_resolution(self, clip, resolution: Optional[str]):
+    @staticmethod
+    def _apply_resolution(clip, resolution: Optional[str]):
         """Применяет разрешение к клипу."""
         if not resolution or resolution == "source":
             return clip
@@ -277,8 +284,8 @@ class VideoExporter:
 
         return clip
 
+    @staticmethod
     def _export_separate_clips(
-        self,
         clips: list,
         markers: List[Marker],
         output_path: str,
@@ -291,7 +298,7 @@ class VideoExporter:
         base_name = os.path.splitext(os.path.basename(output_path))[0]
 
         for i, (clip, marker) in enumerate(zip(clips, markers)):
-            segment_clip = self._apply_resolution(clip, resolution)
+            segment_clip = VideoExporter._apply_resolution(clip, resolution)
 
             segment_output_path = os.path.join(
                 output_dir,
@@ -312,3 +319,42 @@ class VideoExporter:
             print(f"  Exported segment {i+1}: {segment_output_path}")
 
         print(f"Re-encoding export completed successfully: {len(clips)} separate files in {output_dir}")
+
+    # Legacy interface compatibility
+    @staticmethod
+    def export(video_path: str, markers: List[Marker], total_frames: int, fps: float, output_path: str, **kwargs) -> bool:
+        """
+        Legacy interface for backward compatibility with tests.
+        """
+        return VideoExporter.export_segments(
+            video_path=video_path,
+            markers=markers,
+            fps=fps,
+            output_path=output_path,
+            **kwargs
+        )
+
+    @staticmethod
+    def _export_empty_clip(video_path: str, fps: float, output_path: str) -> bool:
+        """Экспортирует пустой клип (для случаев без маркеров)."""
+        import moviepy as mp
+
+        print("Creating empty clip")
+
+        video = mp.VideoFileClip(video_path)
+        empty_clip = video.subclipped(0, 0.1)  # Минимальная длительность
+
+        empty_clip.write_videofile(
+            output_path,
+            fps=fps,
+            codec="libx264",
+            audio_codec="aac",
+            threads=4,
+            logger=None
+        )
+
+        empty_clip.close()
+        video.close()
+
+        print(f"Empty clip exported successfully: {output_path}")
+        return True

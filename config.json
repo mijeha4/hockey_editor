@@ -1,6 +1,27 @@
 {
-  "recording_mode": "fixed_length",
-  "fixed_duration_sec": 10,
-  "pre_roll_sec": 0.0,
-  "post_roll_sec": 0.0
+    "hotkeys": {
+        "ATTACK": "A",
+        "DEFENSE": "D",
+        "SHIFT": "S"
+    },
+    "recording_mode": "dynamic",
+    "fixed_duration_sec": 10,
+    "pre_roll_sec": 3.0,
+    "post_roll_sec": 0.0,
+    "track_colors": {
+        "ATTACK": "#8b0000",
+        "DEFENSE": "#000080",
+        "SHIFT": "#006400"
+    },
+    "window_x": 0,
+    "window_y": 0,
+    "window_width": 1800,
+    "window_height": 1000,
+    "autosave_enabled": true,
+    "autosave_interval_minutes": 5,
+    "recent_projects": [],
+    "custom_events": [],
+    "language": "ru",
+    "playback_speed": 1.0,
+    "theme": "dark"
 }

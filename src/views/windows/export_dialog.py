@@ -51,9 +51,10 @@ class ExportWorker(QThread):
 
             # Финализировать экспорт
             success = VideoExporter.export_segments(
-                self.video_path,
-                self.markers,
-                self.output_path,
+                video_path=self.video_path,
+                markers=self.markers,
+                fps=self.fps,
+                output_path=self.output_path,
                 codec=self.codec,
                 quality=self.quality,
                 resolution=self.resolution,

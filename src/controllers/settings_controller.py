@@ -294,3 +294,8 @@ class SettingsController(QObject):
         except Exception as e:
             print(f"Error importing settings: {e}")
             return False
+
+    def cleanup(self):
+        """Cleanup resources."""
+        # Disconnect signals if needed
+        pass

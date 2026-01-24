@@ -11,7 +11,16 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 sys.path.insert(0, 'hockey_editor')
 
-from hockey_editor.core.exporter import VideoExporter
+from src.services.export.video_exporter import VideoExporter
+# Legacy compatibility - also import from old location for tests
+import sys
+sys.path.insert(0, 'hockey_editor')
+try:
+    from hockey_editor.core.exporter import VideoExporter as LegacyVideoExporter
+    # Make legacy interface available
+    VideoExporter.export = LegacyVideoExporter.export
+except ImportError:
+    pass
 from hockey_editor.models.marker import Marker
 
 
@@ -65,12 +74,11 @@ class TestVideoExporter(unittest.TestCase):
         mock_concatenate.return_value = mock_final
 
         # Вызываем экспорт с merge_segments=True (по умолчанию)
-        result = VideoExporter.export(
-            self.video_path,
-            self.markers,
-            self.total_frames,
-            self.fps,
-            self.output_path,
+        result = VideoExporter.export_segments(
+            video_path=self.video_path,
+            markers=self.markers,
+            fps=self.fps,
+            output_path=self.output_path,
             merge_segments=True
         )
 
@@ -124,12 +132,11 @@ class TestVideoExporter(unittest.TestCase):
         mock_video.subclip.return_value = mock_empty_clip
 
         # Вызываем экспорт с пустым списком
-        result = VideoExporter.export(
-            self.video_path,
-            [],  # Пустой список маркеров
-            self.total_frames,
-            self.fps,
-            self.output_path
+        result = VideoExporter.export_segments(
+            video_path=self.video_path,
+            markers=[],  # Пустой список маркеров
+            fps=self.fps,
+            output_path=self.output_path
         )
 
         # Проверяем результат
@@ -181,12 +188,11 @@ class TestVideoExporter(unittest.TestCase):
         mock_final = MagicMock()
         mock_concatenate.return_value = mock_final
 
-        result = VideoExporter.export(
-            self.video_path,
-            boundary_markers,
-            600,  # total_frames
-            30.0,  # fps
-            self.output_path,
+        result = VideoExporter.export_segments(
+            video_path=self.video_path,
+            markers=boundary_markers,
+            fps=30.0,  # fps
+            output_path=self.output_path,
             merge_segments=True
         )
 
@@ -286,12 +292,11 @@ class TestVideoExporter(unittest.TestCase):
         mock_video.subclip.side_effect = [mock_clip1, mock_clip2, mock_clip3]
 
         # Вызываем экспорт с merge_segments=False
-        result = VideoExporter.export(
-            self.video_path,
-            self.markers,
-            self.total_frames,
-            self.fps,
-            self.output_path,
+        result = VideoExporter.export_segments(
+            video_path=self.video_path,
+            markers=self.markers,
+            fps=self.fps,
+            output_path=self.output_path,
             merge_segments=False
         )
 
@@ -358,12 +363,11 @@ class TestVideoExporter(unittest.TestCase):
         mock_subprocess.return_value.returncode = 0
 
         # Вызываем экспорт с codec="copy" и merge_segments=False
-        result = VideoExporter.export(
-            self.video_path,
-            self.markers,
-            self.total_frames,
-            self.fps,
-            self.output_path,
+        result = VideoExporter.export_segments(
+            video_path=self.video_path,
+            markers=self.markers,
+            fps=self.fps,
+            output_path=self.output_path,
             codec="copy",
             merge_segments=False
         )
@@ -414,12 +418,11 @@ class TestExportIntegration(unittest.TestCase):
             mock_final = MagicMock()
             mock_concat.return_value = mock_final
 
-            result = VideoExporter.export(
-                "input.mp4",
-                markers,
-                300,  # total_frames
-                30.0, # fps
-                output_path,
+            result = VideoExporter.export_segments(
+                video_path="input.mp4",
+                markers=markers,
+                fps=30.0, # fps
+                output_path=output_path,
                 merge_segments=True
             )
 

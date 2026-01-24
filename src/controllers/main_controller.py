@@ -64,7 +64,8 @@ class MainController(QObject):
             None,  # timeline_widget будет установлен позже
             self.main_window.get_segment_list_widget(),
             self.history_manager,
-            self.settings
+            self.settings,
+            None  # custom_event_controller будет установлен позже
         )
 
         # Связать timeline_controller с playback_controller
@@ -107,6 +108,11 @@ class MainController(QObject):
         self._instance_edit_controller = None
         self._settings_controller = None
         self._custom_event_controller = None
+
+        # Создать custom_event_controller заранее для timeline_controller
+        custom_event_controller = self.get_custom_event_controller()
+        # Установить custom_event_controller в timeline_controller
+        self.timeline_controller.custom_event_controller = custom_event_controller
 
         # Свойства для доступа из views
         self.markers = self.project.markers
@@ -406,8 +412,10 @@ class MainController(QObject):
 
     def _on_open_settings(self):
         """Обработка открытия окна настроек."""
-        dialog = SettingsDialog(self.settings, self.main_window)
-        dialog.settings_saved.connect(self._on_settings_saved)
+        settings_controller = self.get_settings_controller()
+        custom_event_controller = self.get_custom_event_controller()
+        dialog = SettingsDialog(settings_controller, custom_event_controller, self.main_window)
+        dialog.accepted.connect(lambda: self._on_settings_saved(settings_controller.settings))
         dialog.exec()
 
     def _on_export(self):

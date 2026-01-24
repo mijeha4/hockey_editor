@@ -1,251 +1,214 @@
+"""
+Settings Dialog - диалог настроек приложения.
+
+Обеспечивает пользовательский интерфейс для настройки параметров приложения
+с интеграцией с SettingsController.
+"""
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
-    QLabel, QSpinBox, QComboBox, QTableWidget, QTableWidgetItem,
-    QPushButton, QDialogButtonBox, QColorDialog, QLineEdit,
-    QHeaderView, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QLabel,
+    QComboBox, QDoubleSpinBox, QSpinBox, QPushButton,
+    QCheckBox, QWidget, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QColor
-# Используем абсолютные импорты для совместимости с run_test.py
-try:
-    from models.config.app_settings import AppSettings, EventType, RecordingMode
-except ImportError:
-    # Для случаев, когда запускаем из src/
-    from ...models.config.app_settings import AppSettings, EventType, RecordingMode
+from PySide6.QtCore import Qt
+
+from controllers.settings_controller import SettingsController
+from controllers.custom_event_controller import CustomEventController
+from views.dialogs.custom_event_dialog import CustomEventManagerDialog
 
 
 class SettingsDialog(QDialog):
-    """Диалог настроек приложения."""
+    """Диалог настроек приложения с вкладками."""
 
-    # Сигнал при сохранении настроек
-    settings_saved = Signal(AppSettings)
-
-    def __init__(self, current_settings: AppSettings, parent=None):
+    def __init__(self, settings_controller: SettingsController,
+                 custom_event_controller: CustomEventController,
+                 parent=None):
         super().__init__(parent)
+        self.settings_controller = settings_controller
+        self.custom_event_controller = custom_event_controller
 
-        self.current_settings = current_settings
-        self.modified_settings = AppSettings(
-            default_events=current_settings.default_events.copy(),
-            recording_mode=current_settings.recording_mode,
-            pre_roll_sec=current_settings.pre_roll_sec,
-            fixed_duration_sec=current_settings.fixed_duration_sec,
-            post_roll_sec=current_settings.post_roll_sec,
-            playback_speed=current_settings.playback_speed,
-            language=current_settings.language
-        )
-
-        self.setWindowTitle("Preferences")
+        self.setWindowTitle("Настройки")
+        self.setGeometry(200, 200, 500, 400)
         self.setModal(True)
-        self.resize(600, 500)
 
-        self._setup_ui()
-        self._load_current_settings()
+        self.setup_ui()
 
-    def _setup_ui(self):
-        """Создать интерфейс."""
-        layout = QVBoxLayout(self)
+        # Загрузить текущие настройки
+        self.load_settings()
+
+    def setup_ui(self):
+        """Создать UI с вкладками."""
+        layout = QVBoxLayout()
 
         # Вкладки
-        self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
+        tabs = QTabWidget()
 
-        # Вкладка General
-        self._create_general_tab()
+        # Вкладка 1: Режим расстановки
+        tabs.addTab(self._create_recording_mode_tab(), "Режим записи")
 
-        # Вкладка Events
-        self._create_events_tab()
+        # Вкладка 2: Горячие клавиши
+        tabs.addTab(self._create_hotkeys_tab(), "Горячие клавиши")
+
+        # Вкладка 3: Автосохранение
+        tabs.addTab(self._create_autosave_tab(), "Автосохранение")
+
+        layout.addWidget(tabs)
+
+        # Кнопка управления пользовательскими событиями
+        events_btn = QPushButton("📝 Управление событиями")
+        events_btn.clicked.connect(self._manage_events)
+        layout.addWidget(events_btn)
 
         # Кнопки
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._on_save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        button_layout = QHBoxLayout()
 
-    def _create_general_tab(self):
-        """Создать вкладку General."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        save_btn = QPushButton("💾 Сохранить")
+        save_btn.clicked.connect(self.save_and_close)
+        button_layout.addWidget(save_btn)
 
-        # Режим записи
-        mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("Recording Mode:"))
+        cancel_btn = QPushButton("✕ Отмена")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
 
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def _create_recording_mode_tab(self):
+        """Вкладка режима расстановки отрезков."""
+        widget = QVBoxLayout()
+
+        # Режим расстановки
+        widget.addWidget(QLabel("Режим записи:"))
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Dynamic", RecordingMode.DYNAMIC)
-        self.mode_combo.addItem("Fixed Length", RecordingMode.FIXED_LENGTH)
-        mode_layout.addWidget(self.mode_combo)
-        mode_layout.addStretch()
-        layout.addLayout(mode_layout)
+        self.mode_combo.addItems(["Динамический (2 нажатия)", "Фиксированная длина (1 нажатие)"])
+        widget.addWidget(self.mode_combo)
+
+        # Фиксированная длина
+        widget.addWidget(QLabel("\nФиксированная длительность (секунды):"))
+        self.fixed_duration_spin = QSpinBox()
+        self.fixed_duration_spin.setRange(1, 120)
+        self.fixed_duration_spin.setSingleStep(5)
+        widget.addWidget(self.fixed_duration_spin)
 
         # Pre-roll
-        pre_roll_layout = QHBoxLayout()
-        pre_roll_layout.addWidget(QLabel("Pre-roll (seconds):"))
-
-        self.pre_roll_spin = QSpinBox()
-        self.pre_roll_spin.setRange(0, 60)
-        self.pre_roll_spin.setValue(3)
-        pre_roll_layout.addWidget(self.pre_roll_spin)
-        pre_roll_layout.addStretch()
-        layout.addLayout(pre_roll_layout)
+        widget.addWidget(QLabel("\nПредварительный откат (секунды):"))
+        self.pre_roll_spin = QDoubleSpinBox()
+        self.pre_roll_spin.setRange(0.0, 10.0)
+        self.pre_roll_spin.setSingleStep(0.5)
+        widget.addWidget(self.pre_roll_spin)
 
         # Post-roll
-        post_roll_layout = QHBoxLayout()
-        post_roll_layout.addWidget(QLabel("Post-roll (seconds):"))
+        widget.addWidget(QLabel("\nДобавление в конец (секунды):"))
+        self.post_roll_spin = QDoubleSpinBox()
+        self.post_roll_spin.setRange(0.0, 10.0)
+        self.post_roll_spin.setSingleStep(0.5)
+        widget.addWidget(self.post_roll_spin)
 
-        self.post_roll_spin = QSpinBox()
-        self.post_roll_spin.setRange(0, 60)
-        self.post_roll_spin.setValue(0)
-        post_roll_layout.addWidget(self.post_roll_spin)
-        post_roll_layout.addStretch()
-        layout.addLayout(post_roll_layout)
+        widget.addStretch()
+        return self._wrap_widget(widget)
 
-        # Fixed duration
-        fixed_duration_layout = QHBoxLayout()
-        fixed_duration_layout.addWidget(QLabel("Fixed Duration (seconds):"))
+    def _create_hotkeys_tab(self):
+        """Вкладка горячих клавиш."""
+        widget = QVBoxLayout()
 
-        self.fixed_duration_spin = QSpinBox()
-        self.fixed_duration_spin.setRange(1, 300)
-        self.fixed_duration_spin.setValue(10)
-        fixed_duration_layout.addWidget(self.fixed_duration_spin)
-        fixed_duration_layout.addStretch()
-        layout.addLayout(fixed_duration_layout)
+        widget.addWidget(QLabel("Настройки горячих клавиш:"))
+        widget.addWidget(QLabel("Горячие клавиши управляются в диалоге 'Управление событиями'."))
+        widget.addWidget(QLabel("Используйте кнопку 'Управление событиями' ниже для настройки событий и их сочетаний клавиш."))
 
-        layout.addStretch()
-        self.tab_widget.addTab(tab, "General")
+        # Статусная информация
+        info_text = """
+Система горячих клавиш:
+• Настраиваемые сочетания клавиш для пользовательских событий
+• Работает глобально даже при фокусе на таймлайне или других элементах
+• Пробел - Воспроизведение/Пауза видео
+• Ctrl+E - Экспорт, Ctrl+S - Сохранить проект
+"""
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #cccccc; font-size: 11px;")
+        widget.addWidget(info_label)
 
-    def _create_events_tab(self):
-        """Создать вкладку Events."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        widget.addStretch()
+        return self._wrap_widget(widget)
 
-        # Таблица событий
-        self.events_table = QTableWidget()
-        self.events_table.setColumnCount(3)
-        self.events_table.setHorizontalHeaderLabels(["Name", "Color", "Hotkey"])
+    def _create_autosave_tab(self):
+        """Вкладка автосохранения."""
+        widget = QVBoxLayout()
 
-        # Настройка заголовков
-        header = self.events_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)    # Color
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)    # Hotkey
+        # Автосохранение
+        widget.addWidget(QLabel("Настройки автосохранения:"))
 
-        self.events_table.setColumnWidth(1, 60)  # Color button width
-        self.events_table.setColumnWidth(2, 60)  # Hotkey width
+        self.autosave_check = QCheckBox("Включить автосохранение")
+        widget.addWidget(self.autosave_check)
 
-        layout.addWidget(self.events_table)
+        # Интервал
+        widget.addWidget(QLabel("\nИнтервал автосохранения (минуты):"))
+        self.autosave_interval_spin = QSpinBox()
+        self.autosave_interval_spin.setRange(1, 60)
+        widget.addWidget(self.autosave_interval_spin)
 
-        # Кнопки управления
-        buttons_layout = QHBoxLayout()
+        # Информация
+        widget.addWidget(QLabel("\nМаркеры автоматически сохраняются в 'project.json'"))
 
-        self.add_button = QPushButton("Add Event")
-        self.add_button.clicked.connect(self._on_add_event)
-        buttons_layout.addWidget(self.add_button)
+        widget.addStretch()
+        return self._wrap_widget(widget)
 
-        self.remove_button = QPushButton("Remove Event")
-        self.remove_button.clicked.connect(self._on_remove_event)
-        buttons_layout.addWidget(self.remove_button)
+    def _wrap_widget(self, layout):
+        """Обёртка для вкладки."""
+        widget = QWidget()
+        widget.setLayout(layout)
+        return widget
 
-        self.reset_button = QPushButton("Reset to Default")
-        self.reset_button.clicked.connect(self._on_reset_events)
-        buttons_layout.addWidget(self.reset_button)
+    def load_settings(self):
+        """Загрузить настройки в UI."""
+        # Режим расстановки
+        mode = self.settings_controller.get_recording_mode()
+        mode_idx = 0 if mode == "dynamic" else 1
+        self.mode_combo.setCurrentIndex(mode_idx)
 
-        buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)
+        # Фиксированная длина
+        self.fixed_duration_spin.setValue(self.settings_controller.get_fixed_duration())
 
-        self.tab_widget.addTab(tab, "Events")
+        # Pre-roll и Post-roll
+        self.pre_roll_spin.setValue(self.settings_controller.get_pre_roll())
+        self.post_roll_spin.setValue(self.settings_controller.get_post_roll())
 
-    def _load_current_settings(self):
-        """Загрузить текущие настройки в UI."""
-        # General settings
-        if self.current_settings.recording_mode == "dynamic":
-            self.mode_combo.setCurrentIndex(0)
-        else:
-            self.mode_combo.setCurrentIndex(1)
+        # Автосохранение
+        self.autosave_check.setChecked(self.settings_controller.get_autosave_enabled())
+        self.autosave_interval_spin.setValue(self.settings_controller.get_autosave_interval())
 
-        self.pre_roll_spin.setValue(int(self.current_settings.pre_roll_sec))
-        self.post_roll_spin.setValue(int(self.current_settings.post_roll_sec))
-        self.fixed_duration_spin.setValue(self.current_settings.fixed_duration_sec)
+    def save_and_close(self):
+        """Сохранить настройки и закрыть."""
+        try:
+            # Режим расстановки
+            mode = "dynamic" if self.mode_combo.currentIndex() == 0 else "fixed_length"
+            self.settings_controller.set_recording_mode(mode)
 
-        # Events
-        self._load_events_table()
+            # Фиксированная длина
+            self.settings_controller.set_fixed_duration(self.fixed_duration_spin.value())
 
-    def _load_events_table(self):
-        """Загрузить события в таблицу."""
-        events = self.modified_settings.default_events
-        self.events_table.setRowCount(len(events))
+            # Pre-roll и Post-roll
+            self.settings_controller.set_pre_roll(self.pre_roll_spin.value())
+            self.settings_controller.set_post_roll(self.post_roll_spin.value())
 
-        for row, event in enumerate(events):
-            # Name
-            name_item = QTableWidgetItem(event.name)
-            self.events_table.setItem(row, 0, name_item)
+            # Автосохранение
+            self.settings_controller.set_autosave_enabled(self.autosave_check.isChecked())
+            self.settings_controller.set_autosave_interval(self.autosave_interval_spin.value())
 
-            # Color button
-            color_button = QPushButton()
-            color_button.setStyleSheet(f"background-color: {event.color}; border: 1px solid #555;")
-            color_button.setFixedSize(40, 20)
-            color_button.clicked.connect(lambda checked, r=row: self._on_color_button_clicked(r))
-            self.events_table.setCellWidget(row, 1, color_button)
-
-            # Hotkey
-            hotkey_item = QTableWidgetItem(event.shortcut)
-            self.events_table.setItem(row, 2, hotkey_item)
-
-    def _on_color_button_clicked(self, row: int):
-        """Обработка клика на кнопку цвета."""
-        current_color = QColor(self.modified_settings.default_events[row].color)
-        color = QColorDialog.getColor(current_color, self, "Choose Color")
-
-        if color.isValid():
-            # Обновить настройки
-            self.modified_settings.default_events[row].color = color.name()
-
-            # Обновить кнопку
-            button = self.events_table.cellWidget(row, 1)
-            button.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #555;")
-
-    def _on_add_event(self):
-        """Добавить новое событие."""
-        # Простая реализация - можно улучшить
-        new_event = EventType(name="New Event", color="#FF0000", shortcut="N")
-        self.modified_settings.default_events.append(new_event)
-        self._load_events_table()
-
-    def _on_remove_event(self):
-        """Удалить выбранное событие."""
-        current_row = self.events_table.currentRow()
-        if current_row >= 0:
-            # Не удалять первые 13 стандартных событий
-            if current_row >= 13:
-                del self.modified_settings.default_events[current_row]
-                self._load_events_table()
+            # Сохранить настройки
+            if self.settings_controller.save_settings():
+                QMessageBox.information(self, "Настройки сохранены",
+                                       "Настройки успешно сохранены.\n\n"
+                                       "Перезапустите приложение для применения некоторых изменений.")
+                self.accept()
             else:
-                QMessageBox.warning(self, "Warning", "Cannot remove default events!")
+                QMessageBox.warning(self, "Ошибка", "Не удалось сохранить настройки.")
 
-    def _on_reset_events(self):
-        """Сбросить события к умолчанию."""
-        self.modified_settings.default_events = AppSettings().default_events
-        self._load_events_table()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при сохранении настроек:\n{str(e)}")
 
-    def _on_save(self):
-        """Обработка сохранения."""
-        # Собрать данные из UI
-        self.modified_settings.recording_mode = self.mode_combo.currentData().value
-        self.modified_settings.pre_roll_sec = float(self.pre_roll_spin.value())
-        self.modified_settings.post_roll_sec = float(self.post_roll_spin.value())
-        self.modified_settings.fixed_duration_sec = self.fixed_duration_spin.value()
-
-        # Собрать события из таблицы
-        for row in range(self.events_table.rowCount()):
-            name_item = self.events_table.item(row, 0)
-            hotkey_item = self.events_table.item(row, 2)
-
-            if name_item and row < len(self.modified_settings.default_events):
-                self.modified_settings.default_events[row].name = name_item.text()
-                if hotkey_item:
-                    self.modified_settings.default_events[row].shortcut = hotkey_item.text()
-
-        # Испустить сигнал
-        self.settings_saved.emit(self.modified_settings)
-        self.accept()
+    def _manage_events(self):
+        """Открыть диалог управления событиями."""
+        dialog = CustomEventManagerDialog(self)
+        dialog.exec()
