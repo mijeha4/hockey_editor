@@ -1,8 +1,8 @@
 """
-Instance Edit Controller - manages segment editing operations.
+Optimized Instance Edit Controller - manages segment editing operations.
 
-Handles precise segment editing with visual timeline, loop playback,
-hotkeys, and professional NLE-style controls for individual video segments.
+Provides optimized timeline updates without ObservableMarker dependency.
+Uses direct signal communication for immediate timeline updates.
 """
 
 from typing import Optional, List, Tuple
@@ -12,26 +12,23 @@ from PySide6.QtGui import QPixmap
 # Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 try:
     from models.domain.marker import Marker
-    from models.domain.observable_marker import ObservableMarker
     from utils.time_utils import frames_to_time
     from utils.custom_events import get_custom_event_manager
 except ImportError:
     # Для случаев, когда запускаем из src/
     try:
         from ..models.domain.marker import Marker
-        from ..models.domain.observable_marker import ObservableMarker
         from hockey_editor.utils.time_utils import frames_to_time
         from hockey_editor.utils.custom_events import get_custom_event_manager
     except ImportError:
         # Fallback для тестирования
         from models.domain.marker import Marker
-        from models.domain.observable_marker import ObservableMarker
         from hockey_editor.utils.time_utils import frames_to_time
         from hockey_editor.utils.custom_events import get_custom_event_manager
 
 
-class InstanceEditController(QObject):
-    """Controller for managing instance (segment) editing operations."""
+class InstanceEditControllerOptimized(QObject):
+    """Optimized controller for managing instance (segment) editing operations."""
 
     # Signals
     marker_updated = Signal()           # Marker data changed
@@ -46,9 +43,11 @@ class InstanceEditController(QObject):
         self.main_controller = main_controller
         self.playback_controller = main_controller.playback_controller
         self.video_service = main_controller.video_service
+        self.timeline_controller = main_controller.timeline_controller
 
         # Current marker being edited
         self.marker: Optional[Marker] = None
+        self.marker_index: int = -1  # Индекс маркера в списке
 
         # Navigation state
         self.filtered_markers: List[Tuple[int, Marker]] = []
@@ -66,10 +65,11 @@ class InstanceEditController(QObject):
         # Video display state
         self.current_frame_pixmap: Optional[QPixmap] = None
 
-    def set_marker(self, marker: Marker, filtered_markers: List[Tuple[int, Marker]] = None,
+    def set_marker(self, marker: Marker, marker_index: int, filtered_markers: List[Tuple[int, Marker]] = None,
                    current_idx: int = 0):
-        """Set the marker to edit."""
+        """Set the marker to edit with its index."""
         self.marker = marker
+        self.marker_index = marker_index
         self.filtered_markers = filtered_markers or []
         self.current_marker_idx = current_idx
 
@@ -81,6 +81,10 @@ class InstanceEditController(QObject):
         """Get the current marker."""
         return self.marker
 
+    def get_marker_index(self) -> int:
+        """Get the current marker index."""
+        return self.marker_index
+
     def get_fps(self) -> float:
         """Get video FPS."""
         return self.video_service.get_fps() if self.video_service.cap else 30.0
@@ -89,9 +93,9 @@ class InstanceEditController(QObject):
         """Get total video frames."""
         return self.video_service.get_total_frames()
 
-    # Timeline operations
+    # Timeline operations with optimized updates
     def set_timeline_range(self, start_frame: int, end_frame: int):
-        """Update marker range from timeline drag."""
+        """Update marker range from timeline drag with optimized timeline update."""
         if not self.marker:
             return
 
@@ -106,15 +110,21 @@ class InstanceEditController(QObject):
         self.timeline_range_changed.emit(start_frame, end_frame)
         self.marker_updated.emit()
 
+        # Оптимизированное обновление таймлайна
+        if self.marker_index >= 0 and self.timeline_controller:
+            self.timeline_controller.update_marker_optimized(
+                self.marker_index, start_frame, end_frame
+            )
+
     def seek_to_frame(self, frame: int):
         """Seek playback to specific frame."""
         self.playback_controller.seek_to_frame(frame)
         self._update_current_frame()
         self.playback_position_changed.emit(frame)
 
-    # Nudge operations
+    # Nudge operations with optimized updates
     def nudge_in_point(self, frames: int):
-        """Nudge IN point by specified frames."""
+        """Nudge IN point by specified frames with optimized update."""
         if not self.marker:
             return
 
@@ -124,8 +134,14 @@ class InstanceEditController(QObject):
             self.seek_to_frame(new_start)
             self.marker_updated.emit()
 
+            # Оптимизированное обновление таймлайна
+            if self.marker_index >= 0 and self.timeline_controller:
+                self.timeline_controller.update_marker_optimized(
+                    self.marker_index, new_start, self.marker.end_frame
+                )
+
     def nudge_out_point(self, frames: int):
-        """Nudge OUT point by specified frames."""
+        """Nudge OUT point by specified frames with optimized update."""
         if not self.marker:
             return
 
@@ -136,9 +152,15 @@ class InstanceEditController(QObject):
             self.seek_to_frame(new_end)
             self.marker_updated.emit()
 
-    # Point setting operations
+            # Оптимизированное обновление таймлайна
+            if self.marker_index >= 0 and self.timeline_controller:
+                self.timeline_controller.update_marker_optimized(
+                    self.marker_index, self.marker.start_frame, new_end
+                )
+
+    # Point setting operations with optimized updates
     def set_in_point(self):
-        """Set IN point to current playback position."""
+        """Set IN point to current playback position with optimized update."""
         if not self.marker:
             return
 
@@ -147,8 +169,14 @@ class InstanceEditController(QObject):
             self.marker.start_frame = current_frame
             self.marker_updated.emit()
 
+            # Оптимизированное обновление таймлайна
+            if self.marker_index >= 0 and self.timeline_controller:
+                self.timeline_controller.update_marker_optimized(
+                    self.marker_index, current_frame, self.marker.end_frame
+                )
+
     def set_out_point(self):
-        """Set OUT point to current playback position."""
+        """Set OUT point to current playback position with optimized update."""
         if not self.marker:
             return
 
@@ -156,6 +184,12 @@ class InstanceEditController(QObject):
         if current_frame > self.marker.start_frame:
             self.marker.end_frame = current_frame
             self.marker_updated.emit()
+
+            # Оптимизированное обновление таймлайна
+            if self.marker_index >= 0 and self.timeline_controller:
+                self.timeline_controller.update_marker_optimized(
+                    self.marker_index, self.marker.start_frame, current_frame
+                )
 
     # Active point management
     def set_active_point(self, point: str):
@@ -246,7 +280,7 @@ class InstanceEditController(QObject):
         prev_idx = self.current_marker_idx - 1
         original_idx, prev_marker = self.filtered_markers[prev_idx]
 
-        self.set_marker(prev_marker, self.filtered_markers, prev_idx)
+        self.set_marker(prev_marker, original_idx, self.filtered_markers, prev_idx)
         return True
 
     def navigate_next(self):
@@ -259,15 +293,21 @@ class InstanceEditController(QObject):
         next_idx = self.current_marker_idx + 1
         original_idx, next_marker = self.filtered_markers[next_idx]
 
-        self.set_marker(next_marker, self.filtered_markers, next_idx)
+        self.set_marker(next_marker, original_idx, self.filtered_markers, next_idx)
         return True
 
-    # Data operations
+    # Data operations with optimized updates
     def update_event_type(self, event_name: str):
-        """Update marker event type."""
+        """Update marker event type with optimized timeline update."""
         if self.marker:
             self.marker.event_name = event_name
             self.marker_updated.emit()
+
+            # Оптимизированное обновление таймлайна
+            if self.marker_index >= 0 and self.timeline_controller:
+                self.timeline_controller.update_marker_optimized(
+                    self.marker_index, self.marker.start_frame, self.marker.end_frame, event_name
+                )
 
     def update_note(self, note: str):
         """Update marker note."""
@@ -331,96 +371,5 @@ class InstanceEditController(QObject):
         """Cleanup resources."""
         self._pause_playback()
         self.marker = None
+        self.marker_index = -1
         self.filtered_markers.clear()
-
-    # --- РЕАКТИВНЫЕ МЕТОДЫ ДЛЯ OBSERVABLE MARKER ---
-
-    def set_observable_marker(self, observable_marker: ObservableMarker, 
-                             filtered_markers: List[Tuple[int, ObservableMarker]] = None,
-                             current_idx: int = 0):
-        """Set the observable marker to edit."""
-        self.observable_marker = observable_marker
-        self.filtered_markers = filtered_markers or []
-        self.current_marker_idx = current_idx
-
-        # Connect signals from observable marker
-        observable_marker.marker_changed.connect(self._on_observable_marker_changed)
-
-        # Seek to marker start
-        self.playback_controller.seek_to_frame(observable_marker.start_frame)
-        self._update_current_frame()
-
-    def _on_observable_marker_changed(self):
-        """Handle changes from observable marker."""
-        # Update UI to reflect marker changes
-        self.marker_updated.emit()
-        self.timeline_range_changed.emit(
-            self.observable_marker.start_frame, 
-            self.observable_marker.end_frame
-        )
-
-    def set_observable_timeline_range(self, start_frame: int, end_frame: int):
-        """Update observable marker range from timeline drag."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        # Validate range
-        total_frames = self.get_total_frames()
-        start_frame = max(0, min(start_frame, total_frames - 1))
-        end_frame = max(start_frame + 1, min(end_frame, total_frames))
-
-        # Update observable marker
-        self.observable_marker.set_range(start_frame, end_frame)
-
-    def nudge_observable_in_point(self, frames: int):
-        """Nudge IN point of observable marker by specified frames."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        new_start = max(0, self.observable_marker.start_frame + frames)
-        if new_start < self.observable_marker.end_frame:
-            self.observable_marker.start_frame = new_start
-            self.seek_to_frame(new_start)
-
-    def nudge_observable_out_point(self, frames: int):
-        """Nudge OUT point of observable marker by specified frames."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        total_frames = self.get_total_frames()
-        new_end = min(total_frames, self.observable_marker.end_frame + frames)
-        if new_end > self.observable_marker.start_frame:
-            self.observable_marker.end_frame = new_end
-            self.seek_to_frame(new_end)
-
-    def set_observable_in_point(self):
-        """Set IN point of observable marker to current playback position."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        current_frame = self.playback_controller.current_frame
-        if current_frame < self.observable_marker.end_frame:
-            self.observable_marker.start_frame = current_frame
-
-    def set_observable_out_point(self):
-        """Set OUT point of observable marker to current playback position."""
-        if not hasattr(self, 'observable_marker') or not self.observable_marker:
-            return
-
-        current_frame = self.playback_controller.current_frame
-        if current_frame > self.observable_marker.start_frame:
-            self.observable_marker.end_frame = current_frame
-
-    def update_observable_event_type(self, event_name: str):
-        """Update observable marker event type."""
-        if hasattr(self, 'observable_marker') and self.observable_marker:
-            self.observable_marker.event_name = event_name
-
-    def update_observable_note(self, note: str):
-        """Update observable marker note."""
-        if hasattr(self, 'observable_marker') and self.observable_marker:
-            self.observable_marker.note = note
-
-    def get_observable_marker(self) -> Optional[ObservableMarker]:
-        """Get the current observable marker."""
-        return getattr(self, 'observable_marker', None)
