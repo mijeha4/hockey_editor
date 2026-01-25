@@ -4,7 +4,7 @@
         "DEFENSE": "D",
         "SHIFT": "S"
     },
-    "recording_mode": "dynamic",
+    "recording_mode": "fixed_length",
     "fixed_duration_sec": 10,
     "pre_roll_sec": 3.0,
     "post_roll_sec": 0.0,

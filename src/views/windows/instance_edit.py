@@ -5,7 +5,7 @@ Provides advanced interface for precise segment editing with visual timeline,
 loop playback, hotkeys, and professional NLE-style controls.
 """
 
-import cv2
+import cv2 # type: ignore
 from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -33,7 +33,7 @@ except ImportError:
                 self.note = note
 
     try:
-        from ...utils.time_utils import frames_to_time
+        from ...utils.time_utils import frames_to_time # type: ignore
     except ImportError:
         # Fallback для frames_to_time
         def frames_to_time(frames: int, fps: float) -> str:
@@ -45,7 +45,7 @@ except ImportError:
             return f"{minutes:02d}:{secs:02d}"
 
     try:
-        from ...utils.custom_events import get_custom_event_manager
+        from ...utils.custom_events import get_custom_event_manager # type: ignore
     except ImportError:
         # Fallback для get_custom_event_manager
         def get_custom_event_manager():
@@ -888,7 +888,7 @@ class InstanceEditWindow(QDialog):
         parent_layout.addLayout(time_layout)
 
         # Timeline progress bar (placeholder for dual-handle slider)
-        self.timeline_bar = QProgressBar()
+        self.timeline_bar = QProgressBar() # type: ignore
         self.timeline_bar.setRange(0, 100)
         self.timeline_bar.setValue(50)
         self.timeline_bar.setTextVisible(False)

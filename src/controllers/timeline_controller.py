@@ -130,12 +130,13 @@ class TimelineController(QObject):
 
     def on_marker_added(self, index: int, marker: Marker):
         """Обработчик добавления маркера."""
-        # Отправить сигнал об изменении маркеров для timeline и segment_list
-        self.markers_changed.emit()
-
         # Обновить timeline с анимацией для нового маркера
         if self.timeline_widget:
             self.timeline_widget.scene.rebuild(animate_new=True)
+
+        # Обновить таблицу сегментов
+        if self.segment_list_widget:
+            self.segment_list_widget.update_segments([marker.to_marker() for marker in self.project.markers])
 
     def on_marker_removed(self, index: int):
         """Обработчик удаления маркера."""
