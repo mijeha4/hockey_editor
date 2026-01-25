@@ -120,22 +120,24 @@ class AppSettings:
     @classmethod
     def from_dict(cls, data: Dict) -> 'AppSettings':
         """Создать из словаря."""
+        # Get default values from a temporary instance to avoid using field descriptors
+        default = cls()
         return cls(
-            hotkeys=data.get('hotkeys', cls.hotkeys),
-            recording_mode=data.get('recording_mode', cls.recording_mode),
-            fixed_duration_sec=data.get('fixed_duration_sec', cls.fixed_duration_sec),
-            pre_roll_sec=data.get('pre_roll_sec', cls.pre_roll_sec),
-            post_roll_sec=data.get('post_roll_sec', cls.post_roll_sec),
-            track_colors=data.get('track_colors', cls.track_colors),
-            window_x=data.get('window_x', cls.window_x),
-            window_y=data.get('window_y', cls.window_y),
-            window_width=data.get('window_width', cls.window_width),
-            window_height=data.get('window_height', cls.window_height),
-            autosave_enabled=data.get('autosave_enabled', cls.autosave_enabled),
-            autosave_interval_minutes=data.get('autosave_interval_minutes', cls.autosave_interval_minutes),
-            recent_projects=data.get('recent_projects', cls.recent_projects),
-            custom_events=data.get('custom_events', cls.custom_events),
-            language=data.get('language', cls.language),
-            playback_speed=data.get('playback_speed', cls.playback_speed),
-            theme=data.get('theme', cls.theme),
+            hotkeys=data.get('hotkeys', default.hotkeys),
+            recording_mode=data.get('recording_mode', default.recording_mode),
+            fixed_duration_sec=data.get('fixed_duration_sec', default.fixed_duration_sec),
+            pre_roll_sec=data.get('pre_roll_sec', default.pre_roll_sec),
+            post_roll_sec=data.get('post_roll_sec', default.post_roll_sec),
+            track_colors=data.get('track_colors', default.track_colors),
+            window_x=data.get('window_x', default.window_x),
+            window_y=data.get('window_y', default.window_y),
+            window_width=data.get('window_width', default.window_width),
+            window_height=data.get('window_height', default.window_height),
+            autosave_enabled=data.get('autosave_enabled', default.autosave_enabled),
+            autosave_interval_minutes=data.get('autosave_interval_minutes', default.autosave_interval_minutes),
+            recent_projects=data.get('recent_projects', default.recent_projects),
+            custom_events=data.get('custom_events', default.custom_events),
+            language=data.get('language', default.language),
+            playback_speed=data.get('playback_speed', default.playback_speed),
+            theme=data.get('theme', default.theme),
         )

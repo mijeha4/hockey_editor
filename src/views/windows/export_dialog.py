@@ -34,11 +34,7 @@ class ExportWorker(QThread):
             self.progress.emit(0)
 
             # Импортировать VideoExporter здесь, чтобы избежать циклических импортов
-            try:
-                from ...services.export.video_exporter import VideoExporter
-            except ImportError:
-                # Fallback для старого расположения
-                from hockey_editor.core.exporter import VideoExporter
+            from services.export.video_exporter import VideoExporter
 
             # Экспортировать сегменты
             for idx, marker in enumerate(self.markers):

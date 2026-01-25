@@ -1,38 +1,14 @@
 from typing import List, Dict, Optional
 from PySide6.QtCore import Signal, QObject
 
-# Используем абсолютные импорты для совместимости с run_test.py
-try:
-    from models.domain.marker import Marker
-    from models.domain.project import Project
-    from models.config.app_settings import AppSettings
-    from services.history import HistoryManager, Command
-    from views.widgets.segment_list import SegmentListWidget
-    # Используем новую профессиональную timeline из hockey_editor/ui/
-    from hockey_editor.ui.timeline_graphics import TimelineWidget
-    from utils.commands.modify_marker_command import ModifyMarkerCommand
-    from utils.commands.delete_marker_command import DeleteMarkerCommand
-except ImportError:
-    # Для случаев, когда запускаем из src/
-    try:
-        from ..models.domain.marker import Marker
-        from ..models.domain.project import Project
-        from ..models.config.app_settings import AppSettings
-        from ..services.history import HistoryManager, Command
-        from ..views.widgets.segment_list import SegmentListWidget
-        # Используем новую профессиональную timeline из hockey_editor/ui/
-        from hockey_editor.ui.timeline_graphics import TimelineWidget
-        from hockey_editor.utils.commands.modify_marker_command import ModifyMarkerCommand
-        from hockey_editor.utils.commands.delete_marker_command import DeleteMarkerCommand
-    except ImportError:
-        # Fallback для тестирования
-        from models.domain.marker import Marker
-        from models.domain.project import Project
-        from models.config.app_settings import AppSettings
-        from services.history import HistoryManager, Command
-        from views.widgets.segment_list import SegmentListWidget
-        from hockey_editor.ui.timeline_graphics import TimelineWidget
-        from hockey_editor.utils.commands.modify_marker_command import ModifyMarkerCommand
+# Используем абсолютные импорты для работы из корня проекта
+from models.domain.marker import Marker
+from models.domain.project import Project
+from models.config.app_settings import AppSettings
+from services.history import HistoryManager
+from views.widgets.segment_list import SegmentListWidget
+from views.widgets.timeline_scene import TimelineWidget  # New timeline widget
+from services.history.command_interface import Command
 
 
 class AddMarkerCommand(Command):
@@ -132,7 +108,7 @@ class TimelineController(QObject):
         """Обработчик добавления маркера."""
         # Обновить timeline с анимацией для нового маркера
         if self.timeline_widget:
-            self.timeline_widget.scene.rebuild(animate_new=True)
+            self.timeline_widget.rebuild(animate_new=True)
 
         # Обновить таблицу сегментов
         if self.segment_list_widget:
@@ -267,6 +243,30 @@ class TimelineController(QObject):
         print(f"Timeline seek to frame: {frame}")
         self.seek_frame(frame)
 
+    def _on_event_selected(self, marker: Marker):
+        """Обработка выбора события в timeline."""
+        # Find marker index and highlight in segment list
+        try:
+            marker_idx = self.project.markers.index(marker)
+            if self.segment_list_widget and hasattr(self.segment_list_widget, 'table'):
+                # Find row in table by marker_idx
+                for row in range(self.segment_list_widget.table.rowCount()):
+                    item = self.segment_list_widget.table.item(row, 0)
+                    if item and item.data(Qt.ItemDataRole.UserRole) == marker_idx:
+                        self.segment_list_widget.table.selectRow(row)
+                        break
+        except ValueError:
+            pass  # Marker not found
+
+    def _on_event_double_clicked(self, marker: Marker):
+        """Обработка двойного клика по событию для редактирования."""
+        # Find marker index
+        try:
+            marker_idx = self.project.markers.index(marker)
+            self.edit_marker_requested(marker_idx)
+        except ValueError:
+            pass  # Marker not found
+
     @property
     def markers(self):
         """Свойство для доступа к маркерам проекта."""
@@ -293,6 +293,10 @@ class TimelineController(QObject):
         """
         self.current_frame = max(0, min(frame_idx, self.total_frames - 1))
 
+        # Update timeline current time line
+        if self.timeline_widget:
+            self.timeline_widget.set_current_frame(self.current_frame, self.fps)
+
         # Синхронизировать с playback controller только если флаг установлен
         if update_playback and self.playback_controller:
             self.playback_controller.seek_to_frame(self.current_frame)
@@ -314,7 +318,7 @@ class TimelineController(QObject):
 
         # Обновить таймлайн - полная перерисовка для совместимости (без анимации)
         if self.timeline_widget:
-            self.timeline_widget.scene.rebuild(animate_new=False)
+            self.timeline_widget.rebuild(animate_new=False)
 
         # Обновить таблицу сегментов - полная перерисовка для совместимости
         if self.segment_list_widget:
@@ -330,20 +334,24 @@ class TimelineController(QObject):
         """Подключить сигналы timeline widget."""
         if self.timeline_widget is None:
             return
-        
+
         # Проверяем, какой тип timeline widget используется
         # Новый TimelineWidget из hockey_editor.ui.timeline_graphics имеет scene.seek_requested
         if hasattr(self.timeline_widget, 'scene') and hasattr(self.timeline_widget.scene, 'seek_requested'):
             self.timeline_widget.scene.seek_requested.connect(self._on_timeline_seek)
+            if hasattr(self.timeline_widget.scene, 'event_double_clicked'):
+                self.timeline_widget.scene.event_double_clicked.connect(self._on_event_double_clicked)
+            if hasattr(self.timeline_widget.scene, 'event_selected'):
+                self.timeline_widget.scene.event_selected.connect(self._on_event_selected)
         # Старый TimelineWidget из src/views/widgets/timeline.py имеет seek_requested напрямую
         elif hasattr(self.timeline_widget, 'seek_requested'):
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
 
     def _on_markers_changed_internal(self):
         """Внутренний обработчик изменения маркеров для обновления UI."""
-        if self.timeline_widget:
-            # Обновить timeline с текущими маркерами (без анимации)
-            self.timeline_widget.scene.rebuild(animate_new=False)
+        if self.timeline_widget and hasattr(self.timeline_widget, 'set_markers'):
+            # Update markers in new timeline widget
+            self.timeline_widget.set_markers(self.project.markers)
 
         if self.segment_list_widget:
             # Обновить таблицу сегментов
@@ -359,10 +367,39 @@ class TimelineController(QObject):
         """Инициализировать таймлайн с общим количеством кадров."""
         self.set_total_frames(total_frames)
         if self.timeline_widget is not None:
-            self.timeline_widget.set_total_frames(total_frames)
-            self.timeline_widget.set_fps(self.fps)
-            # Обновить сцену без анимации при инициализации
-            self.timeline_widget.scene.rebuild(animate_new=False)
+            # Get track names from event manager
+            track_names = self._get_track_names()
+            self.timeline_widget.init_tracks(track_names, total_frames, self.fps)
+            # Set initial markers
+            self.timeline_widget.set_markers(self.project.markers)
+
+    def _get_track_names(self) -> List[str]:
+        """Get list of track names (event types) for timeline."""
+        # Default hockey event types
+        default_tracks = [
+            "Заблокировано", "Блокшот в обороне", "Вброс", "Вбрасывание: Пропущено",
+            "Вбрасывание: Проиграно", "Гол", "Бросок мимо", "Удаление",
+            "Бросок в створ", "Перехват", "Потеря", "Вход в зону", "Выход из зоны"
+        ]
+
+        # Try to get from event manager
+        try:
+            from services.events.custom_event_manager import get_custom_event_manager
+            event_manager = get_custom_event_manager()
+            if event_manager:
+                custom_events = event_manager.get_all_events()
+                if custom_events:
+                    # Use custom events + defaults for any missing
+                    custom_names = [event.name for event in custom_events]
+                    # Add defaults that aren't in custom
+                    for default in default_tracks:
+                        if default not in custom_names:
+                            custom_names.append(default)
+                    return custom_names
+        except ImportError:
+            pass
+
+        return default_tracks
 
     def _on_events_changed(self):
         """Обработка изменения списка событий."""

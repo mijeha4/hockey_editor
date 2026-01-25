@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, Signal
 
 # Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 from models.domain.marker import Marker
-from hockey_editor.utils.custom_events import get_custom_event_manager
+from services.events.custom_event_manager import get_custom_event_manager
 
 
 class FilterController(QObject):

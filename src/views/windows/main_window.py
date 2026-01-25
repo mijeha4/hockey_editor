@@ -17,11 +17,11 @@ from PySide6.QtCore import Qt, Signal, QTimer
 # Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 from views.widgets.player_controls import PlayerControls
 from views.widgets.segment_list import SegmentListWidget
-# Используем новую профессиональную timeline
-from hockey_editor.ui.timeline_graphics import TimelineWidget
+# Use new multi-track timeline
+from views.widgets.timeline_scene import TimelineWidget
 from views.styles import get_application_stylesheet
 # Импортируем EventShortcutListWidget
-from hockey_editor.ui.event_shortcut_list_widget import EventShortcutListWidget
+from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
 
 
 class MainWindow(QMainWindow):
@@ -215,7 +215,7 @@ class MainWindow(QMainWindow):
 
         # Shortcuts panel
         try:
-            from hockey_editor.ui.event_shortcut_list_widget import EventShortcutListWidget
+            from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
             self.shortcuts_widget = EventShortcutListWidget()
             parent_layout.addWidget(self.shortcuts_widget)
         except ImportError:
@@ -313,8 +313,8 @@ class MainWindow(QMainWindow):
         Args:
             controller: TimelineController instance
         """
-        # Создать timeline widget с controller
-        self.timeline_widget = TimelineWidget(controller)
+        # Создать timeline widget
+        self.timeline_widget = TimelineWidget(self)
 
         # Сохранить ссылку на контроллер
         self._timeline_controller = controller

@@ -9,9 +9,9 @@ try:
     from views.windows.main_window import MainWindow
 except ImportError:
     # Для случаев, когда запускаем из src/
-    from ..services.video_engine import VideoService
-    from ..views.widgets.player_controls import PlayerControls
-    from ..views.windows.main_window import MainWindow
+    from services.video_engine import VideoService
+    from views.widgets.player_controls import PlayerControls
+    from views.windows.main_window import MainWindow
 
 
 class PlaybackController(QObject):

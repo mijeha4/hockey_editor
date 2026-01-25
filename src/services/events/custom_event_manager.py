@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtGui import QColor
 from .custom_event_type import CustomEventType
-from hockey_editor.utils.settings_manager import get_settings_manager
+from services.serialization.settings_manager import get_settings_manager
 
 
 class CustomEventManager(QObject):

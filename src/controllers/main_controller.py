@@ -16,7 +16,7 @@ from controllers.instance_edit_controller import InstanceEditController
 from controllers.settings_controller import SettingsController
 from controllers.custom_event_controller import CustomEventController
 from controllers.application_controller import get_application_controller
-from hockey_editor.utils.autosave import AutosaveManager
+# from hockey_editor.utils.autosave import AutosaveManager # Закомментировано, так как файл отсутствует
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QPixmap
 
@@ -98,8 +98,9 @@ class MainController(QObject):
         self.timeline_controller._main_controller = self
 
         # Создать менеджер автосохранения
-        self.autosave_manager = AutosaveManager(self)
-        self.autosave_manager.autosave_completed.connect(self._on_autosave_completed)
+        # self.autosave_manager = AutosaveManager(self)
+        # self.autosave_manager.autosave_completed.connect(self._on_autosave_completed)
+        self.autosave_manager = None
 
         # Создать export controller (lazy initialization)
         self.export_controller = None
@@ -127,7 +128,8 @@ class MainController(QObject):
         self._setup_connections()
 
         # Запустить автосохранение
-        self.autosave_manager.start()
+        if self.autosave_manager:
+            self.autosave_manager.start()
 
     def _setup_connections(self):
         """Настроить связи между компонентами."""
@@ -495,7 +497,8 @@ class MainController(QObject):
                     return
 
         # ШАГ 2: Остановить автосохранение
-        self.autosave_manager.stop()
+        if self.autosave_manager:
+            self.autosave_manager.stop()
 
         # ШАГ 3: Cleanup controllers
         if self._instance_edit_controller:

@@ -6,9 +6,21 @@ Settings Manager - сервис для загрузки и сохранения 
 
 import json
 import os
-from typing import Optional
+from typing import Dict, List, Optional
 
 from models.config.app_settings import AppSettings
+
+
+# Global instance
+_settings_manager: Optional['SettingsManager'] = None
+
+
+def get_settings_manager() -> 'SettingsManager':
+    """Get or create global SettingsManager instance."""
+    global _settings_manager
+    if _settings_manager is None:
+        _settings_manager = SettingsManager()
+    return _settings_manager
 
 
 class SettingsManager:
@@ -67,3 +79,16 @@ class SettingsManager:
         except Exception as e:
             print(f"Error importing settings: {e}")
             return None
+
+    def load_custom_events(self) -> List[Dict]:
+        """Load custom events from settings."""
+        settings = self.load_settings()
+        if settings:
+            return settings.custom_events
+        return []
+
+    def save_custom_events(self, events_data: List[Dict]) -> None:
+        """Save custom events to settings."""
+        settings = self.load_settings() or AppSettings()
+        settings.custom_events = events_data
+        self.save_settings(settings)

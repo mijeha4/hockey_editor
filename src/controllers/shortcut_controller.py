@@ -10,13 +10,8 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 
 # Импорты для работы из корня проекта (main.py добавляет src в sys.path)
-try:
-    from hockey_editor.utils.shortcut_manager import ShortcutManager
-    from hockey_editor.utils.custom_events import get_custom_event_manager
-except ImportError:
-    # Для случаев, когда запускаем из src/
-    from ...hockey_editor.utils.shortcut_manager import ShortcutManager
-    from ...hockey_editor.utils.custom_events import get_custom_event_manager
+from utils.shortcut_manager import ShortcutManager
+from services.events.custom_event_manager import get_custom_event_manager
 
 
 class ShortcutController(QObject):
