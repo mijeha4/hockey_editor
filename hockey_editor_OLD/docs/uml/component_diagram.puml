@@ -1,0 +1,121 @@
+@startuml
+!theme plain
+title Системная архитектура Hockey Editor — Диаграмма компонентов
+
+' ======================= ОСНОВНОЕ ПРИЛОЖЕНИЕ =======================
+package "hockey_editor" as HE #F5F5F5 {
+
+    package "Ядро системы" as Core #FFE5E5 {
+        component "VideoController" as VC
+        component "VideoProcessor" as VP
+        component "EventCreationController" as ECC
+        component "ProjectManager" as PM
+        component "Exporter" as EXP
+    }
+
+    package "Пользовательский интерфейс" as UI #E3F2FD {
+        component "MainWindow" as MW
+        component "TimelineGraphicsView" as TGV
+        component "PreviewWindow" as PW
+        component "EditSegmentDialog" as ESD
+        component "ExportDialog" as ED
+        component "SettingsDialog" as SD
+        component "VideoWindow" as VW
+    }
+
+    package "Модели данных" as Models #FFF8E5 {
+        component "Marker" as M
+        component "EventType (enum)" as ET
+    }
+
+    package "Вспомогательные утилиты" as Utils #E8F5E8 {
+        component "SettingsManager" as SM
+        component "ShortcutManager" as SCM
+        component "UndoRedoManager" as URM
+        component "AutosaveManager" as AM
+        component "TimeUtils" as TU
+    }
+}
+
+' ======================= ВНЕШНИЕ БИБЛИОТЕКИ =======================
+component "OpenCV" as CV #FFCDD2
+component "libmpv" as MPV #F8BBD0
+component "FFmpeg" as FF #C8E6C9
+component "PySide6 / Qt" as PS6 #BBDEFB
+
+' ======================= СИНХРОННЫЕ ЗАВИСИМОСТИ =======================
+VC --> VP : чтение кадров и метаданных
+VC --> ECC : управление записью событий
+VC --> PM : сохранение / загрузка проекта
+VC --> EXP : запуск экспорта
+VC --> URM : команды undo / redo
+VC --> AM : автосохранение
+
+MW --> VC : команды и горячие клавиши
+MW --> TGV : обновление таймлайна
+MW --> PW : обновление списка сегментов
+MW --> ESD : редактирование маркера
+MW --> ED : диалог экспорта
+MW --> SD : настройки приложения
+
+TGV --> M : отображает на таймлайне
+PW --> M : фильтрует и проигрывает
+ESD --> M : редактирует данные
+PM --> M : сериализует ↔ десериализует
+ECC --> M : создаёт новые маркеры
+EXP --> M : обрабатывает при экспорте
+
+SCM --> SM : сохраняет горячие клавиши
+AM --> PM : использует для снимков проекта
+
+VP --> CV : обработка видео
+VP --> MPV : воспроизведение в VideoWindow
+VW --> MPV : отображение видео
+EXP --> FF : кодирование выходных файлов
+MW --> PS6 : весь GUI на Qt
+
+' ======================= СИГНАЛЫ Qt (асинхронная связь) =======================
+VC ..> MW : markers_changed
+VC ..> MW : recording_status_changed
+VC ..> TGV : timeline_update_requested
+VC ..> PW : segments_list_changed
+
+ECC ..> VC : recording_started
+ECC ..> VC : recording_finished
+ECC ..> MW : state_changed
+
+AM ..> MW : autosave_completed
+AM ..> VC : autosave_triggered
+
+' ======================= ПОЯСНЕНИЯ =======================
+note top of HE #FFEBEE
+  <size:15><b>Hockey Editor</b></size>
+  Система покадровой разметки и анализа хоккейных матчей
+  • Чёткое разделение ответственности
+  • Модульная архитектура
+  • Асинхронная связь через сигналы Qt
+end note
+
+note right of VC #FFCDD2
+  <b>VideoController — центральный хаб</b>
+  • Координирует все модули
+  • Управляет состоянием приложения
+  • Рассылает уведомления об изменениях
+end note
+
+note left of MW #BBDEFB
+  <b>MainWindow — главный контейнер UI</b>
+  • Собирает все виджеты
+  • Обрабатывает ввод пользователя
+  • Реагирует на сигналы ядра
+end note
+
+legend bottom right
+  | Тип связи                | Значение                              |
+  | ------------------------ | ------------------------------------- |
+  | ──›                      | Синхронный вызов / зависимость        |
+  | - - - -›                 | Сигнал Qt (асинхронное событие)       |
+  | Цветные прямоугольники   | Внешние библиотеки                    |
+end legend
+
+@enduml

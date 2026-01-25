@@ -1,0 +1,127 @@
+@startuml
+!theme plain
+title Архитектура ядра Hockey Editor - Диаграмма классов
+
+' 1. Задаем глобальное направление (решает проблему расположения)
+top to bottom direction
+
+' 2. Настройки линий
+skinparam linetype polyline
+skinparam nodesep 60
+skinparam ranksep 80
+skinparam classAttributeIconSize 0
+
+' ======================= 1. UI =======================
+package "Компоненты интерфейса (UI)" as UIPackage #E3F2FD {
+    class MainWindow {
+        +обработка_нажатия_клавиши(): void
+        +при_начале_записи(): void
+    }
+    class TimelineGraphicsView {
+        +обновить_таймлайн(): void
+        +добавить_сегмент(): void
+    }
+    class PreviewWindow {
+        +обновить_сегменты(): void
+        +воспроизвести_сегмент(): void
+    }
+    class EditSegmentDialog {
+        +установить_маркер(): void
+    }
+    class ExportDialog {
+        +начать_экспорт(): void
+    }
+}
+
+' ======================= 2. CORE =======================
+package "Основные компоненты (Core)" as CorePackage #FFE5E5 {
+    class VideoController {
+        +загрузить_видео(): bool
+        +воспроизвести(): void
+        +пауза(): void
+        +сохранить_проект(): void
+    }
+    class VideoProcessor {
+        +получить_кадр(): np.ndarray
+    }
+    class EventCreationController {
+        +при_нажатии_горячей_клавиши(): bool
+    }
+    class ProjectManager {
+        +сохранить_проект(): void
+    }
+    class Exporter {
+        +экспортировать_сегменты(): void
+    }
+}
+
+' ======================= 3. UTILS =======================
+package "Вспомогательные утилиты" as UtilsPackage #E8F5E8 {
+    class SettingsManager {
+        +сохранить_горячие_клавиши(): void
+    }
+    class UndoRedoManager {
+        +добавить(): void
+        +отменить(): void
+    }
+    class AutosaveManager {
+        +запустить_автосохранение(): void
+    }
+    class ShortcutManager {
+        +зарегистрировать_сочетание(): void
+    }
+}
+
+' ======================= 4. MODELS =======================
+package "Модели данных" as ModelsPackage #FFF8E5 {
+    class Marker {
+        +кадр_начала: int
+        +кадр_окончания: int
+        +тип: EventType
+        +примечание: str
+    }
+    enum EventType {
+        АТАКА
+        ЗАЩИТА
+        СМЕНА
+    }
+}
+
+' ======================= ВЫРАВНИВАНИЕ =======================
+' Исправленный синтаксис: используем простое [hidden]
+' Благодаря "top to bottom direction" они и так встанут друг под другом
+UIPackage -[hidden]-> CorePackage
+CorePackage -[hidden]-> ModelsPackage
+CorePackage -[hidden]-> UtilsPackage
+
+' ======================= СВЯЗИ =======================
+
+' UI -> Core
+MainWindow --> VideoController : управляет
+MainWindow --> TimelineGraphicsView : содержит
+MainWindow --> PreviewWindow : содержит
+MainWindow --> EditSegmentDialog : вызывает
+MainWindow --> ExportDialog : вызывает
+
+' Core Internal
+VideoController --> VideoProcessor : использует
+VideoController --> EventCreationController : управляет
+VideoController --> ProjectManager : сохранение
+VideoController --> Exporter : экспорт
+
+' Core -> Utils
+VideoController --> UndoRedoManager : история
+VideoController --> AutosaveManager : автосейв
+VideoController --> SettingsManager : настройки
+
+' Models Usage
+TimelineGraphicsView ..> Marker
+PreviewWindow ..> Marker
+ProjectManager ..> Marker
+EventCreationController ..> Marker
+
+' Utils Usage
+AutosaveManager ..> ProjectManager
+ShortcutManager ..> SettingsManager
+
+@enduml

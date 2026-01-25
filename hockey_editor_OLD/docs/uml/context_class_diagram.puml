@@ -1,0 +1,166 @@
+@startuml
+!theme plain
+title Диаграмма классов: Контекст Hockey Editor Pro
+
+' =================== ГРУППА UI (ИНТЕРФЕЙС) ===================
+package "Interface (Интерфейс)" {
+    class MainWindow {
+        +show()
+        +close()
+    }
+    note right of MainWindow
+      Точка входа в приложение.
+      Обрабатывает нажатия клавиш
+      и передает их контроллеру.
+    end note
+}
+
+' =================== ГРУППА CORE (ЯДРО) ===================
+package "Core (Ядро системы)" {
+    class VideoController {
+        +load_video(path: str): bool
+        +play(): void
+        +pause(): void
+        +on_hotkey_pressed(key: str): void
+        +save_project(path: str): bool
+        +load_project(path: str): bool
+    }
+
+    class VideoProcessor {
+        +load(path: str): bool
+        +get_frame(frame: int): ndarray
+        +get_fps(): float
+        +get_total_frames(): int
+    }
+}
+
+' =================== ГРУППА DATA (ДАННЫЕ) ===================
+package "Data (Данные и Проект)" {
+    class ProjectManager {
+        +save_project(project: Project, path: str): bool
+        +load_project(path: str): Project
+        +get_recent_projects(): List[str]
+    }
+
+    class CustomEventManager {
+        +get_event_by_hotkey(key: str): CustomEvent
+        +add_event(event: CustomEvent): void
+    }
+
+    class Marker {
+        +start_frame: int
+        +end_frame: int
+        +event_name: str
+        +note: str
+    }
+}
+
+' =================== ГРУППА UTILS (УТИЛИТЫ) ===================
+package "Utils (Инструменты)" {
+    class SettingsManager {
+        +save_hotkeys(hotkeys: Dict): void
+        +load_hotkeys(): Dict
+        +save_recording_mode(mode: str): void
+    }
+
+    class UndoRedoManager {
+        +push_command(command: UndoCommand): void
+        +undo(): void
+        +redo(): void
+    }
+}
+
+' =================== СВЯЗИ (RELATIONSHIPS) ===================
+
+MainWindow --> VideoController : Делегирует команды\nпользователя
+
+VideoController --> VideoProcessor : Управляет\nвоспроизведением
+VideoController --> ProjectManager : Сохраняет/Загружает\nпроект
+VideoController --> SettingsManager : Читает настройки\nи горячие клавиши
+VideoController --> UndoRedoManager : Записывает историю\nдействий
+VideoController --> CustomEventManager : Определяет тип события\nпо клавише
+
+ProjectManager ..> Marker : Сериализует список\nмаркеров в файл
+
+note bottom of VideoController
+  <b>Центральный контроллер</b>
+  Координирует работу всех
+  подсистем (Mediator pattern)
+end note
+
+@enduml
+
+
+ДРУГАЯ Диаграмма
+@startuml
+!theme plain
+
+' === Настройки стиля ===
+hide circle
+hide empty members
+skinparam shadowing false
+
+' === Настройки линий и отступов ===
+skinparam linetype ortho
+skinparam nodesep 130
+skinparam ranksep 80
+
+' === ГЛАВНЫЙ СЕКРЕТ ОДИНАКОВОГО РАЗМЕРА ===
+' 1. Фиксируем минимальную ширину блока
+skinparam minClassWidth 190
+
+' 2. Выравниваем текст по центру
+skinparam style strictuml
+
+' =================== Определение классов ===================
+' Чтобы высота была одинаковой, стараемся использовать \n для переноса,
+' создавая 2 строки текста в каждом блоке.
+
+class "Окно\nПриложения" as MainWindow
+class "Главный\nКонтроллер" as VideoController
+class "Обработчик\nВидео" as VideoProcessor
+
+together {
+  class "Менеджер\nСобытий" as CustomEventManager
+  class "Менеджер\nПроекта" as ProjectManager
+}
+
+class "Метка\nВремени" as Marker
+
+together {
+  class "Менеджер\nОтмены/Повтора" as UndoRedoManager
+  class "Менеджер\nНастроек" as SettingsManager
+}
+
+' =================== Выстраивание СЕТКИ (Layout) ===================
+
+' Центрирование
+MainWindow -[hidden]down- VideoController
+VideoController -[hidden]down- VideoProcessor
+
+' Выравнивание левой группы
+CustomEventManager -[hidden]down- ProjectManager
+VideoController -[hidden]left- ProjectManager
+
+' Выравнивание правой группы
+UndoRedoManager -[hidden]down- SettingsManager
+VideoController -[hidden]right- SettingsManager
+
+' =================== Логические СВЯЗИ ===================
+
+' Основной поток
+MainWindow --down--> VideoController : Делегирует
+VideoController --down--> VideoProcessor : Управляет
+
+' Левая сторона
+VideoController -left-> CustomEventManager : Определяет
+VideoController -left-> ProjectManager : Сохраняет/\nЗагружает
+
+' Правая сторона
+VideoController -right-> UndoRedoManager : Использует
+VideoController -right-> SettingsManager : Читает/\nИзменяет
+
+' Тупиковая ветвь слева (чтобы не пересекать линии)
+ProjectManager -left-> Marker : Содержит
+
+@enduml

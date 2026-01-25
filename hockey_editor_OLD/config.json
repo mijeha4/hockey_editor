@@ -1,0 +1,6 @@
+{
+  "recording_mode": "fixed_length",
+  "fixed_duration_sec": 10,
+  "pre_roll_sec": 0.0,
+  "post_roll_sec": 0.0
+}

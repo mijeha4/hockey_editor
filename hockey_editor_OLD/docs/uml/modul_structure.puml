@@ -1,0 +1,91 @@
+@startuml
+!theme plain
+
+' Ортогональные линии (прямые углы) как на примере
+skinparam linetype ortho
+' Стиль компонентов (прямоугольники с иконкой компонента)
+skinparam componentStyle uml2
+
+' Настройки отступов для широкой диаграммы
+skinparam nodesep 60
+skinparam ranksep 50
+
+' === 1. Входная точка ===
+component "main.py" as Main
+
+' === 2. UI Слой ===
+component "main_window.py" as MainWindow
+component "timeline_view.py" as Timeline
+component "video_widget.py" as VideoWidget
+
+' Диалоги (были в папке, теперь просто узлы)
+component "export_dialog.py" as ExportDlg
+component "settings_dialog.py" as SettingsDlg
+component "edit_segment_dialog.py" as EditDlg
+
+' === 3. Core (Контроллеры и логика) ===
+component "video_controller.py" as VideoCtrl
+component "video_processor.py" as VideoProc
+component "video_reader_thread.py" as VideoThread
+component "event_creation_controller.py" as EventCtrl
+component "project_manager.py" as ProjMgr
+component "exporter.py" as Exporter
+
+' === 4. Утилиты и Сервисы ===
+component "settings_manager.py" as Settings
+component "undo_redo.py" as UndoRedo
+component "custom_events.py" as CustomEvents
+component "autosave_manager.py" as AutoSave
+component "time_utils.py" as TimeUtils
+
+' === 5. Модели (Сущности) ===
+component "project.py" as Project
+component "marker.py" as Marker
+component "event_type.py" as EventType
+
+
+' ================= СВЯЗИ (Без подписей) =================
+
+' От Main к главному окну
+Main -- MainWindow
+
+' От MainWindow к основным компонентам UI и Главному контроллеру
+MainWindow -- VideoCtrl
+MainWindow -- Timeline
+MainWindow -- VideoWidget
+MainWindow -- Settings
+MainWindow -- CustomEvents
+MainWindow -- AutoSave
+
+' От MainWindow к диалогам
+MainWindow -- ExportDlg
+MainWindow -- SettingsDlg
+MainWindow -- EditDlg
+
+' Внутренности VideoController (Центральный хаб)
+VideoCtrl -- VideoProc
+VideoCtrl -- ProjMgr
+VideoCtrl -- EventCtrl
+VideoCtrl -- Exporter
+VideoCtrl -- UndoRedo
+
+' Детализация VideoProcessor
+VideoProc -- VideoThread
+
+' Детализация ProjectManager
+ProjMgr -- Project
+ProjMgr -- Marker
+
+' Детализация моделей
+Marker -- EventType
+Project -- Marker
+
+' Связи утилит (низкоуровневые)
+Exporter -- TimeUtils
+SettingsDlg -- Settings
+
+' Скрытые связи для выравнивания (чтобы модельки были внизу)
+VideoThread -[hidden]-> TimeUtils
+EventType -[hidden]-> TimeUtils
+
+@enduml

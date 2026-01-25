@@ -1,0 +1,63 @@
+@startuml Event Creation State Machine
+!theme plain
+title Диаграмма состояний: Создание событий (EventCreationController)
+
+' Начало диаграммы
+[*] --> IDLE
+
+' ================== ОПРЕДЕЛЕНИЕ СОСТОЯНИЙ ==================
+state IDLE as "IDLE (Ожидание)\n• Нет активной записи\n• Ожидание нажатия горячей клавиши"
+state RECORDING as "RECORDING (Запись)\n• Тип события зафиксирован\n• Начальный кадр сохранён\n• Применён Pre-roll (отступ)\n• Идет процесс записи"
+state RECORDED as "RECORDED (Записано)\n• Маркер создан\n• Видео перемотано на начало\n• Временное состояние"
+
+' ================== ПЕРЕХОДЫ ==================
+IDLE --> RECORDING : on_hotkey_pressed(event_type)\n[Первое нажатие A/D/S]
+note right
+  **_start_recording()**
+  • Установить current_event_type
+  • Записать start_frame
+  • Рассчитать pre-roll
+  • Сигнал: recording_started
+end note
+
+RECORDING --> RECORDING : update_recording_frame()\n[Видео воспроизводится]
+note right
+  Сигнал **recording_updated**
+  отправляется непрерывно
+  (для UI индикации)
+end note
+
+RECORDING --> RECORDED : on_hotkey_pressed(event_type)\n[Повторное нажатие той же клавиши]
+note right
+  **_finish_recording()**
+  • Рассчитать конечный кадр
+  • Применить post-roll
+  • Создать объект Marker
+  • Перемотать видео на начало
+  • Сигнал: recording_finished
+end note
+
+RECORDING --> IDLE : cancel_recording()\n[Нажат ESC или ошибка]
+note right
+  **_reset_state()**
+  вызывается немедленно
+  для сброса
+end note
+
+RECORDED --> IDLE : Таймер (500мс)\n[Автоматический переход]
+note right
+  **_reset_state()**
+  вызывается через
+  QTimer.singleShot
+end note
+
+' ================== ЗАМЕТКИ ==================
+note as N1
+  **Логика переходов:**
+  • **IDLE → RECORDING**: Пользователь начинает разметку события
+  • **RECORDING → RECORDED**: Пользователь завершает разметку (фиксация конца)
+  • **RECORDED → IDLE**: Автоматическая очистка состояния и подготовка к следующему
+  • **RECORDING → IDLE**: Принудительная отмена записи
+end note
+
+@enduml

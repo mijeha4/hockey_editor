@@ -18,3 +18,10 @@ class ShortcutManager:
     def get_shortcut(self, name: str) -> Optional[QShortcut]:
         """Get a shortcut by name."""
         return self.shortcuts.get(name)
+
+    def unregister_shortcut(self, name: str):
+        """Unregister a shortcut by name."""
+        if name in self.shortcuts:
+            shortcut = self.shortcuts[name]
+            shortcut.setParent(None)  # Remove from parent
+            del self.shortcuts[name]

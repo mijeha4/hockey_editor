@@ -1,0 +1,51 @@
+@startuml Hockey Editor Use Case Diagram
+!theme plain
+left to right direction
+title Диаграмма вариантов использования Hockey Editor
+
+actor "Хоккейный Тренер / Аналитик" as Coach
+
+rectangle "Hockey Editor" {
+    usecase "Загрузка видео" as UC1
+    usecase "Создание события" as UC2 
+    usecase "Редактирование событий" as UC6
+    usecase "Предпросмотр событий" as UC7
+    usecase "Экспорт списка событий" as UC8
+    usecase "Сохранить проект" as UC9
+    usecase "Загрузить проект" as UC10
+    usecase "Конфигурация настроек" as UC11
+    usecase "Управление горячими клавишами" as UC12
+    usecase "Отмена действия" as UC13
+    usecase "Экспорт видео" as UC14
+}
+
+' ================== ПРЯМЫЕ ВЗАИМОДЕЙСТВИЯ ==================
+' Удалены комментарии к стрелкам
+Coach --> UC1
+Coach --> UC2
+Coach --> UC6
+Coach --> UC7
+Coach --> UC8
+Coach --> UC9
+Coach --> UC10
+Coach --> UC11
+Coach --> UC13
+Coach --> UC14
+
+' ================== ОТНОШЕНИЯ INCLUDE (Обязательные) ==================
+' Разметка требует загруженного видео
+UC2 ..> UC1 : <<include>>
+
+UC6 ..> UC2 : <<include>>
+UC7 ..> UC2 : <<include>>
+UC14 ..> UC2 : <<include>>
+UC8 ..> UC2 : <<include>>
+
+UC10 ..> UC1 : <<include>>
+
+' ================== ОТНОШЕНИЯ EXTEND (Опциональные) ==================
+' Настройка горячих клавиш расширяет общие настройки
+UC11 <.. UC12 : <<extend>>
+
+
+@enduml
