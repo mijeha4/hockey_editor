@@ -149,6 +149,7 @@ class MainController(QObject):
         # Подключить сигнал клавиш от main_window и shortcut_controller
         self.main_window.key_pressed.connect(self._on_key_pressed)
         self.shortcut_controller.shortcut_pressed.connect(self._on_shortcut_pressed)
+        print("DEBUG: Connected shortcut signals")
 
         # Подключить фильтры
         self.filter_controller.filters_changed.connect(self._on_filters_changed)
@@ -161,6 +162,7 @@ class MainController(QObject):
 
     def _on_shortcut_pressed(self, key: str):
         """Обработка нажатия горячей клавиши из shortcut controller."""
+        print(f"DEBUG: MainController received shortcut - key: {key}")
         # Обработка специальных клавиш
         if key == 'PLAY_PAUSE':
             self.playback_controller.toggle_play_pause()
@@ -180,6 +182,7 @@ class MainController(QObject):
             # Обработка событий (A, D, S, etc.)
             current_frame = self.playback_controller.current_frame
             fps = self.video_service.get_fps() if self.video_service.cap else 30.0
+            print(f"DEBUG: Handling hotkey - key: {key}, frame: {current_frame}, fps: {fps}")
             self.timeline_controller.handle_hotkey(key, current_frame, fps)
 
     def _on_event_btn_clicked(self, event_name: str):
@@ -275,6 +278,7 @@ class MainController(QObject):
 
     def _on_key_pressed(self, key: str):
         """Обработка нажатия горячей клавиши."""
+        print(f"DEBUG: MainController received key press - key: {key}")
         # Получить текущий кадр из playback controller
         current_frame = self.playback_controller.current_frame
 
@@ -282,6 +286,7 @@ class MainController(QObject):
         fps = self.video_service.get_fps() if self.video_service.cap else 30.0
 
         # Передать в timeline controller
+        print(f"DEBUG: Handling hotkey from key press - key: {key}, frame: {current_frame}, fps: {fps}")
         self.timeline_controller.handle_hotkey(key, current_frame, fps)
 
     def _on_open_video(self):

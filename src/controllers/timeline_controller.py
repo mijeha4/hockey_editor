@@ -346,6 +346,9 @@ class TimelineController(QObject):
         # Старый TimelineWidget из src/views/widgets/timeline.py имеет seek_requested напрямую
         elif hasattr(self.timeline_widget, 'seek_requested'):
             self.timeline_widget.seek_requested.connect(self._on_timeline_seek)
+            # Connect segment edit signal for double-click functionality
+            if hasattr(self.timeline_widget, 'segment_edit_requested'):
+                self.timeline_widget.segment_edit_requested.connect(self._on_event_double_clicked)
 
     def _on_markers_changed_internal(self):
         """Внутренний обработчик изменения маркеров для обновления UI."""

@@ -453,19 +453,23 @@ class InstanceEditWindow(QDialog):
         # Тип события (Code)
         data_layout.addWidget(QLabel("Code:"))
         self.combo_code = QComboBox()
-        # Заполнить данными из event_manager
-        event_manager = get_custom_event_manager()
-        events = event_manager.get_all_events()
-        for event in events:
-            display_name = event.get_localized_name()
-            self.combo_code.addItem(display_name, event.name)
-        # Найти текущий event_name
-        current_index = 0
-        for i, event in enumerate(events):
-            if event.name == self.marker.event_name:
-                current_index = i
-                break
-        self.combo_code.setCurrentIndex(current_index)
+        # Заполнить данными из event_manager через controller
+        event_manager = self.controller.event_manager if hasattr(self.controller, 'event_manager') else get_custom_event_manager()
+        if event_manager:
+            events = event_manager.get_all_events()
+            for event in events:
+                display_name = event.get_localized_name()
+                self.combo_code.addItem(display_name, event.name)
+            # Найти текущий event_name
+            current_index = 0
+            for i, event in enumerate(events):
+                if event.name == self.marker.event_name:
+                    current_index = i
+                    break
+            self.combo_code.setCurrentIndex(current_index)
+        else:
+            # Fallback: add the current event name if no event manager available
+            self.combo_code.addItem(self.marker.event_name, self.marker.event_name)
         self.combo_code.currentTextChanged.connect(self._on_code_changed)
         data_layout.addWidget(self.combo_code)
 
@@ -784,9 +788,11 @@ class InstanceEditWindow(QDialog):
         if current_data:
             self.marker.event_name = current_data
             # Обновить заголовок
-            event_manager = get_custom_event_manager()
-            event = event_manager.get_event(current_data)
-            event_display_name = event.get_localized_name() if event else current_data
+            event_manager = self.controller.event_manager if hasattr(self.controller, 'event_manager') else get_custom_event_manager()
+            event_display_name = current_data
+            if event_manager:
+                event = event_manager.get_event(current_data)
+                event_display_name = event.get_localized_name() if event else current_data
             self.setWindowTitle(f"Instance Edit - {event_display_name}")
             self.marker_updated.emit()
 

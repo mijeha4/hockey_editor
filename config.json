@@ -6,7 +6,7 @@
     },
     "recording_mode": "fixed_length",
     "fixed_duration_sec": 10,
-    "pre_roll_sec": 3.0,
+    "pre_roll_sec": 0.0,
     "post_roll_sec": 0.0,
     "track_colors": {
         "ATTACK": "#8b0000",

@@ -30,7 +30,6 @@ from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
 # Import utilities from old version, adapted to new structure
 from services.serialization.settings_manager import get_settings_manager
 from services.events.custom_event_manager import get_custom_event_manager
-from utils.shortcut_manager import ShortcutManager
 
 
 class MainWindow(QMainWindow):
@@ -65,7 +64,8 @@ class MainWindow(QMainWindow):
         self.settings_manager = get_settings_manager()
         self.event_manager = get_custom_event_manager()
         self.event_manager.setParent(self)  # Ensure proper Qt object ownership
-        self.shortcut_manager = ShortcutManager(self)
+        # Shortcut manager removed - using ShortcutController instead
+        self.shortcut_manager = None
 
         # Autosave from old version (TODO: integrate)
         # from hockey_editor.utils.autosave import AutosaveManager
@@ -76,6 +76,10 @@ class MainWindow(QMainWindow):
 
         # Поддержка drag-drop для видео
         self.setAcceptDrops(True)
+
+        # Ensure main window always gets keyboard events
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAttribute(Qt.WA_AlwaysShowToolTips)
 
         # Инициализация фильтров (from old version)
         self._init_filters()
@@ -93,7 +97,8 @@ class MainWindow(QMainWindow):
         # self.connect_signals()
 
         # Setup shortcuts (adapted from old version)
-        self._setup_shortcuts()
+        # Shortcuts are now handled by ShortcutController
+        # self._setup_shortcuts()
 
     def _init_filters(self):
         """Инициализация состояния фильтров (from old version)."""
@@ -345,7 +350,7 @@ class MainWindow(QMainWindow):
         # self.timeline_widget = TimelineWidget()  # Will be set later
         # timeline_layout.addWidget(self.timeline_widget)
 
-        self.main_splitter.addWidget(timeline_container)
+        timeline_layout.addWidget(timeline_container)
 
         # Установить начальные пропорции (70:30)
         self.main_splitter.setSizes([630, 270])
@@ -486,10 +491,12 @@ class MainWindow(QMainWindow):
             return
 
         key = event.key()
+        print(f"DEBUG: MainWindow keyPressEvent - key: {key}, text: {event.text()}")
 
         # Handle letter keys (A-Z)
         if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
             key_char = chr(key).upper()
+            print(f"DEBUG: Emitting key_pressed signal for key: {key_char}")
             self.key_pressed.emit(key_char)
             return
 
@@ -600,6 +607,7 @@ class MainWindow(QMainWindow):
     def _on_event_btn_clicked(self, event_name: str):
         """Нажатие кнопки события."""
         # Передаем событие в контроллер через сигнал
+        print(f"DEBUG: Event button clicked - event_name: {event_name}")
         self.key_pressed.emit(event_name.upper())
 
     def _on_segment_edit_requested(self, marker_idx: int):
@@ -723,41 +731,13 @@ class MainWindow(QMainWindow):
 
     def _setup_shortcuts(self):
         """Инициализировать горячие клавиши (adapted from old version)."""
-        # Clear old shortcuts
-        for event in self.event_manager.get_all_events():
-            self.shortcut_manager.unregister_shortcut(event.name.upper())
-
-        # Setup event shortcuts
-        self._setup_event_shortcuts()
-
-        # Main shortcuts
-        self.shortcut_manager.register_shortcut('PLAY_PAUSE', 'Space', lambda: self.play_pause_triggered.emit())
-        self.shortcut_manager.register_shortcut('OPEN_VIDEO', 'Ctrl+O', lambda: self.open_video_triggered.emit())
-        self.shortcut_manager.register_shortcut('CANCEL', 'Escape', lambda: self.cancel_recording_triggered.emit())
-        self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z', lambda: self.undo_triggered.emit())
-        self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z', lambda: self.redo_triggered.emit())
-
-        # Skip shortcuts
-        self.shortcut_manager.register_shortcut('SKIP_LEFT', 'Left', lambda: self.skip_seconds_triggered.emit(-5))
-        self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right', lambda: self.skip_seconds_triggered.emit(5))
+        # Shortcuts are now handled by ShortcutController
+        pass
 
     def _setup_event_shortcuts(self):
         """Создаёт глобальные горячие клавиши для всех событий."""
-        if hasattr(self, '_event_shortcuts'):
-            for s in self._event_shortcuts:
-                s.activated.disconnect()
-                s.setParent(None)
-            self._event_shortcuts.clear()
-        else:
-            self._event_shortcuts = []
-
-        for event in self.event_manager.get_all_events():
-            if not event.shortcut:
-                continue
-
-            shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self)
-            shortcut.activated.connect(lambda checked=False, key=event.shortcut.upper(): self.key_pressed.emit(key))
-            self._event_shortcuts.append(shortcut)
+        # Shortcuts are now handled by ShortcutController
+        pass
 
     # ===== Drag & Drop =====
 

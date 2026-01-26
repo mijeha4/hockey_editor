@@ -37,6 +37,12 @@ class PlaybackController(QObject):
         self.current_frame = 0
         self._speed = 1.0  # Скорость воспроизведения
 
+        # Кэш для масштабированных кадров
+        self.frame_cache = {}
+        self.cache_size = 100  # Максимальное количество кэшируемых кадров
+        self.target_width = 800  # Целевая ширина для масштабирования
+        self.use_high_quality_scaling = False  # Флаг для высококачественного масштабирования
+
         # Подключить сигналы от View
         self.player_controls.playClicked.connect(self._on_play_clicked)
         self.player_controls.speedChanged.connect(self._on_speed_changed)
@@ -70,9 +76,9 @@ class PlaybackController(QObject):
             return
 
         self.playing = True
-        # Рассчитать интервал на основе FPS
+        # Рассчитать интервал на основе FPS и скорости воспроизведения
         fps = self.video_service.get_fps()
-        interval_ms = int(1000 / fps) if fps > 0 else 33
+        interval_ms = int(1000 / (fps * self._speed)) if fps > 0 else 33
         self.playback_timer.start(interval_ms)
 
     def pause(self):
@@ -124,9 +130,13 @@ class PlaybackController(QObject):
     def _on_speed_changed(self, speed: float):
         """Handle speed change from player controls."""
         self._speed = speed
-        # For now, just print the speed change
-        # In a full implementation, this would adjust playback speed
         print(f"Playback speed changed to: {speed}x")
+
+        # Если видео воспроизводится, перезапустить таймер с новым интервалом
+        if self.playing:
+            fps = self.video_service.get_fps()
+            interval_ms = int(1000 / (fps * self._speed)) if fps > 0 else 33
+            self.playback_timer.setInterval(interval_ms)
 
     def _on_playback_tick(self):
         """Таймер воспроизведения."""
@@ -166,7 +176,14 @@ class PlaybackController(QObject):
             print(f"Error displaying frame: {e}")
 
     def _numpy_to_pixmap(self, frame: np.ndarray) -> QPixmap:
-        """Конвертировать numpy array (BGR) в QPixmap."""
+        """Конвертировать numpy array (BGR) в QPixmap с кэшированием и оптимизацией."""
+        # Создать уникальный ключ для кэша на основе содержимого кадра
+        frame_hash = hash(frame.tobytes())
+
+        # Проверить кэш
+        if frame_hash in self.frame_cache:
+            return self.frame_cache[frame_hash].copy()
+
         # Конвертировать BGR в RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
@@ -178,7 +195,18 @@ class PlaybackController(QObject):
         # Конвертировать в QPixmap
         pixmap = QPixmap.fromImage(qt_image)
 
-        # Масштабировать для отображения
-        pixmap = pixmap.scaledToWidth(800, Qt.TransformationMode.SmoothTransformation)
+        # Оптимизированное масштабирование
+        if self.use_high_quality_scaling or self._speed <= 1.0:
+            # Использовать высококачественное масштабирование для нормальной скорости
+            pixmap = pixmap.scaledToWidth(self.target_width, Qt.TransformationMode.SmoothTransformation)
+        else:
+            # Для ускоренного воспроизведения использовать быстрое масштабирование
+            pixmap = pixmap.scaledToWidth(self.target_width, Qt.TransformationMode.FastTransformation)
+
+        # Сохранить в кэш
+        if len(self.frame_cache) >= self.cache_size:
+            # Очистить кэш, если он слишком большой
+            self.frame_cache.clear()
+        self.frame_cache[frame_hash] = pixmap.copy()
 
         return pixmap

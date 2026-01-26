@@ -56,34 +56,47 @@ class ShortcutController(QObject):
 
             shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self.parent_window)
             shortcut.activated.connect(
-                lambda checked=False, key=event.shortcut.upper(): self.shortcut_pressed.emit(key)
+                lambda checked=False, key=event.shortcut.upper(): self._on_event_shortcut_activated(key)
             )
             self.event_shortcuts[event.name] = shortcut
+            print(f"DEBUG: Setup event shortcut - {event.name}: {event.shortcut.upper()}")
+
+    def _on_event_shortcut_activated(self, key: str):
+        """Handle event shortcut activation with debug logging."""
+        print(f"DEBUG: Event shortcut activated - key: {key}")
+        self.shortcut_pressed.emit(key)
 
     def _setup_global_shortcuts(self) -> None:
         """Setup global application shortcuts."""
         # Playback shortcuts
         self.shortcut_manager.register_shortcut('PLAY_PAUSE', 'Space',
-            lambda: self.shortcut_pressed.emit('PLAY_PAUSE'))
+            lambda: self._on_global_shortcut_activated('PLAY_PAUSE'))
         self.shortcut_manager.register_shortcut('OPEN_VIDEO', 'Ctrl+O',
-            lambda: self.shortcut_pressed.emit('OPEN_VIDEO'))
+            lambda: self._on_global_shortcut_activated('OPEN_VIDEO'))
         self.shortcut_manager.register_shortcut('CANCEL', 'Escape',
-            lambda: self.shortcut_pressed.emit('CANCEL'))
+            lambda: self._on_global_shortcut_activated('CANCEL'))
 
         # Menu shortcuts (handled by menu system)
         # SETTINGS, EXPORT, PREVIEW are handled through menu actions
 
         # Undo/Redo
         self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z',
-            lambda: self.shortcut_pressed.emit('UNDO'))
+            lambda: self._on_global_shortcut_activated('UNDO'))
         self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z',
-            lambda: self.shortcut_pressed.emit('REDO'))
+            lambda: self._on_global_shortcut_activated('REDO'))
 
         # Seek shortcuts
         self.shortcut_manager.register_shortcut('SKIP_LEFT', 'Left',
-            lambda: self.shortcut_pressed.emit('SKIP_LEFT'))
+            lambda: self._on_global_shortcut_activated('SKIP_LEFT'))
         self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right',
-            lambda: self.shortcut_pressed.emit('SKIP_RIGHT'))
+            lambda: self._on_global_shortcut_activated('SKIP_RIGHT'))
+
+        print("DEBUG: Setup global shortcuts")
+
+    def _on_global_shortcut_activated(self, key: str):
+        """Handle global shortcut activation with debug logging."""
+        print(f"DEBUG: Global shortcut activated - key: {key}")
+        self.shortcut_pressed.emit(key)
 
     def _on_events_changed(self) -> None:
         """Handle event manager changes - rebind shortcuts."""

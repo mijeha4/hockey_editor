@@ -142,14 +142,9 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         super().hoverLeaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        # MVC: emit signal instead of direct call
-        # if self.timeline_scene.main_window:
-        #     try:
-        #         idx = self.timeline_scene.controller.markers.index(self.marker)
-        #         self.timeline_scene.main_window.open_segment_editor(idx)
-        #     except ValueError:
-        #         pass
-        pass  # Will be handled by controller
+        # MVC: emit signal to open segment editor
+        self.timeline_scene.segment_double_clicked.emit(self.marker)
+        super().mouseDoubleClickEvent(event)
 
 
 class TrackHeaderItem(QGraphicsObject):
