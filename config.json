@@ -20,7 +20,86 @@
     "autosave_enabled": true,
     "autosave_interval_minutes": 5,
     "recent_projects": [],
-    "custom_events": [],
+    "custom_events": [
+        {
+            "name": "Blocked Shot",
+            "color": "#795548",
+            "shortcut": "B",
+            "description": "Shot blocked"
+        },
+        {
+            "name": "Defensive Block",
+            "color": "#3F51B5",
+            "shortcut": "K",
+            "description": "Shot blocked in defense"
+        },
+        {
+            "name": "Dump In",
+            "color": "#00BCD4",
+            "shortcut": "D",
+            "description": "Dump puck into zone"
+        },
+        {
+            "name": "Faceoff Loss",
+            "color": "#558B2F",
+            "shortcut": "L",
+            "description": "Faceoff lost"
+        },
+        {
+            "name": "Faceoff Win",
+            "color": "#8BC34A",
+            "shortcut": "F",
+            "description": "Faceoff won"
+        },
+        {
+            "name": "Goal",
+            "color": "#FF0000",
+            "shortcut": "G",
+            "description": "Goal scored"
+        },
+        {
+            "name": "Missed Shot",
+            "color": "#FF9800",
+            "shortcut": "M",
+            "description": "Shot missed the net"
+        },
+        {
+            "name": "Penalty",
+            "color": "#9C27B0",
+            "shortcut": "P",
+            "description": "Penalty called"
+        },
+        {
+            "name": "Shot on Goal",
+            "color": "#FF5722",
+            "shortcut": "H",
+            "description": "Shot on goal"
+        },
+        {
+            "name": "Takeaway",
+            "color": "#4CAF50",
+            "shortcut": "A",
+            "description": "Puck possession gained"
+        },
+        {
+            "name": "Turnover",
+            "color": "#607D8B",
+            "shortcut": "T",
+            "description": "Loss of puck possession"
+        },
+        {
+            "name": "Zone Entry",
+            "color": "#2196F3",
+            "shortcut": "Z",
+            "description": "Entry into offensive zone"
+        },
+        {
+            "name": "Zone Exit",
+            "color": "#03A9F4",
+            "shortcut": "X",
+            "description": "Exit from defensive zone"
+        }
+    ],
     "language": "ru",
     "playback_speed": 1.0,
     "theme": "dark"

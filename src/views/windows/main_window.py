@@ -599,22 +599,27 @@ class MainWindow(QMainWindow):
 
     def _on_event_btn_clicked(self, event_name: str):
         """Нажатие кнопки события."""
+        # Передаем событие в контроллер через сигнал
         self.key_pressed.emit(event_name.upper())
 
     def _on_segment_edit_requested(self, marker_idx: int):
         """Обработка запроса редактирования сегмента."""
-        # Adapted - emit signal to controller
-        pass  # Implementation needed
+        # Вызываем метод контроллера для открытия редактора сегмента
+        if hasattr(self, '_timeline_controller'):
+            self._timeline_controller.edit_marker_requested(marker_idx)
 
     def _on_segment_delete_requested(self, marker_idx: int):
         """Обработка запроса удаления сегмента."""
-        # Adapted - emit signal to controller
-        pass  # Implementation needed
+        # Вызываем метод контроллера для удаления сегмента
+        if hasattr(self, '_timeline_controller'):
+            self._timeline_controller.delete_marker(marker_idx)
 
     def _on_segment_jump_requested(self, marker_idx: int):
         """Обработка запроса перехода к моменту времени сегмента."""
-        # Adapted - emit signal to controller
-        pass  # Implementation needed
+        # Вызываем метод контроллера для перехода к сегменту
+        if hasattr(self, '_timeline_controller') and marker_idx < len(self._timeline_controller.markers):
+            marker = self._timeline_controller.markers[marker_idx]
+            self._timeline_controller.seek_frame(marker.start_frame)
 
     def _on_playback_time_changed(self, frame_idx: int):
         """Обновление при изменении времени воспроизведения."""

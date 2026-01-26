@@ -276,9 +276,9 @@ class EventShortcutListWidget(QWidget):
                 # Shortcut доступен, присваиваем
                 event.shortcut = new_shortcut
                 if self.event_manager.update_event(event_name, event):
-                    QMessageBox.information(self, f"Клавиша '{new_shortcut}' назначена для события '{localized_name}'")
+                    QMessageBox.information(self, "Успех", f"Клавиша '{new_shortcut}' назначена для события '{localized_name}'")
                 else:
-                    QMessageBox.warning(self, "Не удалось назначить горячую клавишу")
+                    QMessageBox.warning(self, "Ошибка", "Не удалось назначить горячую клавишу")
 
     def get_preferred_height(self) -> int:
         """Получение предпочтительной высоты виджета."""

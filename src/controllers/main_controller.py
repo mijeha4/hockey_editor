@@ -156,6 +156,9 @@ class MainController(QObject):
         # Подключить drag-drop
         self.main_window.video_dropped.connect(self._on_video_dropped)
 
+        # Подключить сигналы от event_shortcut_list_widget
+        self.main_window.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
+
     def _on_shortcut_pressed(self, key: str):
         """Обработка нажатия горячей клавиши из shortcut controller."""
         # Обработка специальных клавиш
@@ -178,6 +181,17 @@ class MainController(QObject):
             current_frame = self.playback_controller.current_frame
             fps = self.video_service.get_fps() if self.video_service.cap else 30.0
             self.timeline_controller.handle_hotkey(key, current_frame, fps)
+
+    def _on_event_btn_clicked(self, event_name: str):
+        """Обработка нажатия кнопки события."""
+        # Получить текущий кадр из playback controller
+        current_frame = self.playback_controller.current_frame
+
+        # Получить FPS из video service
+        fps = self.video_service.get_fps() if self.video_service.cap else 30.0
+
+        # Передать в timeline controller
+        self.timeline_controller.handle_hotkey(event_name, current_frame, fps)
 
     def _on_filters_changed(self):
         """Обработка изменения фильтров."""

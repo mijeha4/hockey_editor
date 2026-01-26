@@ -333,9 +333,11 @@ class TimelineGraphicsScene(QGraphicsScene):
         total_frames = max(self.controller.get_total_frames() if self.controller else 1000, 1)
         events = get_custom_event_manager().get_all_events()
 
-        # Очищаем всё КРОМЕ playhead, video_end_line и video_end_label
+        # Удаляем ТОЛЬКО временные элементы (сегменты, заголовки, фон)
         for item in self.items():
-            if item not in (self.playhead, self.video_end_line, self.video_end_label):
+            if item in (self.playhead, self.video_end_line, self.video_end_label):
+                continue
+            if isinstance(item, (SegmentGraphicsItem, TrackHeaderItem)):
                 self.removeItem(item)
 
         scene_width = total_frames * self.pixels_per_frame + 300
@@ -859,16 +861,9 @@ class TimelineWidget(QWidget):
         Args:
             animate_new: Currently unused - kept for compatibility
         """
-        # Clear all existing items from scene
-        self.scene.clear()
-        
-        # Reinitialize graphics items lists
-        self.playhead = None
-        self.segment_items.clear()
-        self.ruler_items.clear()
-        self.ruler_text_items.clear()
-        # Redraw the timeline
-        self._setup_timeline()
+        # Delegate rebuild to the scene
+        if self.scene:
+            self.scene.rebuild()
 
     def _setup_timeline(self) -> None:
         """Setup the timeline graphics."""
