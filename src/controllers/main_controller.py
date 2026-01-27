@@ -113,7 +113,7 @@ class MainController(QObject):
         # Создать custom_event_controller заранее для timeline_controller
         custom_event_controller = self.get_custom_event_controller()
         # Установить custom_event_controller в timeline_controller
-        self.timeline_controller.custom_event_controller = custom_event_controller
+        self.timeline_controller.set_custom_event_controller(custom_event_controller)
 
         # Свойства для доступа из views
         self.markers = self.project.markers

@@ -323,10 +323,27 @@ class TimelineGraphicsScene(QGraphicsScene):
 
                 current_seconds += 5
 
-    def rebuild(self):
+    def rebuild(self, animate_new: bool = True):
         """Перестроение всей сцены."""
+        print(f"DEBUG: TimelineGraphicsScene.rebuild() called with animate_new={animate_new}")
+
+        # Check if controller is properly set
+        if self.controller is None:
+            print("DEBUG: ERROR - controller is None in TimelineGraphicsScene.rebuild()")
+            return
+
         total_frames = max(self.controller.get_total_frames() if self.controller else 1000, 1)
+        print(f"DEBUG: total_frames={total_frames}")
+
         events = get_custom_event_manager().get_all_events()
+        print(f"DEBUG: events count={len(events)}")
+        if not events:
+            print("DEBUG: No events found, returning early")
+            return
+
+        # Check if controller has markers
+        controller_markers = self.controller.markers if self.controller else []
+        print(f"DEBUG: Controller has {len(controller_markers)} markers")
 
         # Удаляем ТОЛЬКО временные элементы (сегменты, заголовки, фон)
         for item in self.items():
@@ -356,9 +373,12 @@ class TimelineGraphicsScene(QGraphicsScene):
 
             # Сегменты
             if self.controller:
-                for marker in self.controller.markers:
-                    if marker.event_name != event.name:
-                        continue
+                print(f"DEBUG: Processing event '{event.name}'")
+                markers_for_event = [m for m in self.controller.markers if m.event_name == event.name]
+                print(f"DEBUG: Found {len(markers_for_event)} markers for event '{event.name}'")
+
+                for marker in markers_for_event:
+                    print(f"DEBUG: Creating segment for marker {marker.event_name} at frames {marker.start_frame}-{marker.end_frame}")
                     x = marker.start_frame * self.pixels_per_frame
                     w = (marker.end_frame - marker.start_frame + 1) * self.pixels_per_frame
                     if w < 10: w = 10
@@ -366,8 +386,10 @@ class TimelineGraphicsScene(QGraphicsScene):
                     segment = SegmentGraphicsItem(marker, self)
                     segment.setRect(x + 150, y + 8, w, self.track_height - 16)
                     self.addItem(segment)
+                    print(f"DEBUG: Added segment item to scene")
 
         self.update_playhead(self.controller.get_current_frame_idx() if self.controller else 0)
+        print("DEBUG: TimelineGraphicsScene.rebuild() completed")
 
     def update_playhead(self, frame_idx: int):
         """Обновление позиции плейхеда."""
@@ -530,19 +552,56 @@ class TimelineWidget(QWidget):
     # MVC Methods
     def set_controller(self, controller):
         """Set controller for MVC pattern."""
+        print(f"DEBUG: TimelineWidget.set_controller() called with controller={controller}")
         self.controller = controller
         self.scene.controller = controller
 
         # Reconnect signals
         if controller:
+            print("DEBUG: Setting up signal connections...")
+
+            # Disconnect any existing connections first to avoid duplicate signals
+            try:
+                controller.markers_changed.disconnect(self.scene.rebuild)
+                print("DEBUG: Disconnected existing markers_changed signal")
+            except TypeError:
+                print("DEBUG: No existing markers_changed connection to disconnect")
+
+            try:
+                controller.playback_time_changed.disconnect(self.scene.update_playhead)
+                print("DEBUG: Disconnected existing playback_time_changed signal")
+            except TypeError:
+                print("DEBUG: No existing playback_time_changed connection to disconnect")
+
+            try:
+                controller.timeline_update.disconnect(self.scene.update_playhead)
+                print("DEBUG: Disconnected existing timeline_update signal")
+            except TypeError:
+                print("DEBUG: No existing timeline_update connection to disconnect")
+
+            # Connect signals
             controller.markers_changed.connect(self.scene.rebuild)
             controller.playback_time_changed.connect(lambda f: self.scene.update_playhead(f))
             controller.timeline_update.connect(lambda: self.scene.update_playhead(controller.get_current_frame_idx()))
 
-        self.scene.rebuild()
+            print(f"DEBUG: TimelineWidget.set_controller() - signals connected successfully")
+            print(f"DEBUG: Controller has {len(controller.markers)} markers")
+
+            # Force immediate rebuild to ensure all markers are displayed
+            print("DEBUG: Calling immediate scene.rebuild()")
+            self.scene.rebuild(animate_new=False)
+            print("DEBUG: Scene rebuild completed")
+
+            # Force scene update to ensure immediate display
+            self.scene.update()
+            print("DEBUG: Called scene.update() for immediate refresh")
+
+        else:
+            print("DEBUG: Controller is None, cannot set up signals")
 
         # Set initial scene size
         self.scene.setSceneRect(0, 0, 1000, 200)
+        print("DEBUG: TimelineWidget.set_controller() completed")
 
     def draw_ruler(self) -> None:
         """Draw the time ruler at the top of the timeline."""
@@ -849,16 +908,23 @@ class TimelineWidget(QWidget):
 
     def rebuild(self, animate_new: bool = True) -> None:
         """Rebuild the entire timeline scene.
-        
+
         This method clears the existing scene content and redraws all
         timeline elements including ruler, tracks, and segments.
-        
+
         Args:
             animate_new: Currently unused - kept for compatibility
         """
+        print(f"DEBUG: TimelineWidget.rebuild() called with animate_new={animate_new}")
+        print(f"DEBUG: self.scene is {self.scene}")
+        print(f"DEBUG: self.controller is {self.controller}")
+
         # Delegate rebuild to the scene
         if self.scene:
-            self.scene.rebuild()
+            print("DEBUG: Calling self.scene.rebuild()")
+            self.scene.rebuild(animate_new)
+        else:
+            print("DEBUG: self.scene is None, cannot rebuild")
 
     def _setup_timeline(self) -> None:
         """Setup the timeline graphics."""

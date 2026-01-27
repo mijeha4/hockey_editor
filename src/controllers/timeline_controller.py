@@ -104,15 +104,59 @@ class TimelineController(QObject):
         """Установить ссылку на playback controller для синхронизации."""
         self.playback_controller = playback_controller
 
+    def set_custom_event_controller(self, custom_event_controller):
+        """Установить ссылку на custom_event_controller."""
+        self.custom_event_controller = custom_event_controller
+        if self.custom_event_controller is not None:
+            self.custom_event_controller.events_changed.connect(self._on_events_changed)
+            self.custom_event_controller.event_added.connect(self._on_event_added)
+            self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
+
     def on_marker_added(self, index: int, marker: Marker):
         """Обработчик добавления маркера."""
+        print(f"DEBUG: TimelineController.on_marker_added() called with index={index}, marker={marker.event_name}")
+        print(f"DEBUG: timeline_widget is {self.timeline_widget}")
+        print(f"DEBUG: segment_list_widget is {self.segment_list_widget}")
+
         # Обновить timeline с анимацией для нового маркера
         if self.timeline_widget:
-            self.timeline_widget.rebuild(animate_new=True)
+            print("DEBUG: Calling timeline_widget.rebuild(animate_new=True)")
+            try:
+                # Ensure the timeline widget has the controller properly set
+                if hasattr(self.timeline_widget, 'set_controller'):
+                    if self.timeline_widget.controller is None:
+                        self.timeline_widget.set_controller(self)
+                        print("DEBUG: Set controller on timeline widget")
+                    elif self.timeline_widget.controller != self:
+                        # Reconnect with current controller to ensure proper signal connections
+                        self.timeline_widget.set_controller(self)
+                        print("DEBUG: Reconnected controller on timeline widget")
+
+                # Call rebuild with animation
+                self.timeline_widget.rebuild(animate_new=True)
+                print("DEBUG: Called timeline_widget.rebuild(animate_new=True)")
+
+                # Force immediate scene update
+                if hasattr(self.timeline_widget, 'scene') and self.timeline_widget.scene:
+                    self.timeline_widget.scene.update()
+                    print("DEBUG: Called scene.update() for immediate refresh")
+
+            except Exception as e:
+                print(f"DEBUG: Error calling timeline_widget.rebuild(): {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("DEBUG: timeline_widget is None, cannot rebuild")
 
         # Обновить таблицу сегментов
         if self.segment_list_widget:
-            self.segment_list_widget.update_segments([marker.to_marker() for marker in self.project.markers])
+            print("DEBUG: Updating segment_list_widget")
+            try:
+                self.segment_list_widget.update_segments([marker.to_marker() for marker in self.project.markers])
+            except Exception as e:
+                print(f"DEBUG: Error updating segment_list_widget: {e}")
+        else:
+            print("DEBUG: segment_list_widget is None, cannot update")
 
     def on_marker_removed(self, index: int):
         """Обработчик удаления маркера."""
@@ -138,11 +182,16 @@ class TimelineController(QObject):
             current_frame: Текущий кадр видео
             fps: FPS видео для конвертации времени
         """
+        print(f"DEBUG: TimelineController.handle_hotkey called with hotkey: {hotkey}")
+        print(f"DEBUG: custom_event_controller is {self.custom_event_controller}")
+
         # Найти событие по горячей клавише
         event_type = self._find_event_by_hotkey(hotkey)
         if not event_type:
+            print(f"DEBUG: No event found for hotkey: {hotkey}")
             return
 
+        print(f"DEBUG: Found event type: {event_type}")
         if self.settings.recording_mode == "dynamic":
             self._handle_dynamic_mode(event_type, current_frame, fps)
         elif self.settings.recording_mode == "fixed_length":
@@ -150,18 +199,27 @@ class TimelineController(QObject):
 
     def _find_event_by_hotkey(self, hotkey: str) -> str:
         """Найти тип события по горячей клавише."""
+        print(f"DEBUG: _find_event_by_hotkey called with hotkey: {hotkey}")
+
         # Сначала проверить кастомные события через контроллер
         if self.custom_event_controller:
             all_events = self.custom_event_controller.get_all_events()
+            print(f"DEBUG: Found {len(all_events)} custom events")
             for event in all_events:
+                print(f"DEBUG: Checking event {event.name} with shortcut {event.shortcut}")
                 if event.shortcut.upper() == hotkey.upper():
+                    print(f"DEBUG: Found event {event.name} for hotkey {hotkey}")
                     return event.name
 
         # Затем проверить дефолтные события
+        print(f"DEBUG: Checking {len(self.settings.default_events)} default events")
         for event in self.settings.default_events:
+            print(f"DEBUG: Checking default event {event.name} with shortcut {event.shortcut}")
             if event.shortcut.upper() == hotkey.upper():
+                print(f"DEBUG: Found default event {event.name} for hotkey {hotkey}")
                 return event.name
 
+        print(f"DEBUG: No event found for hotkey {hotkey}")
         return None
 
     def _handle_dynamic_mode(self, event_name: str, current_frame: int, fps: float) -> None:
@@ -329,6 +387,10 @@ class TimelineController(QObject):
         self.timeline_widget = timeline_widget
         if self.timeline_widget is not None:
             self._connect_timeline_signals()
+            # Если уже есть маркеры, нужно инициализировать их в новом виджете
+            if self.project and self.project.markers:
+                print(f"DEBUG: Initializing {len(self.project.markers)} existing markers in timeline widget")
+                self.timeline_widget.set_markers(self.project.markers)
 
     def _connect_timeline_signals(self):
         """Подключить сигналы timeline widget."""
@@ -368,16 +430,26 @@ class TimelineController(QObject):
 
     def init_tracks(self, total_frames: int):
         """Инициализировать таймлайн с общим количеством кадров."""
+        print(f"DEBUG: TimelineController.init_tracks() called with total_frames={total_frames}")
+        print(f"DEBUG: self.timeline_widget is {self.timeline_widget}")
+
         self.set_total_frames(total_frames)
         if self.timeline_widget is not None:
+            print("DEBUG: Getting track names from event manager")
             # Get track names from event manager
             track_names = self._get_track_names()
+            print(f"DEBUG: track_names={track_names}")
             self.timeline_widget.init_tracks(track_names, total_frames, self.fps)
             # Set initial markers
+            print(f"DEBUG: Setting initial markers, count={len(self.project.markers)}")
             self.timeline_widget.set_markers(self.project.markers)
+        else:
+            print("DEBUG: timeline_widget is None, cannot init tracks")
 
     def _get_track_names(self) -> List[str]:
         """Get list of track names (event types) for timeline."""
+        print("DEBUG: _get_track_names() called")
+
         # Default hockey event types
         default_tracks = [
             "Заблокировано", "Блокшот в обороне", "Вброс", "Вбрасывание: Пропущено",
@@ -389,19 +461,25 @@ class TimelineController(QObject):
         try:
             from services.events.custom_event_manager import get_custom_event_manager
             event_manager = get_custom_event_manager()
+            print(f"DEBUG: event_manager is {event_manager}")
             if event_manager:
                 custom_events = event_manager.get_all_events()
+                print(f"DEBUG: custom_events count={len(custom_events)}")
                 if custom_events:
                     # Use custom events + defaults for any missing
                     custom_names = [event.name for event in custom_events]
+                    print(f"DEBUG: custom_names={custom_names}")
                     # Add defaults that aren't in custom
                     for default in default_tracks:
                         if default not in custom_names:
                             custom_names.append(default)
+                    print(f"DEBUG: final track_names={custom_names}")
                     return custom_names
-        except ImportError:
+        except ImportError as e:
+            print(f"DEBUG: ImportError in _get_track_names(): {e}")
             pass
 
+        print(f"DEBUG: Using default tracks: {default_tracks}")
         return default_tracks
 
     def _on_events_changed(self):

@@ -50,8 +50,13 @@ class ShortcutController(QObject):
 
     def _setup_event_shortcuts(self) -> None:
         """Setup shortcuts for events (A, D, S and custom)."""
-        for event in self.event_manager.get_all_events():
+        print(f"DEBUG: _setup_event_shortcuts called")
+        all_events = self.event_manager.get_all_events()
+        print(f"DEBUG: Found {len(all_events)} events total")
+        for event in all_events:
+            print(f"DEBUG: Processing event {event.name} with shortcut {event.shortcut}")
             if not event.shortcut:
+                print(f"DEBUG: Skipping event {event.name} - no shortcut")
                 continue
 
             shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self.parent_window)

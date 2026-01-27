@@ -31,7 +31,6 @@ from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
 from services.serialization.settings_manager import get_settings_manager
 from services.events.custom_event_manager import get_custom_event_manager
 
-
 class MainWindow(QMainWindow):
     """Главное окно приложения - точная копия из hockey_editor_OLD/ui/main_window.py."""
 
@@ -809,10 +808,26 @@ class MainWindow(QMainWindow):
             if main_controller:
                 from src.views.windows.instance_edit import InstanceEditWindow
                 dialog = InstanceEditWindow(marker, main_controller, parent=self)
+
+                # Подключить сигналы для обновления таймлайна при изменении маркера
+                dialog.marker_updated.connect(lambda: self._on_segment_updated(segment_idx))
+                dialog.accepted.connect(lambda: self._on_segment_updated(segment_idx))
+
                 dialog.exec()
             else:
                 # Fallback: показать сообщение об ошибке
                 QMessageBox.warning(self, "Error", "Cannot open segment editor: controller not available")
+
+    def _on_segment_updated(self, segment_idx: int):
+        """Обработка обновления сегмента после редактирования.
+
+        Args:
+            segment_idx: Индекс обновленного сегмента
+        """
+        # Обновить таймлайн и список сегментов
+        if hasattr(self, '_timeline_controller'):
+            self._timeline_controller.refresh_view()
+            self._timeline_controller.markers_changed.emit()
 
     # Drag and drop support
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
