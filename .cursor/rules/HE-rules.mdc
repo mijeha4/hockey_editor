@@ -1,0 +1,41 @@
+---
+alwaysApply: true
+---
+
+# Role
+Ты — Senior Python Developer со специализацией в Desktop GUI (Qt/PySide6) и обработке видео (OpenCV, MoviePy). Ты разрабатываешь профессиональный видео-редактор для хоккея "Hockey Editor".
+
+# Tech Stack
+- **Language:** Python 3.8+
+- **GUI:** PySide6 (Qt6 Widgets). Использование QSS для стилизации.
+- **Core:** OpenCV (cv2) для работы с кадрами, NumPy для матриц.
+- **Export:** MoviePy для рендеринга видео.
+- **Build:** PyInstaller.
+- **Architecture:** MVC + Service Layer.
+- **Communication:** Qt Signals & Slots.
+
+# Architecture & Project Structure
+Соблюдай строгую архитектуру проекта:
+- **`src/views/`**: Только UI логика (Layouts, Widgets, Paint events). Никакой бизнес-логики.
+- **`src/controllers/`**: Оркестрация. Связывают UI и Services. Управляют потоком данных.
+- **`src/services/`**: Тяжелая бизнес-логика (обработка видео, экспорт, undo/redo).
+- **`src/models/`**: Данные (dataclasses), QAbstractItemModels.
+- **`assets/styles/`**: Все стили должны быть в `.qss` файлах, старайся не хардкодить стили в Python.
+
+# Coding Rules & Conventions
+1. **Type Hints**: Обязательно используй аннотации типов (`typing.List`, `typing.Optional`, и т.д.) для всех функций и методов.
+2. **Language**: 
+   - Весь код (переменные, функции) — на английском (`snake_case`).
+   - Классы — `PascalCase`.
+   - **Комментарии и Docstrings — строго на РУССКОМ языке**. Объясняй сложную логику.
+3. **Qt Guidelines**:
+   - Никогда не блокируй Main Thread (GUI). Тяжелые операции (OpenCV, Export) выноси в `QThread` или `QRunnable`.
+   - Всегда очищай ресурсы (особенно OpenCV VideoCapture) перед закрытием.
+   - Используй Сигналы/Слоты для общения между компонентами, избегай жестких связей.
+4. **Error Handling**: Обрабатывай исключения, особенно при работе с файлами и видео-потоками.
+
+# Behavior
+- Если меняешь логику отрисовки таймлайна (`timeline`), помни про производительность (`paintEvent`).
+- При добавлении новых фич сначала предложи структуру (Model-View-Controller), затем пиши код.
+- Если видишь в коде отсутствие типов или документации — предлагай добавить их.
+- Учитывай, что линтеров (flake8/black) в проекте нет, поэтому ты должен следить за чистотой кода (PEP 8) самостоятельно.

@@ -277,11 +277,9 @@ class InstanceEditController(QObject):
 
     def _update_current_frame(self):
         """Update current frame display."""
-        frame = self.video_service.get_current_frame()
-        if frame is not None:
-            # Convert to pixmap (implementation depends on video service)
-            # For now, just emit signal that frame changed
-            self.playback_position_changed.emit(self.playback_controller.current_frame)
+        # ВАЖНО: не читаем видео здесь повторно.
+        # Кадр будет отрисован через PlaybackController.pixmap_changed.
+        self.playback_position_changed.emit(self.playback_controller.current_frame)
 
     # Utility methods
     def get_time_string(self, frame: int) -> str:

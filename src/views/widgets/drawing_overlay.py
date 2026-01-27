@@ -120,12 +120,26 @@ class DrawingOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet("background: transparent;")
 
-    def set_tool(self, tool: str):
-        """Установить текущий инструмент рисования."""
-        try:
-            self.current_tool = DrawingTool(tool.upper())
-        except ValueError:
-            self.current_tool = DrawingTool.CURSOR
+    def set_tool(self, tool):
+        """Установить текущий инструмент рисования.
+
+        Принимает либо строку ("line", "rectangle" и т.п.), либо сам enum DrawingTool.
+        """
+        # Если передали сам enum - просто сохраним его
+        if isinstance(tool, DrawingTool):
+            self.current_tool = tool
+            return
+
+        # Если передали строку - нормализуем и найдём подходящий инструмент
+        if isinstance(tool, str):
+            value = tool.strip().lower()
+            for t in DrawingTool:
+                if t.value == value or t.name.lower() == value:
+                    self.current_tool = t
+                    return
+
+        # Фолбэк - режим без рисования
+        self.current_tool = DrawingTool.NONE
 
     def set_color(self, color: QColor):
         """Установить цвет рисования."""
@@ -196,7 +210,14 @@ class DrawingOverlay(QWidget):
 
     def mousePressEvent(self, event):
         """Обработка нажатия кнопки мыши."""
-        if event.button() == Qt.LeftButton and self.current_tool != DrawingTool.CURSOR:
+        # Рисуем только для настоящих инструментов рисования
+        drawable_tools = {
+            DrawingTool.LINE,
+            DrawingTool.RECTANGLE,
+            DrawingTool.CIRCLE,
+            DrawingTool.ARROW,
+        }
+        if event.button() == Qt.LeftButton and self.current_tool in drawable_tools:
             self.is_drawing = True
             self.current_start_point = event.pos()
             self.current_end_point = event.pos()

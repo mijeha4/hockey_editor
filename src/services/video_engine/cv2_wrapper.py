@@ -41,7 +41,19 @@ class VideoService:
             raise RuntimeError("No video loaded")
 
         frame_index = max(0, min(frame_index, self.total_frames - 1))
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+
+        # Оптимизация: не дергать cap.set(CAP_PROP_POS_FRAMES) на каждый кадр,
+        # если мы и так идём последовательно. Частые установки позиции сильно
+        # тормозят воспроизведение и особенно заметны на "тяжёлых" участках.
+        try:
+            current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+        except Exception:
+            current_pos = -1
+
+        # Если запрошенный кадр далеко от текущей позиции — делаем seek.
+        # Если рядом (тот же или соседний), читаем последовательно без seek.
+        if current_pos < 0 or abs(frame_index - current_pos) > 1:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
 
         ret, frame = self.cap.read()
         if not ret:

@@ -345,6 +345,13 @@ class InstanceEditWindow(QDialog):
         self._update_navigation_buttons()
         self._display_current_frame()
 
+        # Получаем готовые QPixmap из PlaybackController,
+        # чтобы не декодировать видео заново в окне редактора.
+        try:
+            self.controller.playback_controller.pixmap_changed.connect(self._on_main_pixmap_changed)
+        except Exception:
+            pass
+
     def _setup_ui(self):
         """Создать интерфейс."""
         layout = QVBoxLayout(self)
@@ -553,7 +560,7 @@ class InstanceEditWindow(QDialog):
     def _on_playback_position_changed(self, frame: int):
         """Handle playback position changes from controller."""
         self.timeline.set_current_frame(frame)
-        self._display_current_frame()
+        # Кадр придёт через pixmap_changed
 
     def _on_timeline_range_changed(self, start: int, end: int):
         """Handle timeline range changes from controller."""
@@ -575,15 +582,13 @@ class InstanceEditWindow(QDialog):
     def _on_timeline_seek(self, frame):
         """Клик по таймлайну для перемотки видео"""
         self.instance_controller.seek_to_frame(frame)
-        self._display_current_frame()
 
     def _nudge_in(self, delta):
         new_start = max(0, self.marker.start_frame + delta)
         if new_start < self.marker.end_frame:
             self.marker.start_frame = new_start
             self._update_ui_from_marker()
-            self.controller.playback_controller.seek_to_frame(new_start)
-            self._display_current_frame()
+            self.controller.playback_controller.seek_to_frame_immediate(new_start)
             self.marker_updated.emit()
 
     def _nudge_out(self, delta):
@@ -591,8 +596,7 @@ class InstanceEditWindow(QDialog):
         if new_end > self.marker.start_frame:
             self.marker.end_frame = new_end
             self._update_ui_from_marker()
-            self.controller.playback_controller.seek_to_frame(new_end)
-            self._display_current_frame()
+            self.controller.playback_controller.seek_to_frame_immediate(new_end)
             self.marker_updated.emit()
 
     def _set_in_point(self):
@@ -621,8 +625,7 @@ class InstanceEditWindow(QDialog):
             if new_start != self.marker.start_frame:
                 self.marker.start_frame = new_start
                 self._update_ui_from_marker()
-                self.controller.playback_controller.seek_to_frame(new_start)
-                self._display_current_frame()
+                self.controller.playback_controller.seek_to_frame_immediate(new_start)
                 self.marker_updated.emit()
         else:  # active_point == 'out'
             # Перемещаем OUT точку
@@ -630,8 +633,7 @@ class InstanceEditWindow(QDialog):
             if new_end != self.marker.end_frame:
                 self.marker.end_frame = new_end
                 self._update_ui_from_marker()
-                self.controller.playback_controller.seek_to_frame(new_end)
-                self._display_current_frame()
+                self.controller.playback_controller.seek_to_frame_immediate(new_end)
                 self.marker_updated.emit()
 
     def _navigate_previous(self):
@@ -725,7 +727,7 @@ class InstanceEditWindow(QDialog):
             # Если мы в конце клипа, прыгаем в начало
             curr = self.controller.playback_controller.current_frame
             if curr >= self.marker.end_frame or curr < self.marker.start_frame:
-                self.controller.playback_controller.seek_to_frame(self.marker.start_frame)
+                self.controller.playback_controller.seek_to_frame_immediate(self.marker.start_frame)
 
             interval = int(1000 / self.fps)
             self.playback_timer.start(interval)
@@ -737,7 +739,7 @@ class InstanceEditWindow(QDialog):
 
         # СТАЛО (исправление):
         current_frame = self.controller.playback_controller.current_frame
-        self.controller.playback_controller.seek_to_frame(current_frame + 1)
+        self.controller.playback_controller.seek_to_frame_immediate(current_frame + 1)
 
         # Получаем обновленную позицию
         curr = self.controller.playback_controller.current_frame
@@ -746,31 +748,39 @@ class InstanceEditWindow(QDialog):
         if self.loop_enabled:
             # Если вышли за пределы конца маркера
             if curr >= self.marker.end_frame:
-                self.controller.playback_controller.seek_to_frame(self.marker.start_frame)
+                self.controller.playback_controller.seek_to_frame_immediate(self.marker.start_frame)
                 curr = self.marker.start_frame
 
         # 3. Обновляем UI
-        self._display_current_frame()
         self.timeline.set_current_frame(curr)
 
     def _display_current_frame(self):
-        """Отобразить текущий кадр (адаптировано из PreviewWindow)"""
-        frame = self.controller.video_service.get_current_frame()
-        if frame is None:
+        """Отобразить текущий кадр через кэш PlaybackController (без повторного декодирования)."""
+        frame_idx = self.controller.playback_controller.current_frame
+        pixmap = None
+        if hasattr(self.controller.playback_controller, "get_cached_pixmap"):
+            pixmap = self.controller.playback_controller.get_cached_pixmap(frame_idx)
+        if pixmap is not None:
+            self._display_pixmap(pixmap)
+
+    def _on_main_pixmap_changed(self, pixmap: QPixmap, frame_idx: int):
+        """Получили новый кадр из основного PlaybackController."""
+        if frame_idx != self.controller.playback_controller.current_frame:
+            return
+        self._display_pixmap(pixmap)
+
+    def _display_pixmap(self, pixmap: QPixmap):
+        """Показать QPixmap в video_label с масштабированием и центровкой."""
+        if pixmap is None or pixmap.isNull():
             return
 
-        # Конвертировать BGR в RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        scaled_pixmap = pixmap.scaled(
+            self.video_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
 
-        # Масштабировать
-        pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(self.video_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                     Qt.TransformationMode.SmoothTransformation)
-
-        # Центрировать изображение в контейнере
+        # Центрировать изображение
         container_width = self.video_label.width()
         container_height = self.video_label.height()
         pixmap_width = scaled_pixmap.width()
@@ -810,8 +820,7 @@ class InstanceEditWindow(QDialog):
 
         # Перемещаем playhead к новой активной точке
         active_frame = self.marker.start_frame if self.active_point == 'in' else self.marker.end_frame
-        self.controller.playback_controller.seek_to_frame(active_frame)
-        self._display_current_frame()
+        self.controller.playback_controller.seek_to_frame_immediate(active_frame)
 
     def _update_navigation_buttons(self):
         """Обновление состояния кнопок навигации (включены/отключены)."""

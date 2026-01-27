@@ -19,6 +19,9 @@ class PlaybackController(QObject):
 
     # Сигнал для синхронизации плейхеда с timeline
     frame_changed = Signal(int)
+    # Сигнал с уже подготовленным изображением кадра (для Preview/InstanceEdit),
+    # чтобы не декодировать/конвертировать один и тот же кадр в нескольких окнах.
+    pixmap_changed = Signal(QPixmap, int)  # pixmap, frame_idx
 
     def __init__(self, video_service: VideoService,
                  player_controls: PlayerControls,
@@ -37,7 +40,22 @@ class PlaybackController(QObject):
         self.current_frame = 0
         self._speed = 1.0  # Скорость воспроизведения
 
-        # Кэш для масштабированных кадров
+        # Последний отрисованный кадр (как QPixmap) для переиспользования другими окнами
+        self._last_pixmap: QPixmap | None = None
+        self._last_pixmap_frame: int | None = None
+
+        # Таймер для "отложенного" обновления кадра при частых перемотках/кликах.
+        # Идея: если пользователь быстро кликает по таймлайну или жмёт +-5 сек,
+        # мы не будем каждый раз декодировать и показывать кадр, а подождём
+        # небольшой интервал и покажем только последний выбранный кадр.
+        self.seek_update_timer = QTimer()
+        self.seek_update_timer.setSingleShot(True)
+        self.seek_update_timer.timeout.connect(self._display_current_frame)
+
+        # Кэш для масштабированных кадров.
+        # ВАЖНО: ключом используем (frame_index, width, height), а НЕ содержимое кадра,
+        # чтобы избежать дорогостоящего hash(frame.tobytes()), которое сильно тормозит
+        # воспроизведение и перемотку на больших видео.
         self.frame_cache = {}
         self.cache_size = 100  # Максимальное количество кэшируемых кадров
         self.target_width = 800  # Целевая ширина для масштабирования
@@ -89,10 +107,39 @@ class PlaybackController(QObject):
     def seek_to_frame(self, frame_idx: int):
         """Перемотать на кадр."""
         self.current_frame = frame_idx
-        self._display_current_frame()
+
+        # Отложенное обновление кадра для снижения нагрузки при частых перемотках.
+        # Если пользователь быстро меняет позицию, предыдущий запрос на отрисовку
+        # отменяется, и в итоге отрисуется только последнее положение.
+        if self.seek_update_timer.isActive():
+            self.seek_update_timer.stop()
+        # Небольшая задержка (в мс); можно варьировать от 20 до 50.
+        self.seek_update_timer.start(30)
 
         # Синхронизировать плейхед на таймлайне
         self.frame_changed.emit(self.current_frame)
+
+    def seek_to_frame_immediate(self, frame_idx: int):
+        """Перемотать на кадр и отрисовать сразу (без debounce).
+
+        Используется для покадрового воспроизведения в предпросмотре/редакторе отрезков,
+        чтобы избежать задержки и при этом не читать видео повторно в каждом окне.
+        """
+        self.current_frame = frame_idx
+        if self.seek_update_timer.isActive():
+            self.seek_update_timer.stop()
+        self._display_current_frame()
+        self.frame_changed.emit(self.current_frame)
+
+    def get_cached_pixmap(self, frame_idx: int) -> QPixmap | None:
+        """Попытаться получить pixmap кадра из кэша (без декодирования видео)."""
+        if self._last_pixmap_frame == frame_idx and self._last_pixmap is not None:
+            return self._last_pixmap
+
+        # Ключ кэша совпадает с тем, что используется в _numpy_to_pixmap
+        w, h = self.video_service.get_resolution()
+        cached = self.frame_cache.get((frame_idx, w, h))
+        return cached
 
     def toggle_play_pause(self):
         """Переключить воспроизведение/паузу."""
@@ -172,17 +219,31 @@ class PlaybackController(QObject):
             # Показать в MainWindow
             self.main_window.set_video_image(pixmap)
 
+            # Запомнить и разослать другим окнам
+            self._last_pixmap = pixmap
+            self._last_pixmap_frame = self.current_frame
+            self.pixmap_changed.emit(pixmap, self.current_frame)
+
         except Exception as e:
             print(f"Error displaying frame: {e}")
 
     def _numpy_to_pixmap(self, frame: np.ndarray) -> QPixmap:
-        """Конвертировать numpy array (BGR) в QPixmap с кэшированием и оптимизацией."""
-        # Создать уникальный ключ для кэша на основе содержимого кадра
-        frame_hash = hash(frame.tobytes())
+        """Конвертировать numpy array (BGR) в QPixmap с кэшированием и оптимизацией.
+
+        Оптимизация производительности:
+        - используем лёгкий ключ кэша (номер кадра + размер),
+          вместо вычисления hash(frame.tobytes()), которое
+          каждый раз пробегало весь буфер кадра и вызывало
+          фризы при перемотке и воспроизведении.
+        """
+        # Лёгкий ключ кэша: (текущий кадр, ширина, высота)
+        h, w, ch = frame.shape
+        cache_key = (self.current_frame, w, h)
 
         # Проверить кэш
-        if frame_hash in self.frame_cache:
-            return self.frame_cache[frame_hash].copy()
+        cached = self.frame_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         # Конвертировать BGR в RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -207,6 +268,6 @@ class PlaybackController(QObject):
         if len(self.frame_cache) >= self.cache_size:
             # Очистить кэш, если он слишком большой
             self.frame_cache.clear()
-        self.frame_cache[frame_hash] = pixmap.copy()
+        self.frame_cache[cache_key] = pixmap
 
         return pixmap

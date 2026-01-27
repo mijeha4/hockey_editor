@@ -189,7 +189,8 @@ class EventCardDelegate(QStyledItemDelegate):
 
     def _draw_action_buttons(self, painter: QPainter, rect: QRect, row: int, original_idx: int):
         """Нарисовать кнопки действий."""
-        button_size = 24
+        # Увеличенный размер для лучшей читаемости
+        button_size = 32
         spacing = 4
         right_margin = 8
 
@@ -202,15 +203,15 @@ class EventCardDelegate(QStyledItemDelegate):
 
         # Кнопка Play
         play_rect = QRect(play_x, button_y, button_size, button_size)
-        self._draw_button(painter, play_rect, "▶", row, "play")
+        self._draw_button(painter, play_rect, "PLAY", row, "play")
 
         # Кнопка Edit
         edit_rect = QRect(edit_x, button_y, button_size, button_size)
-        self._draw_button(painter, edit_rect, "✏️", row, "edit")
+        self._draw_button(painter, edit_rect, "EDIT", row, "edit")
 
         # Кнопка Delete
         delete_rect = QRect(delete_x, button_y, button_size, button_size)
-        self._draw_button(painter, delete_rect, "🗑️", row, "delete")
+        self._draw_button(painter, delete_rect, "DEL", row, "delete")
 
     def _draw_button(self, painter: QPainter, rect: QRect, text: str, row: int, button_type: str):
         """Нарисовать кнопку."""
@@ -232,14 +233,15 @@ class EventCardDelegate(QStyledItemDelegate):
         painter.setBrush(QBrush(bg_color))
         painter.drawRoundedRect(rect, 3, 3)
 
-        # Текст кнопки
-        painter.setFont(self._info_font)
+        # Текст кнопки - используем более крупный шрифт
+        painter.setFont(self._title_font)
         painter.setPen(QPen(self._text_color))
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
     def _get_button_at(self, pos: QPoint, item_rect: QRect, row: int) -> Optional[str]:
         """Определить, какая кнопка находится в данной позиции."""
-        button_size = 24
+        # Должен совпадать с размером в _draw_action_buttons
+        button_size = 32
         spacing = 4
         right_margin = 8
 
@@ -260,12 +262,12 @@ class EventCardDelegate(QStyledItemDelegate):
 
     def _get_event_color(self, event_name: str) -> QColor:
         """Получить цвет для события."""
-        # Используем абсолютные импорты для совместимости с run_test.py
+        # Используем актуальный менеджер пользовательских событий.
+        # Поддерживаем разные варианты запуска (через main.py и тесты).
         try:
-            from utils.custom_events import get_custom_event_manager
+            from services.events.custom_event_manager import get_custom_event_manager
         except ImportError:
-            # Для случаев, когда запускаем из src/
-            from ..utils.custom_events import get_custom_event_manager
+            from src.services.events.custom_event_manager import get_custom_event_manager
 
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(event_name)
@@ -275,12 +277,12 @@ class EventCardDelegate(QStyledItemDelegate):
 
     def _get_event_display_name(self, event_name: str) -> str:
         """Получить отображаемое имя события."""
-        # Используем абсолютные импорты для совместимости с run_test.py
+        # Используем актуальный менеджер пользовательских событий.
+        # Поддерживаем разные варианты запуска (через main.py и тесты).
         try:
-            from utils.custom_events import get_custom_event_manager
+            from services.events.custom_event_manager import get_custom_event_manager
         except ImportError:
-            # Для случаев, когда запускаем из src/
-            from ..utils.custom_events import get_custom_event_manager
+            from src.services.events.custom_event_manager import get_custom_event_manager
 
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(event_name)

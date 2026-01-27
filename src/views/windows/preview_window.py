@@ -62,6 +62,13 @@ class PreviewWindow(QMainWindow):
 
         self.event_manager.events_changed.connect(self._on_events_changed)
 
+        # Получаем готовые QPixmap от основного PlaybackController,
+        # чтобы не декодировать/конвертировать видео повторно в этом окне.
+        try:
+            self.controller.playback_controller.pixmap_changed.connect(self._on_main_pixmap_changed)
+        except Exception:
+            pass
+
         # Connect to controller's playback time changed signal for active card highlighting
         # Note: This signal connection may not work in current architecture
         # self.controller.playback_time_changed.connect(self._on_playback_time_changed)
@@ -254,6 +261,7 @@ class PreviewWindow(QMainWindow):
         # Виджет для рисования поверх видео
         self.drawing_overlay = DrawingOverlay(self.video_container)
         self.drawing_overlay.setGeometry(0, 0, 800, 450)
+        self.drawing_overlay.raise_()  # гарантируем, что overlay поверх видео
 
         video_layout.addWidget(self.video_container)
 
@@ -331,18 +339,9 @@ class PreviewWindow(QMainWindow):
         self.markers_list.setSpacing(2)
         self.markers_list.setUniformItemSizes(True)  # Все элементы одинакового размера
 
-        # Подключить сигналы для инспектора
-        self.markers_list.selectionModel().currentChanged.connect(self._on_marker_selection_changed)
-
         top_layout.addWidget(self.markers_list)
 
         right_splitter.addWidget(top_widget)
-
-        # Нижняя часть: инспектор
-        self._setup_inspector(right_splitter)
-
-        # Установить пропорции (70% список, 30% инспектор)
-        right_splitter.setSizes([400, 200])
 
         # Добавить горячие клавиши для редактирования маркеров
         self._setup_marker_editing_shortcuts()
@@ -353,7 +352,10 @@ class PreviewWindow(QMainWindow):
 
     def _setup_drawing_toolbar(self, parent_layout):
         """Создать панель инструментов рисования."""
-        toolbar_layout = QHBoxLayout()
+        # Оборачиваем layout в отдельный виджет, чтобы применялись стили (#drawing_toolbar)
+        toolbar_widget = QWidget()
+        toolbar_widget.setObjectName("drawing_toolbar")
+        toolbar_layout = QHBoxLayout(toolbar_widget)
         toolbar_layout.setSpacing(5)
 
         # Группа кнопок инструментов
@@ -361,7 +363,7 @@ class PreviewWindow(QMainWindow):
         self.drawing_tool_group.buttonClicked.connect(self._on_drawing_tool_changed)
 
         # Кнопка выбора инструмента (курсор)
-        cursor_btn = QPushButton("👆")
+        cursor_btn = QPushButton("Курсор")
         cursor_btn.setMaximumWidth(35)
         cursor_btn.setToolTip("Выбрать (отключить рисование)")
         cursor_btn.setCheckable(True)
@@ -370,7 +372,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(cursor_btn)
 
         # Кнопка линии
-        line_btn = QPushButton("📏")
+        line_btn = QPushButton("Линия")
         line_btn.setMaximumWidth(35)
         line_btn.setToolTip("Линия")
         line_btn.setCheckable(True)
@@ -378,7 +380,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(line_btn)
 
         # Кнопка прямоугольника
-        rect_btn = QPushButton("▭")
+        rect_btn = QPushButton("Прямоуг.")
         rect_btn.setMaximumWidth(35)
         rect_btn.setToolTip("Прямоугольник")
         rect_btn.setCheckable(True)
@@ -386,7 +388,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(rect_btn)
 
         # Кнопка круга
-        circle_btn = QPushButton("○")
+        circle_btn = QPushButton("Круг")
         circle_btn.setMaximumWidth(35)
         circle_btn.setToolTip("Круг")
         circle_btn.setCheckable(True)
@@ -394,7 +396,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(circle_btn)
 
         # Кнопка стрелки
-        arrow_btn = QPushButton("➤")
+        arrow_btn = QPushButton("Стрелка")
         arrow_btn.setMaximumWidth(35)
         arrow_btn.setToolTip("Стрелка")
         arrow_btn.setCheckable(True)
@@ -430,13 +432,13 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addStretch()
 
         # Кнопка очистки
-        clear_btn = QPushButton("🗑️ Очистить")
+        clear_btn = QPushButton("Очистить")
         clear_btn.setMaximumWidth(80)
         clear_btn.setToolTip("Очистить все рисунки")
         clear_btn.clicked.connect(self._on_clear_drawing)
         toolbar_layout.addWidget(clear_btn)
 
-        parent_layout.addLayout(toolbar_layout)
+        parent_layout.addWidget(toolbar_widget)
 
     def _on_drawing_tool_changed(self, button):
         """Обработка изменения инструмента рисования."""
@@ -628,8 +630,10 @@ class PreviewWindow(QMainWindow):
                 next_marker = self.controller.markers[next_marker_idx]
 
                 # Мгновенный переход (без паузы между клипами)
-                self.controller.playback_controller.seek_to_frame(next_marker.start_frame)
+                # ВАЖНО: используем PlaybackController, чтобы был один декод на все окна.
+                self.controller.playback_controller.seek_to_frame_immediate(next_marker.start_frame)
                 self._update_active_card_highlight()
+                self._update_slider()
 
             else:
                 # Конец плейлиста -> Стоп
@@ -639,8 +643,19 @@ class PreviewWindow(QMainWindow):
             return
 
         # 2. Обычное воспроизведение
-        # Note: advance_frame() is handled by PlaybackController internally
-        self._display_current_frame()
+        # Продвинуть кадр вперед перед отображением
+        current_frame = self.controller.playback_controller.current_frame
+        next_frame = current_frame + 1
+        
+        # Проверить, не вышли ли за границы текущего сегмента
+        if next_frame <= marker.end_frame:
+            # Один декод на все окна
+            self.controller.playback_controller.seek_to_frame_immediate(next_frame)
+        else:
+            # Достигли конца сегмента - перейти к следующему (обработается в следующем тике)
+            return
+        
+        # Обновить UI
         self._update_slider()
 
     def _find_next_filtered_marker(self, current_idx: int) -> Optional[int]:
@@ -673,21 +688,67 @@ class PreviewWindow(QMainWindow):
         """Движение ползунка."""
         frame_idx = self.progress_slider.value()
         self.controller.playback_controller.seek_to_frame(frame_idx)
-        self._display_current_frame()
         self._update_slider()
 
     def _display_current_frame(self):
-        """Отобразить текущий кадр."""
-        # 1. Получаем кадр
-        frame = self.controller.video_service.get_current_frame()
+        """Отобразить текущий кадр.
 
-        # 2. Проверяем, пришло ли хоть что-то
+        Предпочтительно берём готовый QPixmap из PlaybackController (без повторного чтения видео).
+        """
+        frame_idx = self.controller.playback_controller.current_frame
+        pixmap = None
+        if hasattr(self.controller.playback_controller, "get_cached_pixmap"):
+            pixmap = self.controller.playback_controller.get_cached_pixmap(frame_idx)
+        if pixmap is not None:
+            self._display_pixmap(pixmap)
+            return
+
+        # Fallback: если кэш ещё не успел заполниться (или не поддерживается)
+        frame = self.controller.video_service.get_current_frame()
+        if frame is None:
+            return
+        self._display_frame(frame)
+
+    def _on_main_pixmap_changed(self, pixmap: QPixmap, frame_idx: int):
+        """Получили новый кадр из основного PlaybackController."""
+        if frame_idx != self.controller.playback_controller.current_frame:
+            return
+        self._display_pixmap(pixmap)
+
+    def _display_pixmap(self, pixmap: QPixmap):
+        """Отобразить переданный QPixmap (без OpenCV конвертации)."""
+        if pixmap is None or pixmap.isNull():
+            return
+
+        target_size = self.video_container.size()
+        scaled_pixmap = pixmap.scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Установка картинки
+        self.video_label.setPixmap(scaled_pixmap)
+
+        # Центрировать изображение в контейнере
+        container_width = self.video_container.width()
+        container_height = self.video_container.height()
+        pixmap_width = scaled_pixmap.width()
+        pixmap_height = scaled_pixmap.height()
+
+        x = (container_width - pixmap_width) // 2
+        y = (container_height - pixmap_height) // 2
+
+        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
+        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
+
+    def _display_frame(self, frame):
+        """Отобразить переданный кадр (numpy array BGR)."""
+        # Проверяем, пришло ли хоть что-то
         if frame is None:
             return
 
-
-
-        # 3. Конвертация OpenCV (BGR) -> Qt (RGB)
+        # Конвертация OpenCV (BGR) -> Qt (RGB)
         # OpenCV хранит цвета как Синий-Зеленый-Красный, а экраны ждут Красный-Зеленый-Синий
         height, width, channel = frame.shape
         bytes_per_line = 3 * width
@@ -698,7 +759,7 @@ class PreviewWindow(QMainWindow):
         # Меняем местами каналы R и B (иначе лица будут синими)
         q_img = q_img.rgbSwapped()
 
-        # 4. Масштабирование под размер окна (видео виджета)
+        # Масштабирование под размер окна (видео виджета)
         target_size = self.video_container.size()
         scaled_pixmap = QPixmap.fromImage(q_img).scaled(
             target_size,
@@ -706,7 +767,7 @@ class PreviewWindow(QMainWindow):
             Qt.TransformationMode.SmoothTransformation
         )
 
-        # 5. Установка картинки
+        # Установка картинки
         self.video_label.setPixmap(scaled_pixmap)
 
         # Центрировать изображение в контейнере
@@ -775,8 +836,9 @@ class PreviewWindow(QMainWindow):
     def resizeEvent(self, event):
         """Обработка изменения размера окна."""
         super().resizeEvent(event)
-        # Обновить отображение кадра при изменении размера
-        if hasattr(self, 'controller') and self.controller.processor:
+        # При любом изменении размера пересчитываем масштаб видео под новый размер окна.
+        # Если кадра нет (видео не загружено), _display_current_frame просто вернётся.
+        if hasattr(self, "controller"):
             self._display_current_frame()
 
     def _format_time(self, seconds: float) -> str:
