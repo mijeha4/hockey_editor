@@ -364,7 +364,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка выбора инструмента (курсор)
         cursor_btn = QPushButton("Курсор")
-        cursor_btn.setMaximumWidth(35)
+        cursor_btn.setMaximumWidth(65)
         cursor_btn.setToolTip("Выбрать (отключить рисование)")
         cursor_btn.setCheckable(True)
         cursor_btn.setChecked(True)  # По умолчанию выбран курсор
@@ -373,7 +373,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка линии
         line_btn = QPushButton("Линия")
-        line_btn.setMaximumWidth(35)
+        line_btn.setMaximumWidth(65)
         line_btn.setToolTip("Линия")
         line_btn.setCheckable(True)
         self.drawing_tool_group.addButton(line_btn, 1)
@@ -381,7 +381,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка прямоугольника
         rect_btn = QPushButton("Прямоуг.")
-        rect_btn.setMaximumWidth(35)
+        rect_btn.setMaximumWidth(65)
         rect_btn.setToolTip("Прямоугольник")
         rect_btn.setCheckable(True)
         self.drawing_tool_group.addButton(rect_btn, 2)
@@ -389,7 +389,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка круга
         circle_btn = QPushButton("Круг")
-        circle_btn.setMaximumWidth(35)
+        circle_btn.setMaximumWidth(65)
         circle_btn.setToolTip("Круг")
         circle_btn.setCheckable(True)
         self.drawing_tool_group.addButton(circle_btn, 3)
@@ -397,7 +397,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка стрелки
         arrow_btn = QPushButton("Стрелка")
-        arrow_btn.setMaximumWidth(35)
+        arrow_btn.setMaximumWidth(65)
         arrow_btn.setToolTip("Стрелка")
         arrow_btn.setCheckable(True)
         self.drawing_tool_group.addButton(arrow_btn, 4)
@@ -433,7 +433,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка очистки
         clear_btn = QPushButton("Очистить")
-        clear_btn.setMaximumWidth(80)
+        clear_btn.setMaximumWidth(120)
         clear_btn.setToolTip("Очистить все рисунки")
         clear_btn.clicked.connect(self._on_clear_drawing)
         toolbar_layout.addWidget(clear_btn)

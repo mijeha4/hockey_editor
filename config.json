@@ -5,7 +5,7 @@
         "SHIFT": "S"
     },
     "recording_mode": "fixed_length",
-    "fixed_duration_sec": 10,
+    "fixed_duration_sec": 5,
     "pre_roll_sec": 0.0,
     "post_roll_sec": 0.0,
     "track_colors": {

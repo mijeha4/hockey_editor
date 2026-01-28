@@ -10,7 +10,6 @@ class Project(QObject):
     # Сигналы
     marker_added = Signal(int, Marker)  # index, marker
     marker_removed = Signal(int)  # index
-    marker_changed = Signal(int, Marker)  # index, marker
     markers_cleared = Signal()
 
     def __init__(self, name: str, video_path: str = "", fps: float = 30.0):
@@ -98,37 +97,22 @@ class Project(QObject):
         if index == -1:
             index = len(self._markers)
         self._markers.insert(index, marker)
-        # Подключаемся к сигналам маркера
-        marker.changed.connect(lambda: self._on_marker_changed(marker))
         self.marker_added.emit(index, marker)
         self._is_modified = True
 
     def remove_marker(self, index: int):
         """Удалить маркер из проекта."""
         if 0 <= index < len(self._markers):
-            marker = self._markers.pop(index)
-            # Отключаемся от сигналов маркера
-            marker.changed.disconnect()
+            self._markers.pop(index)
             self.marker_removed.emit(index)
             self._is_modified = True
 
     def clear_markers(self):
         """Очистить все маркеры."""
-        for marker in self._markers:
-            marker.changed.disconnect()
         self._markers.clear()
         self.markers_cleared.emit()
         self._is_modified = True
 
-    def _on_marker_changed(self, marker: Marker):
-        """Обработчик изменения маркера."""
-        try:
-            index = self._markers.index(marker)
-            self.marker_changed.emit(index, marker)
-            self._is_modified = True
-        except ValueError:
-            # Маркер не найден в списке
-            pass
 
     def to_dict(self) -> Dict[str, Any]:
         """Конвертировать проект в словарь."""

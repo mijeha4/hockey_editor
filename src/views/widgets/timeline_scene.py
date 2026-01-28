@@ -207,6 +207,7 @@ class TimelineScene(QGraphicsScene):
         # Create a temporary marker for display
         from models.domain.marker import Marker
         marker = Marker(
+            id=0,  # Temporary ID
             start_frame=int(start_sec * self.fps),
             end_frame=int((start_sec + duration_sec) * self.fps),
             event_name=track_name,

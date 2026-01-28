@@ -31,6 +31,50 @@ class AddMarkerCommand(Command):
             self.project.remove_marker(self.index)
 
 
+class ModifyMarkerCommand(Command):
+    """Команда изменения маркера."""
+
+    def __init__(self, markers_list, marker_idx: int, old_marker: Marker, new_marker: Marker):
+        super().__init__(f"Modify {new_marker.event_name} marker")
+        self.markers_list = markers_list
+        self.marker_idx = marker_idx
+        self.old_marker = old_marker
+        self.new_marker = new_marker
+
+    def execute(self):
+        """Изменить маркер."""
+        if 0 <= self.marker_idx < len(self.markers_list):
+            self.markers_list[self.marker_idx] = self.new_marker
+
+    def undo(self):
+        """Вернуть старый маркер."""
+        if 0 <= self.marker_idx < len(self.markers_list):
+            self.markers_list[self.marker_idx] = self.old_marker
+
+
+class DeleteMarkerCommand(Command):
+    """Команда удаления маркера."""
+
+    def __init__(self, markers_list, marker: Marker):
+        super().__init__(f"Delete {marker.event_name} marker")
+        self.markers_list = markers_list
+        self.marker = marker
+        self.index = -1  # Индекс, откуда был удален маркер
+
+    def execute(self):
+        """Удалить маркер."""
+        try:
+            self.index = self.markers_list.index(self.marker)
+            self.markers_list.pop(self.index)
+        except ValueError:
+            self.index = -1
+
+    def undo(self):
+        """Вернуть маркер."""
+        if self.index >= 0:
+            self.markers_list.insert(self.index, self.marker)
+
+
 class TimelineController(QObject):
     """Контроллер управления маркерами с синхронизацией UI."""
 
@@ -79,7 +123,6 @@ class TimelineController(QObject):
         # Подключить сигналы проекта для реактивности
         self.project.marker_added.connect(self.on_marker_added)
         self.project.marker_removed.connect(self.on_marker_removed)
-        self.project.marker_changed.connect(self.on_marker_changed)
         self.project.markers_cleared.connect(self.on_markers_cleared)
 
         # Подключить сигналы от View (если timeline_widget уже создан)
@@ -271,7 +314,10 @@ class TimelineController(QObject):
 
     def add_marker(self, start_frame: int, end_frame: int, event_name: str, note: str = ""):
         """Добавить маркер."""
+        # Генерация ID для нового маркера
+        new_id = self._generate_marker_id()
         marker = Marker(
+            id=new_id,
             start_frame=start_frame,
             end_frame=end_frame,
             event_name=event_name,
@@ -283,6 +329,15 @@ class TimelineController(QObject):
 
         # Уведомить об изменении проекта
         self.project_modified.emit()
+
+    def _generate_marker_id(self) -> int:
+        """Сгенерировать уникальный ID для маркера."""
+        if not self.project.markers:
+            return 1
+        
+        # Найти максимальный ID и увеличить на 1
+        max_id = max(marker.id for marker in self.project.markers)
+        return max_id + 1
 
     def modify_marker(self, marker_idx: int, new_marker):
         """Изменить существующий маркер."""
@@ -536,8 +591,20 @@ class TimelineController(QObject):
                 marker.note = new_note
             
             # Создать команду для истории
-            old_marker = Marker(old_start, old_end, old_event_name, old_note)
-            new_marker = Marker(new_start, new_end, new_event_name or old_event_name, new_note or old_note)
+            old_marker = Marker(
+                id=marker.id,
+                start_frame=old_start,
+                end_frame=old_end,
+                event_name=old_event_name,
+                note=old_note
+            )
+            new_marker = Marker(
+                id=marker.id,
+                start_frame=new_start,
+                end_frame=new_end,
+                event_name=new_event_name or old_event_name,
+                note=new_note or old_note
+            )
             command = ModifyMarkerCommand(self.project.markers, marker_idx, old_marker, new_marker)
             self.history_manager.execute_command(command)
             
