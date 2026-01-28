@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt
 from controllers.settings_controller import SettingsController
 from controllers.custom_event_controller import CustomEventController
 from views.dialogs.custom_event_dialog import CustomEventManagerDialog
+from models.config.app_settings import AppSettings
 
 
 class SettingsDialog(QDialog):
@@ -207,6 +208,19 @@ class SettingsDialog(QDialog):
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при сохранении настроек:\n{str(e)}")
+
+    def _on_settings_saved(self, new_settings: AppSettings):
+        """Обработка сохранения настроек."""
+        # Обновить настройки
+        self.settings = new_settings
+
+        # Обновить timeline controller
+        self.timeline_controller.settings = self.settings
+
+        # Обновить отображение (цвета маркеров могут измениться)
+        self.timeline_controller.refresh_view()
+
+        print("Settings updated successfully")
 
     def _manage_events(self):
         """Открыть диалог управления событиями."""

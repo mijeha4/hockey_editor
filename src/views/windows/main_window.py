@@ -373,6 +373,13 @@ class MainWindow(QMainWindow):
         self.status_label.setFixedHeight(22)  # Фиксированная высота 20-24px
         bottom_layout.addWidget(self.status_label)
 
+        # Индикатор режима записи
+        self.mode_indicator = QLabel("Режим: Фиксированная длина")
+        self.mode_indicator.setStyleSheet("color: #00ccff; font-weight: bold;")
+        self.mode_indicator.setMinimumWidth(250)
+        self.mode_indicator.setFixedHeight(22)
+        bottom_layout.addWidget(self.mode_indicator)
+
         main_layout.addLayout(bottom_layout)
 
         central.setLayout(main_layout)
@@ -767,6 +774,17 @@ class MainWindow(QMainWindow):
     def get_shortcuts_widget(self) -> Optional[QWidget]:
         """Get the shortcuts widget."""
         return getattr(self, 'shortcuts_widget', None)
+
+    def update_mode_indicator(self, recording_mode: str, fixed_duration: int, pre_roll: float, post_roll: float):
+        """Обновить индикатор режима записи."""
+        if recording_mode == "fixed_length":
+            mode_text = "Режим: Фиксированная длина"
+            params_text = f"Длительность: {fixed_duration}с | Pre-roll: {pre_roll}с | Post-roll: {post_roll}с"
+        else:
+            mode_text = "Режим: Динамический"
+            params_text = f"Pre-roll: {pre_roll}с | Post-roll: {post_roll}с"
+        
+        self.mode_indicator.setText(f"{mode_text} | {params_text}")
 
     def set_timeline_controller(self, controller) -> None:
         """Set the timeline controller and create timeline widget.

@@ -58,6 +58,11 @@ class MainController(QObject):
         self.shortcut_controller = ShortcutController(self.main_window)
         self.filter_controller = FilterController()
 
+        # Инициализировать контроллеры для окон (lazy initialization)
+        self._instance_edit_controller = None
+        self._settings_controller = None
+        self._custom_event_controller = None
+
         # Создать timeline_controller ПЕРЕД созданием timeline_widget
         self.timeline_controller = TimelineController(
             self.project,
@@ -67,6 +72,9 @@ class MainController(QObject):
             self.settings,
             None  # custom_event_controller будет установлен позже
         )
+
+        # Загрузить и применить настройки при запуске
+        self._load_and_apply_settings()
 
         # Связать timeline_controller с playback_controller
         self.timeline_controller.set_playback_controller(self.playback_controller)
@@ -105,11 +113,6 @@ class MainController(QObject):
         # Создать export controller (lazy initialization)
         self.export_controller = None
 
-        # Создать контроллеры для окон (lazy initialization)
-        self._instance_edit_controller = None
-        self._settings_controller = None
-        self._custom_event_controller = None
-
         # Создать custom_event_controller заранее для timeline_controller
         custom_event_controller = self.get_custom_event_controller()
         # Установить custom_event_controller в timeline_controller
@@ -130,6 +133,30 @@ class MainController(QObject):
         # Запустить автосохранение
         if self.autosave_manager:
             self.autosave_manager.start()
+
+    def _load_and_apply_settings(self):
+        """Загрузить и применить настройки при запуске."""
+        settings_controller = self.get_settings_controller()
+        if settings_controller.load_settings():
+            self.settings = settings_controller.settings
+            self.timeline_controller.settings = self.settings
+            
+            # Обновить отображение режима в главном окне
+            self._update_mode_indicator()
+            
+            print("Settings loaded and applied successfully")
+        else:
+            print("Failed to load settings, using defaults")
+
+    def _update_mode_indicator(self):
+        """Обновить индикатор режима в главном окне."""
+        if hasattr(self.main_window, 'update_mode_indicator'):
+            self.main_window.update_mode_indicator(
+                self.settings.recording_mode,
+                self.settings.fixed_duration_sec,
+                self.settings.pre_roll_sec,
+                self.settings.post_roll_sec
+            )
 
     def _setup_connections(self):
         """Настроить связи между компонентами."""
@@ -471,6 +498,9 @@ class MainController(QObject):
 
         # Обновить отображение (цвета маркеров могут измениться)
         self.timeline_controller.refresh_view()
+
+        # Обновить индикатор режима в главном окне
+        self._update_mode_indicator()
 
         print("Settings updated successfully")
 

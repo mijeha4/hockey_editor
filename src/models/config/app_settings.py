@@ -58,7 +58,7 @@ class AppSettings:
     })
 
     # Режим расстановки
-    recording_mode: str = "dynamic"
+    recording_mode: str = "fixed_length"
     fixed_duration_sec: int = 10
     pre_roll_sec: float = 3.0
     post_roll_sec: float = 0.0
