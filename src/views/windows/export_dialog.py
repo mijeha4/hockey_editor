@@ -90,6 +90,8 @@ class ExportDialog(QDialog):
         self.setGeometry(200, 200, 700, 650)
 
         self.output_path = None
+        self.video_path = None  # Добавлено: путь к видео файлу
+        self.fps = 30.0  # Добавлено: FPS видео
         self.segment_checkboxes = []
         self.export_worker = None
 
@@ -297,8 +299,8 @@ class ExportDialog(QDialog):
             duration_sec = segment['duration_sec']
 
             # Форматировать время
-            start_time = self._format_time(start_frame / 30.0)  # Предполагаем 30 FPS для отображения
-            end_time = self._format_time(end_frame / 30.0)
+            start_time = self._format_time(start_frame / self.fps)  # Используем реальный FPS
+            end_time = self._format_time(end_frame / self.fps)
 
             text = f"{segment_id+1}. {event_name} ({start_time}–{end_time}) [{duration_sec:.1f}s]"
             checkbox = QCheckBox(text)
@@ -306,6 +308,14 @@ class ExportDialog(QDialog):
 
             self.segment_checkboxes.append((segment_id, checkbox))
             self.segments_layout.addWidget(checkbox)
+
+    def set_video_path(self, video_path: str):
+        """Установить путь к видео файлу."""
+        self.video_path = video_path
+
+    def set_fps(self, fps: float):
+        """Установить FPS видео."""
+        self.fps = fps
 
     def get_selected_segment_ids(self) -> List[int]:
         """Получить ID выбранных сегментов."""
@@ -416,19 +426,9 @@ class ExportDialog(QDialog):
 
     def _on_export_clicked(self):
         """Начать экспорт."""
-        # Получить выбранные отрезки
-        selected_markers = []
-        for idx, cb in enumerate(self.segment_checkboxes):
-            if cb[1].isChecked():  # cb is (segment_id, checkbox)
-                # Get marker from controller - this needs to be passed in
-                # For now, create a placeholder
-                selected_markers.append({
-                    'start_frame': 0,
-                    'end_frame': 100,
-                    'event_name': f'Segment {idx+1}'
-                })
-
-        if not selected_markers:
+        # Проверить выбор сегментов
+        selected_segment_ids = self.get_selected_segment_ids()
+        if not selected_segment_ids:
             QMessageBox.warning(self, "No Segments", "Please select at least one segment to export")
             return
 
@@ -439,7 +439,7 @@ class ExportDialog(QDialog):
                 QMessageBox.warning(self, "No Output Directory", "Please select output directory")
             return
 
-        # Disable controls
+        # Отключить элементы управления
         self.set_controls_enabled(False)
 
         # Получить параметры экспорта
@@ -449,24 +449,18 @@ class ExportDialog(QDialog):
         include_audio = self.audio_check.isChecked()
         merge_segments = self.merge_check.isChecked()
 
-        # Запустить экспорт в отдельном потоке
-        self.export_worker = ExportWorker(
-            "placeholder_video_path.mp4",  # This should come from controller
-            selected_markers,
-            self.output_path,
-            30.0,  # fps - should come from controller
-            codec,
-            crf_value,
-            resolution,
-            include_audio,
-            merge_segments
-        )
+        # Отправить сигнал с параметрами (реальные маркеры получит controller)
+        params = {
+            'codec': codec,
+            'quality': crf_value,
+            'resolution': resolution,
+            'include_audio': include_audio,
+            'merge_segments': merge_segments,
+            'output_path': self.output_path,
+            'selected_segment_ids': selected_segment_ids
+        }
 
-        self.export_worker.progress.connect(self._on_progress_update)
-        self.export_worker.finished.connect(self._on_export_finished)
-        self.export_worker.start()
-
-        self.progress_label.setText("Exporting...")
+        self.export_requested.emit(params)
 
     def _on_progress_update(self, value: int):
         """Обновить прогресс."""

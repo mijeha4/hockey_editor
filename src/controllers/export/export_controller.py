@@ -95,6 +95,10 @@ class ExportController(QObject):
         segments_data = self._prepare_segments_data()
         self.view.set_segments(segments_data)
 
+        # Передать путь к видео и FPS в View
+        self.view.set_video_path(self.video_path)
+        self.view.set_fps(self.fps)
+
         # Показать диалог
         self.view.exec()
 
