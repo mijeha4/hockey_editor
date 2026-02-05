@@ -206,6 +206,7 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.pixels_per_frame = 0.8
         self.track_height = 45
         self.header_height = 40
+        self.ruler_height = 30  # Height of the time ruler at the top
 
         # Playhead создаём один раз и больше НИКОГДА не удаляем!
         self.playhead = QGraphicsLineItem()

@@ -71,6 +71,11 @@ class ShortcutController(QObject):
         print(f"DEBUG: Event shortcut activated - key: {key}")
         self.shortcut_pressed.emit(key)
 
+    def _on_global_shortcut_activated(self, key: str):
+        """Handle global shortcut activation with debug logging."""
+        print(f"DEBUG: Global shortcut activated - key: {key}")
+        self.shortcut_pressed.emit(key)
+
     def _setup_global_shortcuts(self) -> None:
         """Setup global application shortcuts."""
         # Playback shortcuts

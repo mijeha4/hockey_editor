@@ -679,12 +679,18 @@ class MainWindow(QMainWindow):
         
         # Если в таблице ничего не выделено, проверяем выделение на таймлайне
         if hasattr(self, '_timeline_controller') and self._timeline_controller:
-            # Получаем выделенные маркеры из контроллера
-            # Для этого нужно добавить метод в TimelineController для получения выделенных маркеров
-            # Пока просто удаляем последний добавленный маркер как fallback
+            # Проверяем выделенные маркеры в контроллере
+            selected_markers = self._timeline_controller.get_selected_markers()
+            if selected_markers:
+                # Удаляем первый выделенный маркер
+                marker_idx = selected_markers[0]
+                print(f"DEBUG: Deleting selected segment from timeline - marker_idx: {marker_idx}")
+                self._delete_marker_by_index(marker_idx)
+                return
+            
+            # Если нет выделенных маркеров, удаляем последний добавленный маркер как fallback
             markers = self._timeline_controller.markers
             if markers:
-                # Удаляем последний маркер как fallback
                 marker_idx = len(markers) - 1
                 print(f"DEBUG: Deleting last segment as fallback - marker_idx: {marker_idx}")
                 self._delete_marker_by_index(marker_idx)

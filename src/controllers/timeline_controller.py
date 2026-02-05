@@ -120,6 +120,9 @@ class TimelineController(QObject):
         # Ссылка на playback controller для синхронизации
         self.playback_controller = None
 
+        # Выделенные маркеры для операций удаления
+        self.selected_markers = set()
+
         # Подключить сигналы проекта для реактивности
         self.project.marker_added.connect(self.on_marker_added)
         self.project.marker_removed.connect(self.on_marker_removed)
@@ -625,3 +628,21 @@ class TimelineController(QObject):
             
             # Уведомить об изменении проекта
             self.project_modified.emit()
+
+    def get_selected_markers(self) -> List[int]:
+        """Получить список индексов выделенных маркеров."""
+        return list(self.selected_markers)
+
+    def select_marker(self, marker_idx: int):
+        """Выделить маркер."""
+        if 0 <= marker_idx < len(self.project.markers):
+            self.selected_markers.add(marker_idx)
+            # Можно добавить визуальное выделение на таймлайне
+
+    def deselect_marker(self, marker_idx: int):
+        """Снять выделение с маркера."""
+        self.selected_markers.discard(marker_idx)
+
+    def clear_selection(self):
+        """Снять выделение со всех маркеров."""
+        self.selected_markers.clear()

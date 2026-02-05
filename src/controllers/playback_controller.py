@@ -152,6 +152,21 @@ class PlaybackController(QObject):
         """Возвращает текущую скорость воспроизведения."""
         return self._speed
 
+    def cancel_recording(self):
+        """Отменить текущую запись маркера в TimelineController."""
+        # Проверяем, есть ли у нас доступ к timeline_controller через main_window
+        if hasattr(self.main_window, '_timeline_controller'):
+            timeline_controller = self.main_window._timeline_controller
+            if timeline_controller and timeline_controller.is_recording:
+                # Сбросить состояние записи
+                timeline_controller.recording_start_frame = None
+                timeline_controller.is_recording = False
+                # Уведомить о завершении записи (с пустыми параметрами для отмены)
+                timeline_controller.recording_state_changed.emit(False, "", 0)
+                print("Recording cancelled")
+        else:
+            print("TimelineController not available, cannot cancel recording")
+
     def _on_play_clicked(self):
         """Handle play/pause click from player controls."""
         if self.playing:
