@@ -230,7 +230,7 @@ class TimelineGraphicsScene(QGraphicsScene):
         self.rebuild()  # первый рендер
 
     def drawBackground(self, painter, rect):
-        """Отрисовка фона с зеброй и сеткой времени."""
+        """Отрисовка фона с зеброй и адаптивной сеткой времени."""
         super().drawBackground(painter, rect)
 
         # Получить список событий для определения количества треков
@@ -252,7 +252,7 @@ class TimelineGraphicsScene(QGraphicsScene):
                 color = even_color if i % 2 == 0 else odd_color
                 painter.fillRect(track_rect, color)
 
-        # Рисуем вертикальные линии сетки каждые 5 секунд
+        # Рисуем вертикальные линии сетки с адаптивным интервалом
         fps = self.controller.get_fps() if self.controller else 30.0
         if fps > 0:
             grid_pen = QPen(QColor("#333333"), 1, Qt.SolidLine)
@@ -262,8 +262,31 @@ class TimelineGraphicsScene(QGraphicsScene):
             start_frame = max(0, int((rect.left() - 150) / self.pixels_per_frame))
             end_frame = int((rect.right() - 150) / self.pixels_per_frame) + 1
 
-            # Находим первую отметку в 5 секунд до start_frame
-            first_grid_seconds = (start_frame // int(5 * fps)) * 5
+            # Рассчитываем адаптивный интервал сетки (аналогично меткам времени)
+            min_spacing_px = 60  # Минимальное расстояние между линиями сетки в пикселях
+            current_spacing_px = self.pixels_per_frame * fps * 5  # Текущее расстояние при 5-секундном интервале
+            
+            # Определяем интервал в секундах на основе масштаба
+            if current_spacing_px < min_spacing_px:
+                # При малом масштабе увеличиваем интервал
+                step_seconds = max(5, int(min_spacing_px / (self.pixels_per_frame * fps)))
+                # Округляем до удобных значений: 5, 10, 15, 30, 60 секунд
+                if step_seconds <= 7:
+                    step_seconds = 5
+                elif step_seconds <= 12:
+                    step_seconds = 10
+                elif step_seconds <= 20:
+                    step_seconds = 15
+                elif step_seconds <= 40:
+                    step_seconds = 30
+                else:
+                    step_seconds = 60
+            else:
+                # При нормальном масштабе используем стандартный 5-секундный интервал
+                step_seconds = 5
+
+            # Находим первую отметку с учетом нового интервала
+            first_grid_seconds = (start_frame // int(step_seconds * fps)) * step_seconds
             current_seconds = first_grid_seconds
 
             while True:
@@ -275,7 +298,7 @@ class TimelineGraphicsScene(QGraphicsScene):
                 if x >= rect.left() and x <= rect.right():
                     painter.drawLine(x, rect.top(), x, rect.bottom())
 
-                current_seconds += 5
+                current_seconds += step_seconds
 
     def drawForeground(self, painter, rect):
         """Отрисовка линейки времени вверху."""
@@ -287,16 +310,42 @@ class TimelineGraphicsScene(QGraphicsScene):
         # Фон линейки
         painter.fillRect(ruler_rect, QColor("#1a1a1a"))
 
-        # Рисуем засечки и время каждые 5 секунд
+        # Рисуем засечки и время с адаптивным интервалом для предотвращения наложения
         fps = self.controller.get_fps() if self.controller else 30.0
         if fps > 0:
             # Рассчитываем диапазон для видимой области
             start_frame = max(0, int((rect.left() - 150) / self.pixels_per_frame))
             end_frame = int((rect.right() - 150) / self.pixels_per_frame) + 1
 
-            # Находим первую отметку в 5 секунд
-            first_grid_seconds = (start_frame // int(5 * fps)) * 5
+            # Рассчитываем адаптивный интервал меток времени
+            min_spacing_px = 80  # Минимальное расстояние между метками в пикселях
+            current_spacing_px = self.pixels_per_frame * fps * 5  # Текущее расстояние при 5-секундном интервале
+            
+            # Определяем интервал в секундах на основе масштаба
+            if current_spacing_px < min_spacing_px:
+                # При малом масштабе увеличиваем интервал
+                step_seconds = max(5, int(min_spacing_px / (self.pixels_per_frame * fps)))
+                # Округляем до удобных значений: 5, 10, 15, 30, 60 секунд
+                if step_seconds <= 7:
+                    step_seconds = 5
+                elif step_seconds <= 12:
+                    step_seconds = 10
+                elif step_seconds <= 20:
+                    step_seconds = 15
+                elif step_seconds <= 40:
+                    step_seconds = 30
+                else:
+                    step_seconds = 60
+            else:
+                # При нормальном масштабе используем стандартный 5-секундный интервал
+                step_seconds = 5
+
+            # Находим первую отметку с учетом нового интервала
+            first_grid_seconds = (start_frame // int(step_seconds * fps)) * step_seconds
             current_seconds = first_grid_seconds
+
+            # Переменная для отслеживания позиции последней нарисованной метки
+            last_text_x = float('-inf')
 
             while True:
                 frame_index = int(current_seconds * fps)
@@ -319,11 +368,19 @@ class TimelineGraphicsScene(QGraphicsScene):
                     font = QFont("Segoe UI", 8, QFont.Normal)
                     painter.setFont(font)
 
-                    # Позиция текста чуть выше засечки
-                    text_x = x - 15  # центрируем относительно засечки
-                    painter.drawText(int(text_x), 20, time_text)
+                    # Рассчитываем ширину текста для центрирования
+                    font_metrics = QFontMetrics(font)
+                    text_width = font_metrics.horizontalAdvance(time_text)
+                    
+                    # Центрируем текст относительно засечки
+                    text_x = x - text_width // 2
+                    
+                    # Проверяем, не перекрывается ли текст с предыдущим
+                    if text_x >= last_text_x + 5:  # 5px отступ между метками
+                        painter.drawText(int(text_x), 20, time_text)
+                        last_text_x = text_x + text_width
 
-                current_seconds += 5
+                current_seconds += step_seconds
 
     def rebuild(self, animate_new: bool = True):
         """Перестроение всей сцены."""
