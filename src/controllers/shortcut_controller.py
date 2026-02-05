@@ -96,6 +96,10 @@ class ShortcutController(QObject):
         self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right',
             lambda: self._on_global_shortcut_activated('SKIP_RIGHT'))
 
+        # Delete shortcut for removing selected segments
+        self.shortcut_manager.register_shortcut('DELETE', 'Delete',
+            lambda: self._on_global_shortcut_activated('DELETE'))
+
         print("DEBUG: Setup global shortcuts")
 
     def _on_global_shortcut_activated(self, key: str):

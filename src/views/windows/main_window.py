@@ -588,6 +588,10 @@ class MainWindow(QMainWindow):
         self.segment_list_widget.segment_delete_requested.connect(self._on_segment_delete_requested)
         self.segment_list_widget.segment_jump_requested.connect(self._on_segment_jump_requested)
 
+        # Shortcut signals
+        if hasattr(self, 'shortcut_controller'):
+            self.shortcut_controller.shortcut_pressed.connect(self._on_shortcut_pressed)
+
     # ===== Event Handlers (adapted from old version) =====
 
     def _on_play_pause_clicked(self):
@@ -634,6 +638,67 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_timeline_controller') and marker_idx < len(self._timeline_controller.markers):
             marker = self._timeline_controller.markers[marker_idx]
             self._timeline_controller.seek_frame(marker.start_frame)
+
+    def _on_shortcut_pressed(self, key: str):
+        """Обработка нажатия горячей клавиши."""
+        print(f"DEBUG: MainWindow._on_shortcut_pressed - key: {key}")
+        
+        if key == 'DELETE':
+            self._delete_selected_segment()
+        elif key == 'UNDO':
+            self.undo_triggered.emit()
+        elif key == 'REDO':
+            self.redo_triggered.emit()
+        elif key == 'PLAY_PAUSE':
+            self.play_pause_triggered.emit()
+        elif key == 'SKIP_LEFT':
+            self.skip_seconds_triggered.emit(-5)
+        elif key == 'SKIP_RIGHT':
+            self.skip_seconds_triggered.emit(5)
+        else:
+            # Обработка остальных клавиш как событий
+            self.key_pressed.emit(key)
+
+    def _delete_selected_segment(self):
+        """Удалить выделенный сегмент."""
+        print("DEBUG: _delete_selected_segment called")
+        
+        # Сначала проверяем выделение в таблице сегментов
+        if self.segment_list_widget and hasattr(self.segment_list_widget, 'table'):
+            selected_rows = self.segment_list_widget.table.selectionModel().selectedRows()
+            if selected_rows:
+                # Получаем индекс выделенного сегмента из таблицы
+                row = selected_rows[0].row()
+                # Получаем marker_idx из первого столбца
+                item = self.segment_list_widget.table.item(row, 0)
+                if item and item.data(Qt.ItemDataRole.UserRole) is not None:
+                    marker_idx = item.data(Qt.ItemDataRole.UserRole)
+                    print(f"DEBUG: Deleting segment from table selection - marker_idx: {marker_idx}")
+                    self._delete_marker_by_index(marker_idx)
+                    return
+        
+        # Если в таблице ничего не выделено, проверяем выделение на таймлайне
+        if hasattr(self, '_timeline_controller') and self._timeline_controller:
+            # Получаем выделенные маркеры из контроллера
+            # Для этого нужно добавить метод в TimelineController для получения выделенных маркеров
+            # Пока просто удаляем последний добавленный маркер как fallback
+            markers = self._timeline_controller.markers
+            if markers:
+                # Удаляем последний маркер как fallback
+                marker_idx = len(markers) - 1
+                print(f"DEBUG: Deleting last segment as fallback - marker_idx: {marker_idx}")
+                self._delete_marker_by_index(marker_idx)
+            else:
+                print("DEBUG: No segments to delete")
+                # Можно показать сообщение пользователю
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Удаление", "Нет выделенных сегментов для удаления.")
+    
+    def _delete_marker_by_index(self, marker_idx: int):
+        """Удалить маркер по индексу."""
+        if hasattr(self, '_timeline_controller') and self._timeline_controller:
+            print(f"DEBUG: Calling timeline_controller.delete_marker({marker_idx})")
+            self._timeline_controller.delete_marker(marker_idx)
 
     def _on_playback_time_changed(self, frame_idx: int):
         """Обновление при изменении времени воспроизведения."""

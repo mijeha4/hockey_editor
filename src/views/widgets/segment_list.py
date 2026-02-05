@@ -114,6 +114,7 @@ class SegmentListWidget(QWidget):
 
         # Connect signals
         self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.table.itemClicked.connect(self._on_item_clicked)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu_requested)
 
@@ -354,6 +355,14 @@ class SegmentListWidget(QWidget):
                 background-color: #555555;
             }
         """
+
+    def _on_item_clicked(self, item):
+        """Handle click on table item."""
+        if item:
+            marker_idx = item.data(Qt.ItemDataRole.UserRole)
+            if marker_idx is not None:
+                # Выделяем строку
+                self.table.selectRow(item.row())
 
     def _on_item_double_clicked(self, item):
         """Handle double-click on table item."""

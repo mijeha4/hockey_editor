@@ -197,6 +197,7 @@ class TimelineGraphicsScene(QGraphicsScene):
 
     # MVC Signals
     segment_double_clicked = Signal(Marker)  # When segment is double-clicked
+    segment_selected = Signal(Marker)  # When segment is selected
 
     def __init__(self, controller=None):
         super().__init__()
@@ -519,13 +520,36 @@ class TimelineWidget(QWidget):
             super().wheelEvent(event)
 
     def mousePressEvent(self, event):
-        """Клик по таймлайну для перехода к времени."""
+        """Клик по таймлайну для перехода к времени или выделения сегмента."""
         if event.button() == Qt.LeftButton:
             pos = self.view.mapToScene(self.view.mapFrom(self, event.pos()))
             frame = int((pos.x() - 150) / self.scene.pixels_per_frame)
-            if self.controller:
-                frame = max(0, min(frame, self.controller.get_total_frames() - 1))
-                self.seek_requested.emit(frame)
+            
+            # Check if click is on the ruler (top area)
+            if pos.y() <= self.scene.ruler_height:
+                if self.controller:
+                    frame = max(0, min(frame, self.controller.get_total_frames() - 1))
+                    self.seek_requested.emit(frame)
+            else:
+                # Check if click is on a segment
+                clicked_items = self.scene.items(pos)
+                for item in clicked_items:
+                    if isinstance(item, SegmentGraphicsItem):
+                        # Clear previous selection
+                        for seg_item in self.scene.items():
+                            if isinstance(seg_item, SegmentGraphicsItem):
+                                seg_item.set_selected(False)
+                        # Select clicked segment
+                        item.set_selected(True)
+                        # Emit selection signal
+                        if hasattr(self.scene, 'segment_selected'):
+                            self.scene.segment_selected.emit(item.marker)
+                        break
+                else:
+                    # Click was not on a segment, handle as seek
+                    if self.controller:
+                        frame = max(0, min(frame, self.controller.get_total_frames() - 1))
+                        self.seek_requested.emit(frame)
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):

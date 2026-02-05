@@ -55,24 +55,24 @@ class ModifyMarkerCommand(Command):
 class DeleteMarkerCommand(Command):
     """Команда удаления маркера."""
 
-    def __init__(self, markers_list, marker: Marker):
+    def __init__(self, project: Project, marker: Marker):
         super().__init__(f"Delete {marker.event_name} marker")
-        self.markers_list = markers_list
+        self.project = project
         self.marker = marker
         self.index = -1  # Индекс, откуда был удален маркер
 
     def execute(self):
         """Удалить маркер."""
         try:
-            self.index = self.markers_list.index(self.marker)
-            self.markers_list.pop(self.index)
+            self.index = self.project.markers.index(self.marker)
+            self.project.remove_marker(self.index)
         except ValueError:
             self.index = -1
 
     def undo(self):
         """Вернуть маркер."""
         if self.index >= 0:
-            self.markers_list.insert(self.index, self.marker)
+            self.project.add_marker(self.marker, self.index)
 
 
 class TimelineController(QObject):
@@ -610,6 +610,18 @@ class TimelineController(QObject):
             
             # Отправить сигнал об обновлении конкретного маркера
             self.marker_updated.emit(marker_idx)
+            
+            # Уведомить об изменении проекта
+            self.project_modified.emit()
+
+    def delete_marker(self, marker_idx: int):
+        """Удалить маркер по индексу."""
+        if 0 <= marker_idx < len(self.project.markers):
+            marker = self.project.markers[marker_idx]
+            
+            # Создать команду удаления
+            command = DeleteMarkerCommand(self.project, marker)
+            self.history_manager.execute_command(command)
             
             # Уведомить об изменении проекта
             self.project_modified.emit()

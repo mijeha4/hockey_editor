@@ -5,8 +5,8 @@
         "SHIFT": "S"
     },
     "recording_mode": "fixed_length",
-    "fixed_duration_sec": 5,
-    "pre_roll_sec": 0.0,
+    "fixed_duration_sec": 13,
+    "pre_roll_sec": 3.0,
     "post_roll_sec": 0.0,
     "track_colors": {
         "ATTACK": "#8b0000",
