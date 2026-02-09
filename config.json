@@ -24,7 +24,7 @@
         {
             "name": "Blocked Shot",
             "color": "#795548",
-            "shortcut": "C",
+            "shortcut": "B",
             "description": "Shot blocked"
         },
         {
@@ -54,7 +54,7 @@
         {
             "name": "Goal",
             "color": "#FF0000",
-            "shortcut": "G",
+            "shortcut": "Y",
             "description": "Goal scored"
         },
         {

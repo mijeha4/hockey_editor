@@ -45,7 +45,9 @@ class ShortcutController(QObject):
         """Clear all event shortcuts."""
         for shortcut in self.event_shortcuts.values():
             if shortcut:
-                shortcut.setParent(None)
+                shortcut.setEnabled(False)  # Отключаем сначала
+                shortcut.setParent(None)   # Удаляем из родителя
+                shortcut.deleteLater()     # Помечаем на удаление
         self.event_shortcuts.clear()
 
     def _setup_event_shortcuts(self) -> None:
@@ -59,16 +61,20 @@ class ShortcutController(QObject):
                 print(f"DEBUG: Skipping event {event.name} - no shortcut")
                 continue
 
-            shortcut = QShortcut(QKeySequence(event.shortcut.upper()), self.parent_window)
+            # Создаем локальную копию для замыкания
+            event_name = event.name
+            event_shortcut = event.shortcut.upper()
+            
+            shortcut = QShortcut(QKeySequence(event_shortcut), self.parent_window)
             shortcut.activated.connect(
-                lambda checked=False, key=event.shortcut.upper(): self._on_event_shortcut_activated(key)
+                lambda checked=False, name=event_name, key=event_shortcut: self._on_event_shortcut_activated(name, key)
             )
-            self.event_shortcuts[event.name] = shortcut
-            print(f"DEBUG: Setup event shortcut - {event.name}: {event.shortcut.upper()}")
+            self.event_shortcuts[event_name] = shortcut
+            print(f"DEBUG: Setup event shortcut - {event_name}: {event_shortcut}")
 
-    def _on_event_shortcut_activated(self, key: str):
+    def _on_event_shortcut_activated(self, event_name: str, key: str):
         """Handle event shortcut activation with debug logging."""
-        print(f"DEBUG: Event shortcut activated - key: {key}")
+        print(f"DEBUG: Event shortcut activated - event: {event_name}, key: {key}")
         self.shortcut_pressed.emit(key)
 
     def _on_global_shortcut_activated(self, key: str):
@@ -114,13 +120,24 @@ class ShortcutController(QObject):
 
     def _on_events_changed(self) -> None:
         """Handle event manager changes - rebind shortcuts."""
+        print("DEBUG: _on_events_changed called - rebind shortcuts")
         self._setup_shortcuts()
         self.shortcuts_updated.emit()
 
     def rebind_shortcuts(self) -> None:
         """Rebind all shortcuts after settings changes."""
+        print("DEBUG: rebind_shortcuts called")
         self._setup_shortcuts()
         self.shortcuts_updated.emit()
+
+    def cleanup_all_shortcuts(self):
+        """Complete cleanup of all shortcuts."""
+        # Clear event shortcuts
+        self._clear_event_shortcuts()
+        
+        # Clear global shortcuts
+        for name in list(self.shortcut_manager.shortcuts.keys()):
+            self.shortcut_manager.unregister_shortcut(name)
 
     def get_shortcut_for_event(self, event_name: str) -> Optional[str]:
         """Get the shortcut for a specific event."""
