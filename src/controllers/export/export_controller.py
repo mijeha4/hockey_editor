@@ -91,6 +91,10 @@ class ExportController(QObject):
 
     def show_dialog(self):
         """Показать диалог экспорта."""
+        # Создать новый диалог при каждом вызове
+        self.view = ExportDialog()
+        self._connect_signals()
+        
         # Подготовить данные сегментов для View
         segments_data = self._prepare_segments_data()
         self.view.set_segments(segments_data)
