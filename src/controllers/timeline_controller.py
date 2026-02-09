@@ -646,3 +646,18 @@ class TimelineController(QObject):
     def clear_selection(self):
         """Снять выделение со всех маркеров."""
         self.selected_markers.clear()
+
+    def save_project(self):
+        """Сохранить проект через main controller."""
+        if hasattr(self, '_main_controller') and self._main_controller:
+            self._main_controller._on_save_project()
+
+    def load_project(self):
+        """Загрузить проект через main controller."""
+        if hasattr(self, '_main_controller') and self._main_controller:
+            self._main_controller._on_load_project()
+
+    def new_project(self):
+        """Создать новый проект через main controller."""
+        if hasattr(self, '_main_controller') and self._main_controller:
+            self._main_controller._on_new_project()

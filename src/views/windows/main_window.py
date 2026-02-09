@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
 
         # Кнопка сброса фильтров
         reset_btn = QPushButton("Сброс")
-        reset_btn.setMaximumWidth(50)
+        reset_btn.setMaximumWidth(80)
         reset_btn.setToolTip("Сбросить все фильтры")
         reset_btn.clicked.connect(self._reset_filters)
         filters_layout.addWidget(reset_btn)

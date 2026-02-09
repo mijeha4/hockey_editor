@@ -59,6 +59,9 @@ class PreviewWindow(QMainWindow):
         self._setup_shortcuts()
         self._update_speed_combo()
         self._update_marker_list()
+        
+        # Установить оптимальный размер окна под видео
+        self._adjust_window_size_for_video()
 
         self.event_manager.events_changed.connect(self._on_events_changed)
 
@@ -129,7 +132,7 @@ class PreviewWindow(QMainWindow):
 
         # Кнопка сброса фильтров
         reset_btn = QPushButton("Сброс")
-        reset_btn.setMaximumWidth(45)
+        reset_btn.setMaximumWidth(80)
         reset_btn.setToolTip("Сбросить все фильтры")
         reset_btn.clicked.connect(self._on_reset_filters)
         row1_layout.addWidget(reset_btn)
@@ -363,7 +366,7 @@ class PreviewWindow(QMainWindow):
         self.drawing_tool_group.buttonClicked.connect(self._on_drawing_tool_changed)
 
         # Кнопка выбора инструмента (курсор)
-        cursor_btn = QPushButton("Курсор")
+        cursor_btn = QPushButton("✍")
         cursor_btn.setMaximumWidth(65)
         cursor_btn.setToolTip("Выбрать (отключить рисование)")
         cursor_btn.setCheckable(True)
@@ -372,7 +375,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(cursor_btn)
 
         # Кнопка линии
-        line_btn = QPushButton("Линия")
+        line_btn = QPushButton("︳")
         line_btn.setMaximumWidth(65)
         line_btn.setToolTip("Линия")
         line_btn.setCheckable(True)
@@ -380,7 +383,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(line_btn)
 
         # Кнопка прямоугольника
-        rect_btn = QPushButton("Прямоуг.")
+        rect_btn = QPushButton("▭")
         rect_btn.setMaximumWidth(65)
         rect_btn.setToolTip("Прямоугольник")
         rect_btn.setCheckable(True)
@@ -388,7 +391,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(rect_btn)
 
         # Кнопка круга
-        circle_btn = QPushButton("Круг")
+        circle_btn = QPushButton("◯")
         circle_btn.setMaximumWidth(65)
         circle_btn.setToolTip("Круг")
         circle_btn.setCheckable(True)
@@ -396,7 +399,7 @@ class PreviewWindow(QMainWindow):
         toolbar_layout.addWidget(circle_btn)
 
         # Кнопка стрелки
-        arrow_btn = QPushButton("Стрелка")
+        arrow_btn = QPushButton("➡")
         arrow_btn.setMaximumWidth(65)
         arrow_btn.setToolTip("Стрелка")
         arrow_btn.setCheckable(True)
@@ -715,72 +718,6 @@ class PreviewWindow(QMainWindow):
             return
         self._display_pixmap(pixmap)
 
-    def _display_pixmap(self, pixmap: QPixmap):
-        """Отобразить переданный QPixmap (без OpenCV конвертации)."""
-        if pixmap is None or pixmap.isNull():
-            return
-
-        target_size = self.video_container.size()
-        scaled_pixmap = pixmap.scaled(
-            target_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        # Установка картинки
-        self.video_label.setPixmap(scaled_pixmap)
-
-        # Центрировать изображение в контейнере
-        container_width = self.video_container.width()
-        container_height = self.video_container.height()
-        pixmap_width = scaled_pixmap.width()
-        pixmap_height = scaled_pixmap.height()
-
-        x = (container_width - pixmap_width) // 2
-        y = (container_height - pixmap_height) // 2
-
-        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
-        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
-
-    def _display_frame(self, frame):
-        """Отобразить переданный кадр (numpy array BGR)."""
-        # Проверяем, пришло ли хоть что-то
-        if frame is None:
-            return
-
-        # Конвертация OpenCV (BGR) -> Qt (RGB)
-        # OpenCV хранит цвета как Синий-Зеленый-Красный, а экраны ждут Красный-Зеленый-Синий
-        height, width, channel = frame.shape
-        bytes_per_line = 3 * width
-
-        # Создаем QImage из байтов
-        q_img = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-
-        # Меняем местами каналы R и B (иначе лица будут синими)
-        q_img = q_img.rgbSwapped()
-
-        # Масштабирование под размер окна (видео виджета)
-        target_size = self.video_container.size()
-        scaled_pixmap = QPixmap.fromImage(q_img).scaled(
-            target_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        # Установка картинки
-        self.video_label.setPixmap(scaled_pixmap)
-
-        # Центрировать изображение в контейнере
-        container_width = self.video_container.width()
-        container_height = self.video_container.height()
-        pixmap_width = scaled_pixmap.width()
-        pixmap_height = scaled_pixmap.height()
-
-        x = (container_width - pixmap_width) // 2
-        y = (container_height - pixmap_height) // 2
-
-        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
-        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
 
     def _update_slider(self):
         """Обновить ползунок и время."""
@@ -1135,3 +1072,163 @@ class PreviewWindow(QMainWindow):
     def _on_instance_updated_externally(self):
         """Обработка обновления маркера из внешнего окна редактирования."""
         self._update_marker_list()
+
+    def _adjust_window_size_for_video(self):
+        """Рассчитать и установить оптимальный размер окна под видео без черных рамок."""
+        try:
+            # Получить размеры видео
+            video_width = self.controller.get_video_width()
+            video_height = self.controller.get_video_height()
+            
+            if video_width <= 0 or video_height <= 0:
+                return
+
+            # Рассчитать соотношение сторон видео
+            video_aspect_ratio = video_width / video_height
+
+            # Получить размеры UI элементов (панель управления, список отрезков и т.д.)
+            controls_height = 50  # Примерная высота панели управления
+            filters_height = 60   # Примерная высота фильтров
+            list_height = 300     # Примерная высота списка отрезков
+            margins = 20          # Отступы
+            
+            # Рассчитать оптимальные размеры окна
+            # Цель: видео должно занимать максимальное пространство без черных рамок
+            # Учитываем, что видео занимает 70% ширины, а список отрезков - 30%
+            
+            # Вариант 1: видео ограничено по ширине
+            # Ширина видео = 70% от ширины окна
+            # Высота видео = ширина_видео / соотношение_сторон
+            # Общая высота окна = высота_видео + высота_панелей
+            
+            # Вариант 2: видео ограничено по высоте
+            # Высота видео = общая_высота - высота_панелей
+            # Ширина видео = высота_видео * соотношение_сторон
+            # Ширина окна = ширина_видео / 0.7
+            
+            # Рассчитываем оба варианта и выбираем оптимальный
+            
+            # Вариант 1: ограничение по ширине
+            # Предполагаем ширину окна 1200px (примерно)
+            test_width_1 = 1200
+            video_width_1 = int(test_width_1 * 0.7)
+            video_height_1 = int(video_width_1 / video_aspect_ratio)
+            total_height_1 = video_height_1 + controls_height + filters_height + list_height + margins
+            
+            # Вариант 2: ограничение по высоте
+            # Предполагаем высоту окна 800px (примерно)
+            test_height_2 = 800
+            video_height_2 = test_height_2 - (controls_height + filters_height + list_height + margins)
+            video_width_2 = int(video_height_2 * video_aspect_ratio)
+            total_width_2 = int(video_width_2 / 0.7)
+            
+            # Выбираем вариант, который дает большее видео
+            if video_width_1 * video_height_1 > video_width_2 * video_height_2:
+                final_width = test_width_1
+                final_height = total_height_1
+            else:
+                final_width = total_width_2
+                final_height = test_height_2
+
+            # Ограничить максимальный размер окна (не больше 90% от экрана)
+            screen = QApplication.primaryScreen().size()
+            max_width = int(screen.width() * 0.9)
+            max_height = int(screen.height() * 0.9)
+            
+            final_width = min(final_width, max_width)
+            final_height = min(final_height, max_height)
+
+            # Убедиться, что видео действительно помещается без рамок
+            # Пересчитать финальные размеры видео в окне
+            actual_video_width = int(final_width * 0.7)
+            actual_video_height = int(actual_video_width / video_aspect_ratio)
+            
+            # Проверить, помещается ли видео по высоте
+            available_height = final_height - (controls_height + filters_height + list_height + margins)
+            if actual_video_height > available_height:
+                # Если видео не помещается по высоте, уменьшаем ширину
+                actual_video_height = available_height
+                actual_video_width = int(actual_video_height * video_aspect_ratio)
+                final_width = int(actual_video_width / 0.7)
+
+            # Установить размер окна
+            self.resize(final_width, final_height)
+            
+            # Центрировать окно на экране
+            screen_geometry = QApplication.primaryScreen().geometry()
+            x = screen_geometry.center().x() - final_width // 2
+            y = screen_geometry.center().y() - final_height // 2
+            self.move(x, y)
+
+        except Exception as e:
+            # Если не удалось получить размеры видео, оставить стандартные размеры
+            pass
+
+    def _display_pixmap(self, pixmap: QPixmap):
+        """Отобразить переданный QPixmap с сохранением пропорций."""
+        if pixmap is None or pixmap.isNull():
+            return
+
+        target_size = self.video_container.size()
+        scaled_pixmap = pixmap.scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Установка картинки
+        self.video_label.setPixmap(scaled_pixmap)
+
+        # Центрировать изображение в контейнере
+        container_width = self.video_container.width()
+        container_height = self.video_container.height()
+        pixmap_width = scaled_pixmap.width()
+        pixmap_height = scaled_pixmap.height()
+
+        x = (container_width - pixmap_width) // 2
+        y = (container_height - pixmap_height) // 2
+
+        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
+        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
+
+    def _display_frame(self, frame):
+        """Отобразить переданный кадр (numpy array BGR) с сохранением пропорций."""
+        # Проверяем, пришло ли хоть что-то
+        if frame is None:
+            return
+
+        # Конвертация OpenCV (BGR) -> Qt (RGB)
+        height, width, channel = frame.shape
+        bytes_per_line = 3 * width
+
+        # Создаем QImage из байтов
+        q_img = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+
+        # Меняем местами каналы R и B (иначе лица будут синими)
+        q_img = q_img.rgbSwapped()
+
+        # Масштабирование под размер окна (видео виджета) с сохранением пропорций
+        target_size = self.video_container.size()
+        scaled_pixmap = QPixmap.fromImage(q_img).scaled(
+            target_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        # Установка картинки
+        self.video_label.setPixmap(scaled_pixmap)
+
+        # Центрировать изображение в контейнере
+        container_width = self.video_container.width()
+        container_height = self.video_container.height()
+        pixmap_width = scaled_pixmap.width()
+        pixmap_height = scaled_pixmap.height()
+
+        x = (container_width - pixmap_width) // 2
+        y = (container_height - pixmap_height) // 2
+
+        self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
+        self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
+
+
+
