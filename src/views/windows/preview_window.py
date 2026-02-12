@@ -770,6 +770,13 @@ class PreviewWindow(QMainWindow):
             closest_item = min(items, key=lambda x: abs(float(x.replace('x', '')) - current_speed))
             self.speed_combo.setCurrentText(closest_item)
 
+    def showEvent(self, event):
+        """Событие отображения окна."""
+        super().showEvent(event)
+        # Откладываем обновление видео на 0 мс, чтобы дать Layout-менеджеру 
+        # время рассчитать точные размеры контейнера video_container
+        QTimer.singleShot(0, self._display_current_frame)
+
     def resizeEvent(self, event):
         """Обработка изменения размера окна."""
         super().resizeEvent(event)
