@@ -10,5 +10,6 @@ from .timeline import TimelineWidget
 from .event_card_delegate import EventCardDelegate
 from .event_shortcut_list_widget import EventShortcutListWidget
 from .drawing_overlay import DrawingOverlay, DrawingTool
+from .scalable_video_label import ScalableVideoLabel
 
-__all__ = ['PlayerControls', 'SegmentListWidget', 'TimelineWidget', 'EventCardDelegate', 'EventShortcutListWidget', 'DrawingOverlay', 'DrawingTool']
+__all__ = ['PlayerControls', 'SegmentListWidget', 'TimelineWidget', 'EventCardDelegate', 'EventShortcutListWidget', 'DrawingOverlay', 'DrawingTool', 'ScalableVideoLabel']

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QFileDialog, QSpinBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtGui import QPixmap, QImage, QKeySequence, QKeyEvent, QShortcut, QDragEnterEvent, QDropEvent
-from PySide6.QtCore import Qt, Signal, QTimer, QMimeData
+from PySide6.QtCore import Qt, Signal, QMimeData
 import cv2
 import numpy as np
 from pathlib import Path
@@ -290,11 +290,11 @@ class MainWindow(QMainWindow):
         video_container_layout.setSpacing(0)  # Убираем промежутки между элементами
 
         # Видео виджет
-        self.video_label = QLabel()
-        self.video_label.setMinimumSize(640, 360)
+        from views.widgets.scalable_video_label import ScalableVideoLabel
+        self.video_label = ScalableVideoLabel()
+        self.video_label.setMinimumSize(320, 180)
         # Убрано ограничение максимального размера для занятия всей доступной высоты верхней половины экрана
-        self.video_label.setStyleSheet("background-color: black; border: 1px solid grey;")
-        self.video_label.setAlignment(Qt.AlignCenter)  # Центрирование содержимого
+        self.video_label.setStyleSheet("background-color: black;")  # Рамка убрана, фон черный
         video_container_layout.addWidget(self.video_label, 1)  # stretch factor 1 для занятия основного пространства
 
         # Профессиональная панель управления (интегрирована в нижнюю часть видео-фрейма)
@@ -384,77 +384,6 @@ class MainWindow(QMainWindow):
 
         central.setLayout(main_layout)
 
-    def _create_top_section(self) -> QWidget:
-        """Create the top section with video player and segment list."""
-        top_widget = QWidget()
-
-        # Horizontal splitter for video/segments
-        horizontal_splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Left side - Video container
-        video_container = self._create_video_container()
-        horizontal_splitter.addWidget(video_container)
-
-        # Right side - Segment list
-        self.segment_list_widget = SegmentListWidget()
-        horizontal_splitter.addWidget(self.segment_list_widget)
-
-        # Set proportions (60% video, 40% segments)
-        horizontal_splitter.setSizes([840, 560])
-
-        # Layout for top widget
-        layout = QHBoxLayout(top_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(horizontal_splitter)
-
-        return top_widget
-
-    def _create_video_container(self) -> QWidget:
-        """Create the video container with video display and controls."""
-        container = QWidget()
-
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Video display (placeholder QLabel)
-        self.video_label = QLabel("Video Display")
-        self.video_label.setMinimumSize(640, 360)
-        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setStyleSheet("""
-            QLabel {
-                background-color: #000000;
-                color: #666666;
-                border: 2px solid #444444;
-                font-size: 16px;
-                font-weight: bold;
-            }
-        """)
-        layout.addWidget(self.video_label)
-
-        # Player controls
-        self.player_controls = PlayerControls()
-        layout.addWidget(self.player_controls)
-
-        return container
-
-    def _create_footer(self, parent_layout: QVBoxLayout) -> None:
-        """Create the footer with status bar and shortcuts panel."""
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.status_bar.showMessage("Ready")
-        self.setStatusBar(self.status_bar)
-
-        # Shortcuts panel
-        try:
-            from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
-            self.shortcuts_widget = EventShortcutListWidget()
-            parent_layout.addWidget(self.shortcuts_widget)
-        except ImportError:
-            # Fallback if import fails
-            self.shortcuts_widget = QLabel("Event Shortcuts (Import failed)")
-            self.shortcuts_widget.setStyleSheet("color: #888888; padding: 5px;")
-            parent_layout.addWidget(self.shortcuts_widget)
 
     # Menu action handlers
     def _on_new_project(self) -> None:
@@ -750,16 +679,8 @@ class MainWindow(QMainWindow):
         if frame is None:
             return
 
-        # Конвертировать BGR в RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame_rgb.shape
-        bytes_per_line = ch * w
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-
-        # Масштабировать под размер label
-        pixmap = QPixmap.fromImage(qt_image)
-        pixmap = pixmap.scaledToWidth(800, Qt.TransformationMode.SmoothTransformation)
-        self.video_label.setPixmap(pixmap)
+        # Передаем кадр напрямую в ScalableVideoLabel
+        self.video_label.set_frame(frame)
 
     def _on_autosave_completed(self):
         """Обработка завершения автосохранения."""
