@@ -19,6 +19,7 @@ from src.models.ui.event_list_model import MarkersListModel
 from src.views.widgets.event_card_delegate import EventCardDelegate
 from src.models.domain.marker import Marker
 from src.views.widgets.drawing_overlay import DrawingOverlay, DrawingTool
+from controllers.filter_controller import FilterController
 
 
 class PreviewWindow(QMainWindow):
@@ -41,9 +42,6 @@ class PreviewWindow(QMainWindow):
         self.playback_timer.timeout.connect(self._on_playback_tick)
         self.frame_time_ms = 33  # ~30 FPS
 
-        # Инициализация фильтров
-        self._init_filters()
-
         # Создание модели и делегата для списка маркеров
         self.markers_model = MarkersListModel(self)
         self.markers_delegate = EventCardDelegate(self)
@@ -55,6 +53,9 @@ class PreviewWindow(QMainWindow):
         from src.services.events.custom_event_manager import get_custom_event_manager
         self.event_manager = get_custom_event_manager()
 
+        # Get FilterController from main controller
+        self.filter_controller = self.controller.filter_controller
+
         self._setup_ui()
         self._setup_shortcuts()
         self._update_speed_combo()
@@ -64,6 +65,7 @@ class PreviewWindow(QMainWindow):
         self._adjust_window_size_for_video()
 
         self.event_manager.events_changed.connect(self._on_events_changed)
+        self.filter_controller.filters_changed.connect(self._on_filters_changed)
 
         # Получаем готовые QPixmap от основного PlaybackController,
         # чтобы не декодировать/конвертировать видео повторно в этом окне.
@@ -94,14 +96,6 @@ class PreviewWindow(QMainWindow):
 
         # Update card highlighting
         self._update_active_card_highlight()
-
-    def _init_filters(self):
-        """Инициализация состояния фильтров."""
-        self.filter_event_types = set()  # Множество выбранных типов событий
-        self.filter_has_notes = False    # Фильтр по наличию заметок
-        self.filter_min_duration = 0     # Минимальная длительность (секунды)
-        self.filter_max_duration = 0     # Максимальная длительность (секунды)
-        self.filter_notes_search = ""    # Поиск по тексту заметок
 
     def _setup_filters(self, parent_layout):
         """Создать элементы управления фильтрами."""
@@ -216,6 +210,22 @@ class PreviewWindow(QMainWindow):
     def _on_events_changed(self):
         """Обработка изменения событий - обновить фильтр событий."""
         self._update_event_filter()
+
+    def _passes_filters(self, marker):
+        """Проверить, проходит ли маркер через текущие фильтры."""
+        # Фильтр по типу события
+        if self.filter_event_types and marker.event_name not in self.filter_event_types:
+            return False
+
+        # Фильтр по заметкам
+        if self.filter_has_notes and not marker.note.strip():
+            return False
+
+        # Фильтр по поиску в заметках
+        if self.filter_notes_search and self.filter_notes_search not in marker.note.lower():
+            return False
+
+        return True
 
     def _setup_shortcuts(self):
         """Настроить горячие клавиши для рисования."""
@@ -571,22 +581,6 @@ class PreviewWindow(QMainWindow):
             self.markers_list.setCurrentIndex(index)
             # Автоскролл к выделенному элементу
             self.markers_list.scrollTo(index)
-
-    def _passes_filters(self, marker):
-        """Проверить, проходит ли маркер через текущие фильтры."""
-        # Фильтр по типу события
-        if self.filter_event_types and marker.event_name not in self.filter_event_types:
-            return False
-
-        # Фильтр по заметкам
-        if self.filter_has_notes and not marker.note.strip():
-            return False
-
-        # Фильтр по поиску в заметках
-        if self.filter_notes_search and self.filter_notes_search not in marker.note.lower():
-            return False
-
-        return True
 
     def _on_play_pause_clicked(self):
         """Кнопка Play/Pause."""
@@ -1237,5 +1231,55 @@ class PreviewWindow(QMainWindow):
         self.video_label.setGeometry(x, y, pixmap_width, pixmap_height)
         self.drawing_overlay.setGeometry(x, y, pixmap_width, pixmap_height)
 
+    def _on_filters_changed(self):
+        """Обработка изменения фильтров из FilterController."""
+        # Update filter UI to match FilterController state
+        self._sync_filter_ui_with_controller()
+        # Update marker list with new filters
+        self._update_marker_list_with_filters()
 
+    def _sync_filter_ui_with_controller(self):
+        """Синхронизировать UI фильтров с состоянием FilterController."""
+        if not hasattr(self, 'filter_controller'):
+            return
 
+        # Update event filter combo
+        self.event_filter_combo.blockSignals(True)
+        current_filtered_events = self.filter_controller.get_filtered_event_types()
+        
+        if not current_filtered_events:
+            # Show "Все" if no event filters
+            self.event_filter_combo.setCurrentIndex(0)
+        else:
+            # Find and select the first filtered event
+            for i in range(self.event_filter_combo.count()):
+                event_name = self.event_filter_combo.itemData(i)
+                if event_name in current_filtered_events:
+                    self.event_filter_combo.setCurrentIndex(i)
+                    break
+        
+        self.event_filter_combo.blockSignals(False)
+
+        # Update notes filter checkbox
+        self.notes_filter_checkbox.blockSignals(True)
+        self.notes_filter_checkbox.setChecked(self.filter_controller.is_notes_filtered())
+        self.notes_filter_checkbox.blockSignals(False)
+
+    def _update_marker_list_with_filters(self):
+        """Обновить список маркеров с учетом текущих фильтров."""
+        if not hasattr(self, 'filter_controller'):
+            return
+
+        # Get all markers from controller
+        all_markers = self.controller.markers
+        
+        # Apply filters using FilterController
+        filtered_markers = self.filter_controller.filter_markers(all_markers)
+        
+        # Update marker list with filtered markers
+        fps = self.controller.get_fps()
+        self.markers_model.set_fps(fps)
+        self.markers_model.set_markers(filtered_markers)
+        
+        # Выделить текущую активную карточку
+        self._update_active_card_highlight()

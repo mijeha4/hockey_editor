@@ -31,6 +31,11 @@ from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
 from services.serialization.settings_manager import get_settings_manager
 from services.events.custom_event_manager import get_custom_event_manager
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from controllers.filter_controller import FilterController
+
 class MainWindow(QMainWindow):
     """Главное окно приложения - точная копия из hockey_editor_OLD/ui/main_window.py."""
 
@@ -99,91 +104,6 @@ class MainWindow(QMainWindow):
         # Shortcuts are now handled by ShortcutController
         # self._setup_shortcuts()
 
-    def _init_filters(self):
-        """Инициализация состояния фильтров (from old version)."""
-        self.filter_event_types = set()  # Множество выбранных типов событий
-        self.filter_has_notes = False    # Фильтр по наличию заметок
-
-    def _setup_filters(self, parent_layout):
-        """Создать элементы управления фильтрами (from old version)."""
-        # Контейнер для фильтров
-        filters_layout = QHBoxLayout()
-        filters_layout.setSpacing(5)
-
-        # Фильтр по типу события
-        event_filter_label = QLabel("Тип:")
-        event_filter_label.setMaximumWidth(30)
-        filters_layout.addWidget(event_filter_label)
-
-        self.event_filter_combo = QComboBox()
-        self.event_filter_combo.setToolTip("Фильтр по типу события")
-        self.event_filter_combo.setMaximumWidth(120)
-        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
-        filters_layout.addWidget(self.event_filter_combo)
-
-        # Чекбокс для фильтра заметок
-        self.notes_filter_checkbox = QCheckBox("Заметки")
-        self.notes_filter_checkbox.setToolTip("Показывать только отрезки с заметками")
-        self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
-        filters_layout.addWidget(self.notes_filter_checkbox)
-
-        # Кнопка сброса фильтров
-        reset_btn = QPushButton("Сброс")
-        reset_btn.setMaximumWidth(80)
-        reset_btn.setToolTip("Сбросить все фильтры")
-        reset_btn.clicked.connect(self._reset_filters)
-        filters_layout.addWidget(reset_btn)
-
-        filters_layout.addStretch()
-
-        parent_layout.addLayout(filters_layout)
-
-        # Заполнить фильтр событий
-        self._update_event_filter()
-
-    def _update_event_filter(self):
-        """Обновить список доступных типов событий в фильтре."""
-        self.event_filter_combo.blockSignals(True)
-        self.event_filter_combo.clear()
-
-        # Добавить опцию "Все"
-        self.event_filter_combo.addItem("Все", None)
-
-        # Добавить все доступные типы событий
-        events = self.event_manager.get_all_events()
-        for event in events:
-            localized_name = event.get_localized_name()
-            self.event_filter_combo.addItem(localized_name, event.name)
-
-        self.event_filter_combo.blockSignals(False)
-
-    def _on_event_filter_changed(self):
-        """Обработка изменения фильтра типов событий."""
-        current_data = self.event_filter_combo.currentData()
-        if current_data is None:  # "Все"
-            self.filter_event_types.clear()
-        else:
-            self.filter_event_types = {current_data}
-
-        self._on_markers_changed()
-
-    def _on_notes_filter_changed(self):
-        """Обработка изменения фильтра заметок."""
-        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
-        self._on_markers_changed()
-
-    def _reset_filters(self):
-        """Сбросить все фильтры."""
-        self.event_filter_combo.blockSignals(True)
-        self.event_filter_combo.setCurrentIndex(0)  # "Все"
-        self.event_filter_combo.blockSignals(False)
-
-        self.notes_filter_checkbox.setChecked(False)
-
-        self.filter_event_types.clear()
-        self.filter_has_notes = False
-
-        self._on_markers_changed()
 
     def _create_menu(self):
         """Создать меню приложения (adapted from old version)."""
@@ -473,6 +393,12 @@ class MainWindow(QMainWindow):
         # self.autosave_manager.autosave_completed.connect(self._on_autosave_completed)
         self.autosave_manager = None
 
+        # Get FilterController from main controller
+        self.filter_controller = self.controller.filter_controller
+
+        # Connect FilterController signals
+        self.filter_controller.filters_changed.connect(self._on_filters_changed)
+
         # Connect signals
         self.connect_signals()
 
@@ -642,8 +568,91 @@ class MainWindow(QMainWindow):
 
     def _on_markers_changed(self):
         """Обновление списка отрезков с применением фильтров."""
-        # Adapted from old version
-        pass  # Implementation needed
+        # Проверка наличия контроллера
+        if not hasattr(self, 'controller') or not self.controller:
+            return
+
+        # 1. Получаем все маркеры из контроллера
+        all_markers = self.controller.markers
+        filtered_markers = []
+
+        # 2. Применяем фильтры
+        for marker in all_markers:
+            # Фильтр по типу события (если список типов не пуст)
+            # self.filter_event_types содержит set выбранных типов (например {'goal'})
+            if self.filter_event_types and marker.event_name not in self.filter_event_types:
+                continue
+
+            # Фильтр по наличию заметок
+            if self.filter_has_notes and not marker.note.strip():
+                continue
+
+            # Если маркер прошел все проверки, добавляем его
+            filtered_markers.append(marker)
+
+        # 3. Обновляем виджет списка сегментов
+        if hasattr(self.segment_list_widget, 'update_segments'):
+            self.segment_list_widget.update_segments(filtered_markers)
+        elif hasattr(self.segment_list_widget, 'set_markers'):
+            # На случай, если метод называется по-другому
+            self.segment_list_widget.set_markers(filtered_markers)
+            
+        # 4. Если нужно обновить и таймлайн (опционально)
+        if hasattr(self, 'timeline_widget') and hasattr(self.timeline_widget, 'set_filtered_markers'):
+             self.timeline_widget.set_filtered_markers(filtered_markers)
+
+    def _on_filters_changed(self):
+        """Обработка изменения фильтров из FilterController."""
+        # Update filter UI to match FilterController state
+        self._sync_filter_ui_with_controller()
+        # Update segment list with new filters
+        self._update_segment_list_with_filters()
+
+    def _sync_filter_ui_with_controller(self):
+        """Синхронизировать UI фильтров с состоянием FilterController."""
+        if not hasattr(self, 'filter_controller'):
+            return
+
+        # Update event filter combo
+        self.event_filter_combo.blockSignals(True)
+        current_filtered_events = self.filter_controller.get_filtered_event_types()
+        
+        if not current_filtered_events:
+            # Show "Все" if no event filters
+            self.event_filter_combo.setCurrentIndex(0)
+        else:
+            # Find and select the first filtered event
+            for i in range(self.event_filter_combo.count()):
+                event_name = self.event_filter_combo.itemData(i)
+                if event_name in current_filtered_events:
+                    self.event_filter_combo.setCurrentIndex(i)
+                    break
+        
+        self.event_filter_combo.blockSignals(False)
+
+        # Update notes filter checkbox
+        self.notes_filter_checkbox.blockSignals(True)
+        self.notes_filter_checkbox.setChecked(self.filter_controller.is_notes_filtered())
+        self.notes_filter_checkbox.blockSignals(False)
+
+    def _update_segment_list_with_filters(self):
+        """Обновить список сегментов с учетом текущих фильтров."""
+        if not hasattr(self, 'filter_controller') or not hasattr(self, '_timeline_controller'):
+            return
+
+        # Get all markers from timeline controller
+        all_markers = self._timeline_controller.markers
+        
+        # Apply filters using FilterController
+        filtered_markers = self.filter_controller.filter_markers(all_markers)
+        
+        # Convert to format expected by segment list widget
+        segments_with_idx = []
+        for i, marker in enumerate(filtered_markers):
+            segments_with_idx.append((i, marker))
+        
+        # Update segment list
+        self.segment_list_widget.set_segments(segments_with_idx)
 
     def _on_recording_status_changed(self, event_type: str, status: str):
         """Изменение статуса записи."""
@@ -890,3 +899,112 @@ class MainWindow(QMainWindow):
 
     # Additional signals
     video_dropped = Signal(str)  # Signal emitted when video is dropped (file_path)
+
+    # ===== Filter Methods =====
+
+    def _init_filters(self):
+        """Инициализация фильтров."""
+        # Инициализация переменных состояния фильтров
+        self.filter_event_types = set()
+        self.filter_has_notes = False
+        
+        # UI элементы фильтров будут созданы в _setup_filters
+        self.event_filter_combo = None
+        self.notes_filter_checkbox = None
+
+    def _setup_filters(self, parent_layout):
+        """Создать элементы управления фильтрами."""
+        # Контейнер для фильтров
+        filters_layout = QVBoxLayout()
+        filters_layout.setSpacing(3)
+
+        # Первая строка: тип события + заметки
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(5)
+
+        # Фильтр по типу события
+        event_label = QLabel("Тип:")
+        event_label.setMaximumWidth(25)
+        row1_layout.addWidget(event_label)
+
+        self.event_filter_combo = QComboBox()
+        self.event_filter_combo.setToolTip("Фильтр по типу события")
+        self.event_filter_combo.setMaximumWidth(100)
+        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        row1_layout.addWidget(self.event_filter_combo)
+
+        # Чекбокс для фильтра заметок
+        self.notes_filter_checkbox = QCheckBox("Заметки")
+        self.notes_filter_checkbox.setToolTip("Показывать только отрезки с заметками")
+        self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
+        row1_layout.addWidget(self.notes_filter_checkbox)
+
+        # Кнопка сброса фильтров
+        reset_btn = QPushButton("Сброс")
+        reset_btn.setMaximumWidth(80)
+        reset_btn.setToolTip("Сбросить все фильтры")
+        reset_btn.clicked.connect(self._on_reset_filters)
+        row1_layout.addWidget(reset_btn)
+
+        filters_layout.addLayout(row1_layout)
+
+        parent_layout.addLayout(filters_layout)
+
+        # Заполнить фильтр событий
+        self._update_event_filter()
+
+    def _update_event_filter(self):
+        """Обновить список доступных типов событий в фильтре."""
+        if not self.event_filter_combo:
+            return
+
+        self.event_filter_combo.blockSignals(True)
+        self.event_filter_combo.clear()
+
+        # Добавить опцию "Все"
+        self.event_filter_combo.addItem("Все", None)
+
+        # Добавить все доступные типы событий
+        events = self.event_manager.get_all_events()
+        for event in events:
+            localized_name = event.get_localized_name()
+            self.event_filter_combo.addItem(localized_name, event.name)
+
+        self.event_filter_combo.blockSignals(False)
+
+    def _on_event_filter_changed(self):
+        """Обработка изменения фильтра типов событий."""
+        current_data = self.event_filter_combo.currentData()
+        if current_data is None:  # "Все"
+            self.filter_event_types.clear()
+        else:
+            self.filter_event_types = {current_data}
+
+        # Обновить фильтр в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.set_event_type_filter(self.filter_event_types)
+
+    def _on_notes_filter_changed(self):
+        """Обработка изменения фильтра заметок."""
+        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
+        
+        # Обновить фильтр в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.set_notes_filter(self.filter_has_notes)
+
+    def _on_reset_filters(self):
+        """Сбросить все фильтры."""
+        if self.event_filter_combo:
+            self.event_filter_combo.blockSignals(True)
+            self.event_filter_combo.setCurrentIndex(0)  # "Все"
+            self.event_filter_combo.blockSignals(False)
+
+        if self.notes_filter_checkbox:
+            self.notes_filter_checkbox.setChecked(False)
+
+        self.filter_event_types.clear()
+        self.filter_has_notes = False
+
+        # Сбросить фильтры в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.reset_all_filters()

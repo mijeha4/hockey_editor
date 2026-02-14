@@ -2,16 +2,21 @@ from PySide6.QtCore import QObject, QTimer, Signal, Qt
 from PySide6.QtGui import QPixmap, QImage
 import cv2
 import numpy as np
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from services.video_engine import VideoService
+    from views.widgets.player_controls import PlayerControls
+    from views.windows.main_window import MainWindow
+
 # Используем абсолютные импорты для совместимости с run_test.py
 try:
     from services.video_engine import VideoService
     from views.widgets.player_controls import PlayerControls
-    from views.windows.main_window import MainWindow
 except ImportError:
     # Для случаев, когда запускаем из src/
     from services.video_engine import VideoService
     from views.widgets.player_controls import PlayerControls
-    from views.windows.main_window import MainWindow
 
 
 class PlaybackController(QObject):
@@ -25,7 +30,7 @@ class PlaybackController(QObject):
 
     def __init__(self, video_service: VideoService,
                  player_controls: PlayerControls,
-                 main_window: MainWindow):
+                 main_window):
         super().__init__()
 
         self.video_service = video_service

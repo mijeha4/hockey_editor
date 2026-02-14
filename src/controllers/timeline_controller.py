@@ -140,6 +140,16 @@ class TimelineController(QObject):
             self.custom_event_controller.events_changed.connect(self._on_events_changed)
             self.custom_event_controller.event_added.connect(self._on_event_added)
             self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
+
+        # Подключить FilterController для синхронизации фильтров
+        self.filter_controller = None
+        if hasattr(self, 'project') and hasattr(self.project, 'filter_controller'):
+            self.filter_controller = self.project.filter_controller
+        elif hasattr(self, 'project') and hasattr(self.project, 'main_controller'):
+            self.filter_controller = self.project.main_controller.filter_controller
+
+        if self.filter_controller is not None:
+            self.filter_controller.filters_changed.connect(self._on_filters_changed)
     # --- ДОБАВИТЬ ЭТОТ МЕТОД ---
     def set_main_window(self, window):
         """Установить ссылку на главное окно."""
@@ -661,3 +671,27 @@ class TimelineController(QObject):
         """Создать новый проект через main controller."""
         if hasattr(self, '_main_controller') and self._main_controller:
             self._main_controller._on_new_project()
+
+    def _on_filters_changed(self):
+        """Обработка изменения фильтров из FilterController."""
+        # Обновить отображение маркеров в соответствии с новыми фильтрами
+        self._update_markers_display()
+
+    def _update_markers_display(self):
+        """Обновить отображение маркеров с учетом текущих фильтров."""
+        if not hasattr(self, 'filter_controller'):
+            return
+
+        # Get all markers from project
+        all_markers = self.project.markers
+        
+        # Apply filters using FilterController
+        filtered_markers = self.filter_controller.filter_markers(all_markers)
+        
+        # Update timeline widget with filtered markers
+        if self.timeline_widget and hasattr(self.timeline_widget, 'set_markers'):
+            self.timeline_widget.set_markers(filtered_markers)
+
+        # Update segment list widget with filtered markers
+        if self.segment_list_widget:
+            self.segment_list_widget.update_segments([marker.to_marker() for marker in filtered_markers])
