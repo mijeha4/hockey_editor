@@ -115,7 +115,7 @@ class PreviewWindow(QMainWindow):
         self.event_filter_combo = QComboBox()
         self.event_filter_combo.setToolTip("Фильтр по типу события")
         self.event_filter_combo.setMaximumWidth(100)
-        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        self.event_filter_combo.currentIndexChanged.connect(self._on_event_filter_changed)
         row1_layout.addWidget(self.event_filter_combo)
 
         # Чекбокс для фильтра заметок
@@ -172,7 +172,7 @@ class PreviewWindow(QMainWindow):
 
         self.event_filter_combo.blockSignals(False)
 
-    def _on_event_filter_changed(self):
+    def _on_event_filter_changed(self, index=None):
         """Обработка изменения фильтра типов событий."""
         current_data = self.event_filter_combo.currentData()
         if current_data is None:  # "Все"
@@ -498,17 +498,9 @@ class PreviewWindow(QMainWindow):
 
     def _update_marker_list(self):
         """Обновить список карточек событий с фильтрацией."""
-        fps = self.controller.get_fps()
-
-        # Установить FPS в делегате для форматирования времени
-        self.markers_delegate.set_fps(fps)
-
-        # Обновить модель с новыми данными и фильтрами
-        self.markers_model.set_fps(fps)
-        self.markers_model.set_markers(self.controller.markers)
-
-        # Выделить текущую активную карточку
-        self._update_active_card_highlight()
+        # Используем единую логику обновления через FilterController,
+        # чтобы избежать дублирования и рассинхронизации фильтров.
+        self._update_marker_list_with_filters()
 
     def _on_card_play_requested(self, marker_idx: int):
         """Обработка запроса воспроизведения от карточки."""
@@ -1282,4 +1274,11 @@ class PreviewWindow(QMainWindow):
         self.markers_model.set_markers(filtered_markers)
         
         # Выделить текущую активную карточку
+        self._update_active_card_highlight()
+
+    def set_filtered_markers(self, markers):
+        """Set filtered markers directly."""
+        fps = self.controller.get_fps() if self.controller else 30.0
+        self.markers_model.set_fps(fps)
+        self.markers_model.set_markers(markers)
         self._update_active_card_highlight()

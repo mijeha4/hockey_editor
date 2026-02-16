@@ -275,6 +275,14 @@ class MarkerSegmentTimelineWidget(QGraphicsView):
 
                 # Emit seek signal
                 self.seek_requested.emit(frame)
+            else:
+                # Check if click is on a segment
+                clicked_items = self.scene.items(scene_pos)
+                for item in clicked_items:
+                    if isinstance(item, QGraphicsRectItem) and hasattr(item, 'marker'):
+                        # Handle marker selection
+                        self._on_marker_clicked(item.marker)
+                        break
 
         super().mousePressEvent(event)
 
@@ -376,3 +384,10 @@ class MarkerSegmentTimelineWidget(QGraphicsView):
 
         # Redraw the timeline
         self._setup_timeline()
+
+    def _on_marker_clicked(self, marker: Marker) -> None:
+        """Handle click on a marker/segment in the timeline."""
+        # Emit signal to notify controller about marker selection
+        # This will be connected to the controller's selection handling
+        if hasattr(self, 'marker_selected'):
+            self.marker_selected.emit(marker)

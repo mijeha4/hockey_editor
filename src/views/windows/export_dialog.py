@@ -309,6 +309,35 @@ class ExportDialog(QDialog):
             self.segment_checkboxes.append((segment_id, checkbox))
             self.segments_layout.addWidget(checkbox)
 
+    def set_filtered_segments(self, segments_data: List[Dict]):
+        """
+        Установить отфильтрованный список сегментов для выбора.
+        Все сегменты будут выбраны по умолчанию.
+        """
+        # Очистить старые checkbox
+        for cb in self.segment_checkboxes:
+            cb.setParent(None)
+        self.segment_checkboxes.clear()
+
+        # Создать checkbox для каждого сегмента
+        for segment in segments_data:
+            segment_id = segment['id']
+            event_name = segment['event_name']
+            start_frame = segment['start_frame']
+            end_frame = segment['end_frame']
+            duration_sec = segment['duration_sec']
+
+            # Форматировать время
+            start_time = self._format_time(start_frame / self.fps)
+            end_time = self._format_time(end_frame / self.fps)
+
+            text = f"{segment_id+1}. {event_name} ({start_time}–{end_time}) [{duration_sec:.1f}s]"
+            checkbox = QCheckBox(text)
+            checkbox.setChecked(True)  # Все отфильтрованные сегменты выбраны по умолчанию
+
+            self.segment_checkboxes.append((segment_id, checkbox))
+            self.segments_layout.addWidget(checkbox)
+
     def set_video_path(self, video_path: str):
         """Установить путь к видео файлу."""
         self.video_path = video_path

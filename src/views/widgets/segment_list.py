@@ -42,8 +42,12 @@ class SegmentListWidget(QWidget):
         self.fps = 30.0  # default, will be updated
         self.segments = []  # list of (marker_idx, marker) tuples
         self.event_manager = get_custom_event_manager()
+        
+        # External filter controller for synchronization
+        self.filter_controller = None
 
         self.setup_ui()
+        self._setup_selection_handling()
 
     def setup_ui(self):
         """Create the main UI."""
@@ -117,8 +121,32 @@ class SegmentListWidget(QWidget):
         self.table.itemClicked.connect(self._on_item_clicked)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu_requested)
-
+        
         layout.addWidget(self.table)
+
+    def _setup_selection_handling(self):
+        """Setup selection handling for filter synchronization."""
+        # Connect selection changed signal for filter synchronization
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        
+    def _on_selection_changed(self, selected, deselected):
+        """Handle selection changes in the table."""
+        # Get selected rows
+        selected_rows = []
+        for index in self.table.selectionModel().selectedRows():
+            selected_rows.append(index.row())
+        
+        # If filter controller is available, update it with selected marker IDs
+        if self.filter_controller:
+            # Get marker IDs for selected rows
+            selected_marker_ids = set()
+            for row in selected_rows:
+                if 0 <= row < len(self.segments):
+                    marker_idx, marker = self.segments[row]
+                    selected_marker_ids.add(marker.id)
+            
+            # Set selected markers filter
+            self.filter_controller.set_selected_markers_filter(selected_marker_ids)
 
 
 
@@ -450,3 +478,9 @@ class SegmentListWidget(QWidget):
         """
         filtered_tuples = self._apply_filters(self.segments)
         return [marker for _, marker in filtered_tuples]
+
+    def set_filter_controller(self, filter_controller):
+        """Set the external filter controller for synchronization."""
+        self.filter_controller = filter_controller
+        if self.filter_controller is not None:
+            self.filter_controller.filters_changed.connect(self._on_external_filters_changed)

@@ -54,11 +54,13 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         self.timeline_scene = timeline_scene
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsRectItem.ItemIsFocusable, True)
 
         event_manager = get_custom_event_manager()
         event = event_manager.get_event(marker.event_name)
         self.event_color = QColor(event.color) if event else QColor("#888888")
         self.is_hovered = False
+        self.is_selected = False
 
         # Устанавливаем tooltip с полным текстом
         self.setToolTip(self._get_full_text())
@@ -145,6 +147,12 @@ class SegmentGraphicsItem(QGraphicsRectItem):
         # MVC: emit signal to open segment editor
         self.timeline_scene.segment_double_clicked.emit(self.marker)
         super().mouseDoubleClickEvent(event)
+
+    def set_selected(self, selected: bool):
+        """Set selection state for the segment."""
+        self.is_selected = selected
+        self.setSelected(selected)
+        self.update()  # Перерисовываем
 
 
 class TrackHeaderItem(QGraphicsObject):
@@ -593,15 +601,32 @@ class TimelineWidget(QWidget):
                 clicked_items = self.scene.items(pos)
                 for item in clicked_items:
                     if isinstance(item, SegmentGraphicsItem):
-                        # Clear previous selection
-                        for seg_item in self.scene.items():
-                            if isinstance(seg_item, SegmentGraphicsItem):
-                                seg_item.set_selected(False)
-                        # Select clicked segment
-                        item.set_selected(True)
-                        # Emit selection signal
-                        if hasattr(self.scene, 'segment_selected'):
-                            self.scene.segment_selected.emit(item.marker)
+                        # Handle marker selection through controller
+                        if self.controller:
+                            # Find marker index
+                            marker_idx = -1
+                            for i, marker in enumerate(self.controller.markers):
+                                if marker.id == item.marker.id:
+                                    marker_idx = i
+                                    break
+                            
+                            if marker_idx >= 0:
+                                # Toggle selection
+                                self.controller.handle_marker_selection(marker_idx, toggle_mode=True)
+                                # Emit selection signal for compatibility
+                                if hasattr(self.scene, 'segment_selected'):
+                                    self.scene.segment_selected.emit(item.marker)
+                        else:
+                            # Fallback to direct selection
+                            # Clear previous selection
+                            for seg_item in self.scene.items():
+                                if isinstance(seg_item, SegmentGraphicsItem):
+                                    seg_item.set_selected(False)
+                            # Select clicked segment
+                            item.set_selected(True)
+                            # Emit selection signal
+                            if hasattr(self.scene, 'segment_selected'):
+                                self.scene.segment_selected.emit(item.marker)
                         break
                 else:
                     # Click was not on a segment, handle as seek

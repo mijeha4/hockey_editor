@@ -27,6 +27,7 @@ class FilterController(QObject):
         # Filter state
         self.filter_event_types: Set[str] = set()  # Selected event type names
         self.filter_has_notes: bool = False        # Filter by segments with notes
+        self.selected_marker_ids: Set[int] = set() # Selected marker IDs for filtering
 
         # Connect to event manager changes
         self.event_manager.events_changed.connect(self._on_events_changed)
@@ -99,9 +100,141 @@ class FilterController(QObject):
         if self.filter_has_notes:
             self.filter_has_notes = False
             changed = True
+        if self.selected_marker_ids:
+            self.selected_marker_ids.clear()
+            changed = True
 
         if changed:
             self.filters_changed.emit()
+
+    def set_selected_markers_filter(self, marker_ids: Set[int]) -> None:
+        """Set the selected markers filter.
+
+        Args:
+            marker_ids: Set of marker IDs to show (empty for all)
+        """
+        if self.selected_marker_ids != marker_ids:
+            self.selected_marker_ids = marker_ids.copy()
+            self.filters_changed.emit()
+
+    def add_selected_marker(self, marker_id: int) -> None:
+        """Add a marker to the selected markers filter.
+
+        Args:
+            marker_id: Marker ID to add
+        """
+        if marker_id not in self.selected_marker_ids:
+            self.selected_marker_ids.add(marker_id)
+            self.filters_changed.emit()
+
+    def remove_selected_marker(self, marker_id: int) -> None:
+        """Remove a marker from the selected markers filter.
+
+        Args:
+            marker_id: Marker ID to remove
+        """
+        if marker_id in self.selected_marker_ids:
+            self.selected_marker_ids.remove(marker_id)
+            self.filters_changed.emit()
+
+    def clear_selected_markers(self) -> None:
+        """Clear the selected markers filter (show all markers)."""
+        if self.selected_marker_ids:
+            self.selected_marker_ids.clear()
+            self.filters_changed.emit()
+
+    def toggle_selected_marker(self, marker_id: int) -> None:
+        """Toggle a marker in the selected markers filter.
+
+        Args:
+            marker_id: Marker ID to toggle
+        """
+        if marker_id in self.selected_marker_ids:
+            self.remove_selected_marker(marker_id)
+        else:
+            self.add_selected_marker(marker_id)
+
+    def is_selected_marker_filtered(self) -> bool:
+        """Check if selected markers filter is active.
+
+        Returns:
+            True if selected markers filter is active
+        """
+        return bool(self.selected_marker_ids)
+
+    def get_selected_marker_ids(self) -> Set[int]:
+        """Get currently selected marker IDs.
+
+        Returns:
+            Set of selected marker IDs
+        """
+        return self.selected_marker_ids.copy()
+
+    def clear_selected_markers_filter(self) -> None:
+        """Clear the selected markers filter and emit signal."""
+        if self.selected_marker_ids:
+            self.selected_marker_ids.clear()
+            self.filters_changed.emit()
+
+    def set_selected_markers_filter_active(self, active: bool) -> None:
+        """Set the selected markers filter to active or inactive state.
+
+        Args:
+            active: True to activate filter, False to deactivate
+        """
+        if active and not self.selected_marker_ids:
+            # If trying to activate but no markers selected, do nothing
+            return
+        elif not active and self.selected_marker_ids:
+            # If deactivating, clear the selection
+            self.clear_selected_markers_filter()
+
+    def get_filter_mode(self) -> str:
+        """Get current filter mode.
+
+        Returns:
+            'selected' if selected markers filter is active,
+            'all' if no filters are active,
+            'filtered' if other filters are active
+        """
+        if self.selected_marker_ids:
+            return 'selected'
+        elif self.filter_event_types or self.filter_has_notes:
+            return 'filtered'
+        else:
+            return 'all'
+
+    def toggle_selected_markers_mode(self) -> None:
+        """Toggle between showing all markers and only selected markers."""
+        if self.selected_marker_ids:
+            # If selected markers are active, deactivate them
+            self.clear_selected_markers_filter()
+        else:
+            # If no selected markers, activate selection mode
+            # This will be handled by the UI when markers are selected
+            pass
+
+    def is_selected_markers_mode_active(self) -> bool:
+        """Check if selected markers mode is active.
+
+        Returns:
+            True if only selected markers should be shown
+        """
+        return bool(self.selected_marker_ids)
+
+    def get_selected_markers_count(self) -> int:
+        """Get the number of selected markers.
+
+        Returns:
+            Number of selected markers
+        """
+        return len(self.selected_marker_ids)
+
+    def clear_all_filters(self) -> None:
+        """Clear all filters including selected markers."""
+        self.clear_event_type_filter()
+        self.set_notes_filter(False)
+        self.clear_selected_markers_filter()
 
     def passes_filters(self, marker: Marker) -> bool:
         """Check if a marker passes current filters.
@@ -112,6 +245,10 @@ class FilterController(QObject):
         Returns:
             True if marker passes all filters
         """
+        # Selected markers filter (highest priority)
+        if self.selected_marker_ids and marker.id not in self.selected_marker_ids:
+            return False
+
         # Event type filter
         if self.filter_event_types and marker.event_name not in self.filter_event_types:
             return False

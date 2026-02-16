@@ -98,6 +98,24 @@
             "color": "#03A9F4",
             "shortcut": "X",
             "description": "Exit from defensive zone"
+        },
+        {
+            "name": "Гол",
+            "color": "G",
+            "shortcut": "#FF0000",
+            "description": ""
+        },
+        {
+            "name": "Перехват",
+            "color": "P",
+            "shortcut": "#00FF00",
+            "description": ""
+        },
+        {
+            "name": "Удаление",
+            "color": "U",
+            "shortcut": "#0000FF",
+            "description": ""
         }
     ],
     "language": "ru",

@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 from PySide6.QtCore import Signal, QObject
+from PySide6.QtWidgets import QGraphicsRectItem
 
 # Используем абсолютные импорты для работы из корня проекта
 from models.domain.marker import Marker
@@ -83,6 +84,7 @@ class TimelineController(QObject):
     playback_time_changed = Signal(int)
     timeline_update = Signal()
     marker_updated = Signal(int)  # Индекс измененного маркера
+    marker_selection_changed = Signal()  # Сигнал изменения выделения маркеров
 
     # Сигнал для уведомления об изменениях проекта
     project_modified = Signal()
@@ -167,6 +169,12 @@ class TimelineController(QObject):
             self.custom_event_controller.events_changed.connect(self._on_events_changed)
             self.custom_event_controller.event_added.connect(self._on_event_added)
             self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
+
+    def set_filter_controller(self, filter_controller):
+        """Установить ссылку на filter_controller."""
+        self.filter_controller = filter_controller
+        if self.filter_controller is not None:
+            self.filter_controller.filters_changed.connect(self._on_filters_changed)
 
     def on_marker_added(self, index: int, marker: Marker):
         """Обработчик добавления маркера."""
@@ -656,6 +664,151 @@ class TimelineController(QObject):
     def clear_selection(self):
         """Снять выделение со всех маркеров."""
         self.selected_markers.clear()
+
+    def toggle_marker_selection(self, marker_idx: int):
+        """Переключить выделение маркера."""
+        if 0 <= marker_idx < len(self.project.markers):
+            if marker_idx in self.selected_markers:
+                self.deselect_marker(marker_idx)
+            else:
+                self.select_marker(marker_idx)
+
+    def handle_marker_selection(self, marker_idx: int, toggle_mode: bool = True):
+        """Обработать выбор маркера на таймлайне.
+
+        Args:
+            marker_idx: Индекс маркера
+            toggle_mode: Если True, переключает выделение. Если False, выделяет только этот маркер.
+        """
+        if 0 <= marker_idx < len(self.project.markers):
+            if toggle_mode:
+                self.toggle_marker_selection(marker_idx)
+            else:
+                # Выделить только этот маркер
+                self.clear_selection()
+                self.select_marker(marker_idx)
+            
+            # Обновить фильтрацию по выбранным маркерам
+            self._update_selected_markers_filter()
+
+    def select_single_marker(self, marker_idx: int):
+        """Select a single marker and activate selected markers filter mode.
+        
+        Args:
+            marker_idx: Index of the marker to select
+        """
+        if 0 <= marker_idx < len(self.project.markers):
+            # Clear all selections first
+            self.clear_selection()
+            # Select the specific marker
+            self.select_marker(marker_idx)
+            # Activate selected markers filter mode
+            self._activate_selected_markers_filter_mode()
+            # Update UI to show only selected markers
+            self._update_markers_display()
+
+    def _activate_selected_markers_filter_mode(self):
+        """Activate filter mode to show only selected markers."""
+        if self.filter_controller:
+            # Get selected marker IDs
+            selected_ids = set()
+            for idx in self.selected_markers:
+                if 0 <= idx < len(self.project.markers):
+                    selected_ids.add(self.project.markers[idx].id)
+            
+            # Set filter controller to show only selected markers
+            self.filter_controller.set_selected_markers_filter(selected_ids)
+            
+            # Synchronize selection across components
+            self._sync_timeline_selection()
+            self._sync_segment_list_selection()
+
+    def clear_selected_markers_filter_mode(self):
+        """Clear selected markers filter mode and show all markers."""
+        if self.filter_controller:
+            self.filter_controller.clear_selected_markers_filter()
+            self.clear_selection()
+            self._update_markers_display()
+
+    def toggle_selected_markers_filter_mode(self):
+        """Toggle between showing all markers and only selected markers."""
+        if self.filter_controller:
+            if self.filter_controller.is_selected_markers_mode_active():
+                self.clear_selected_markers_filter_mode()
+            else:
+                # If no markers selected, select current marker
+                if not self.selected_markers and self.project.markers:
+                    self.select_single_marker(0)
+                else:
+                    self._activate_selected_markers_filter_mode()
+
+    def get_filtered_markers(self) -> List[Marker]:
+        """Получить отфильтрованные маркеры."""
+        if self.filter_controller:
+            return self.filter_controller.filter_markers(self.project.markers)
+        return self.project.markers
+
+    def set_selected_markers_filter(self, marker_ids: set):
+        """Установить фильтр по выбранным маркерам."""
+        if self.filter_controller:
+            self.filter_controller.set_selected_markers_filter(marker_ids)
+            self._update_markers_display()
+
+    def _update_selected_markers_filter(self):
+        """Обновить фильтрацию по выбранным маркерам."""
+        if self.filter_controller:
+            # Получаем ID выделенных маркеров
+            selected_ids = set()
+            for idx in self.selected_markers:
+                if 0 <= idx < len(self.project.markers):
+                    selected_ids.add(self.project.markers[idx].id)
+            
+            # Устанавливаем фильтр выбранных маркеров
+            self.filter_controller.set_selected_markers_filter(selected_ids)
+            
+            # Синхронизируем выделение на таймлайне
+            self._sync_timeline_selection()
+            
+            # Синхронизируем выделение в списке сегментов
+            self._sync_segment_list_selection()
+
+    def _sync_timeline_selection(self):
+        """Синхронизировать выделение маркеров на таймлайне."""
+        if self.timeline_widget and hasattr(self.timeline_widget, 'scene'):
+            scene = self.timeline_widget.scene
+            if hasattr(scene, 'items'):
+                # Сначала снимаем выделение со всех сегментов
+                for item in scene.items():
+                    if isinstance(item, QGraphicsRectItem) and hasattr(item, 'set_selected'):
+                        item.set_selected(False)
+                
+                # Затем выделяем только выбранные маркеры
+                for idx in self.selected_markers:
+                    if 0 <= idx < len(self.project.markers):
+                        marker = self.project.markers[idx]
+                        # Находим соответствующий графический элемент
+                        for item in scene.items():
+                            if (isinstance(item, QGraphicsRectItem) and 
+                                hasattr(item, 'marker') and 
+                                item.marker.id == marker.id):
+                                item.set_selected(True)
+                                break
+
+    def _sync_segment_list_selection(self):
+        """Синхронизировать выделение маркеров в списке сегментов."""
+        if self.segment_list_widget and hasattr(self.segment_list_widget, 'table'):
+            table = self.segment_list_widget.table
+            
+            # Сначала снимаем выделение со всех строк
+            table.clearSelection()
+            
+            # Затем выделяем строки для выбранных маркеров
+            for idx in self.selected_markers:
+                if 0 <= idx < table.rowCount():
+                    # Проверяем, что в строке действительно находится нужный маркер
+                    item = table.item(idx, 0)
+                    if item and item.data(Qt.ItemDataRole.UserRole) == idx:
+                        table.selectRow(idx)
 
     def save_project(self):
         """Сохранить проект через main controller."""

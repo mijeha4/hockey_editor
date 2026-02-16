@@ -34,6 +34,9 @@ def main():
 
     # Создать главный контроллер (он создаст все компоненты)
     controller = MainController()
+    
+    # Сохранить ссылку на контроллер, чтобы он не был удален
+    app.main_controller = controller
 
     # Запустить приложение
     controller.run()

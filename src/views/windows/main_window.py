@@ -386,7 +386,7 @@ class MainWindow(QMainWindow):
 
     def set_controller(self, controller) -> None:
         """Set the main controller and connect signals (adapted from old version)."""
-        self.controller = controller
+        self.main_controller = controller
 
         # Initialize autosave (TODO: integrate from old version)
         # self.autosave_manager = AutosaveManager(controller)
@@ -394,7 +394,7 @@ class MainWindow(QMainWindow):
         self.autosave_manager = None
 
         # Get FilterController from main controller
-        self.filter_controller = self.controller.filter_controller
+        self.filter_controller = self.main_controller.filter_controller
 
         # Connect FilterController signals
         self.filter_controller.filters_changed.connect(self._on_filters_changed)
@@ -421,11 +421,11 @@ class MainWindow(QMainWindow):
     def connect_signals(self):
         """Подключить сигналы контроллера (adapted from old version)."""
         # Playback signals
-        self.controller.playback_time_changed.connect(self._on_playback_time_changed)
-        self.controller.markers_changed.connect(self._on_markers_changed)
-        self.controller.recording_status_changed.connect(self._on_recording_status_changed)
-        self.controller.timeline_update.connect(self._on_timeline_update)
-        self.controller.frame_ready.connect(self._on_frame_ready)
+        self.main_controller.playback_time_changed.connect(self._on_playback_time_changed)
+        self.main_controller.markers_changed.connect(self._on_markers_changed)
+        self.main_controller.recording_status_changed.connect(self._on_recording_status_changed)
+        self.main_controller.timeline_update.connect(self._on_timeline_update)
+        self.main_controller.frame_ready.connect(self._on_frame_ready)
 
         # Events
         self.event_manager.events_changed.connect(self._on_events_changed)
@@ -455,7 +455,7 @@ class MainWindow(QMainWindow):
 
     def _on_speed_step_changed(self, step: int):
         """Изменение скорости на шаг (±1)."""
-        self.speed_changed.emit(self.controller.get_playback_speed() + step * 0.25)  # Simplified
+        self.speed_changed.emit(self.main_controller.get_playback_speed() + step * 0.25)  # Simplified
 
     def _on_skip_seconds(self, seconds: int):
         """Перемотка на секунды."""
@@ -567,39 +567,10 @@ class MainWindow(QMainWindow):
         pass  # Implementation needed
 
     def _on_markers_changed(self):
-        """Обновление списка отрезков с применением фильтров."""
-        # Проверка наличия контроллера
-        if not hasattr(self, 'controller') or not self.controller:
-            return
-
-        # 1. Получаем все маркеры из контроллера
-        all_markers = self.controller.markers
-        filtered_markers = []
-
-        # 2. Применяем фильтры
-        for marker in all_markers:
-            # Фильтр по типу события (если список типов не пуст)
-            # self.filter_event_types содержит set выбранных типов (например {'goal'})
-            if self.filter_event_types and marker.event_name not in self.filter_event_types:
-                continue
-
-            # Фильтр по наличию заметок
-            if self.filter_has_notes and not marker.note.strip():
-                continue
-
-            # Если маркер прошел все проверки, добавляем его
-            filtered_markers.append(marker)
-
-        # 3. Обновляем виджет списка сегментов
-        if hasattr(self.segment_list_widget, 'update_segments'):
-            self.segment_list_widget.update_segments(filtered_markers)
-        elif hasattr(self.segment_list_widget, 'set_markers'):
-            # На случай, если метод называется по-другому
-            self.segment_list_widget.set_markers(filtered_markers)
-            
-        # 4. Если нужно обновить и таймлайн (опционально)
-        if hasattr(self, 'timeline_widget') and hasattr(self.timeline_widget, 'set_filtered_markers'):
-             self.timeline_widget.set_filtered_markers(filtered_markers)
+        """Обновление списка отрезков."""
+        # Используем единую логику обновления через FilterController,
+        # чтобы избежать дублирования и рассинхронизации фильтров.
+        self._update_segment_list_with_filters()
 
     def _on_filters_changed(self):
         """Обработка изменения фильтров из FilterController."""
@@ -930,7 +901,7 @@ class MainWindow(QMainWindow):
         self.event_filter_combo = QComboBox()
         self.event_filter_combo.setToolTip("Фильтр по типу события")
         self.event_filter_combo.setMaximumWidth(100)
-        self.event_filter_combo.currentTextChanged.connect(self._on_event_filter_changed)
+        self.event_filter_combo.currentIndexChanged.connect(self._on_event_filter_changed)
         row1_layout.addWidget(self.event_filter_combo)
 
         # Чекбокс для фильтра заметок
@@ -972,7 +943,7 @@ class MainWindow(QMainWindow):
 
         self.event_filter_combo.blockSignals(False)
 
-    def _on_event_filter_changed(self):
+    def _on_event_filter_changed(self, index=0):
         """Обработка изменения фильтра типов событий."""
         current_data = self.event_filter_combo.currentData()
         if current_data is None:  # "Все"
