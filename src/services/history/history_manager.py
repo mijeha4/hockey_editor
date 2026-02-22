@@ -1,54 +1,105 @@
-from typing import List
+from __future__ import annotations
+
+from typing import List, Optional
+
+from PySide6.QtCore import QObject, Signal
+
 from .command_interface import Command
 
 
-class HistoryManager:
+class HistoryManager(QObject):
     """Менеджер истории команд для undo/redo."""
 
-    def __init__(self, max_history: int = 50):
+    history_changed = Signal(bool, bool)  # can_undo, can_redo
+    command_executed = Signal(str)        # command description/name (optional)
+    command_undone = Signal(str)          # optional
+    command_redone = Signal(str)          # optional
+    error = Signal(str)                   # optional
+
+    def __init__(self, max_history: int = 50, parent: Optional[QObject] = None):
+        super().__init__(parent)
         self.undo_stack: List[Command] = []
         self.redo_stack: List[Command] = []
         self.max_history = max_history
 
-    def execute_command(self, command: Command):
-        """Выполнить команду и добавить в историю."""
-        command.execute()
-        self.undo_stack.append(command)
+    def execute_command(self, command: Command) -> bool:
+        """Выполнить команду и добавить в историю.
 
-        # Очистить redo стек при новом действии
+        Returns:
+            True if executed successfully.
+        """
+        try:
+            command.execute()
+        except Exception as e:
+            self.error.emit(f"Command execute failed: {e}")
+            return False
+
+        self.undo_stack.append(command)
         self.redo_stack.clear()
 
-        # Ограничить размер истории
         if len(self.undo_stack) > self.max_history:
-            self.undo_stack.pop(0)
+            dropped = self.undo_stack.pop(0)
+            # Optional: if Command has dispose/cleanup
+            if hasattr(dropped, "dispose"):
+                try:
+                    dropped.dispose()
+                except Exception:
+                    pass
 
-    def undo(self):
+        self.command_executed.emit(getattr(command, "name", command.__class__.__name__))
+        self._emit_state()
+        return True
+
+    def undo(self) -> bool:
         """Отменить последнюю команду."""
         if not self.can_undo():
-            return
+            return False
 
         command = self.undo_stack.pop()
-        command.undo()
-        self.redo_stack.append(command)
+        try:
+            command.undo()
+        except Exception as e:
+            self.error.emit(f"Command undo failed: {e}")
+            # Push it back to keep consistent state
+            self.undo_stack.append(command)
+            self._emit_state()
+            return False
 
-    def redo(self):
+        self.redo_stack.append(command)
+        self.command_undone.emit(getattr(command, "name", command.__class__.__name__))
+        self._emit_state()
+        return True
+
+    def redo(self) -> bool:
         """Повторить отменённую команду."""
         if not self.can_redo():
-            return
+            return False
 
         command = self.redo_stack.pop()
-        command.execute()
+        try:
+            command.execute()
+        except Exception as e:
+            self.error.emit(f"Command redo failed: {e}")
+            # Push it back
+            self.redo_stack.append(command)
+            self._emit_state()
+            return False
+
         self.undo_stack.append(command)
+        self.command_redone.emit(getattr(command, "name", command.__class__.__name__))
+        self._emit_state()
+        return True
 
     def can_undo(self) -> bool:
-        """Проверить, можно ли отменить."""
-        return len(self.undo_stack) > 0
+        return bool(self.undo_stack)
 
     def can_redo(self) -> bool:
-        """Проверить, можно ли повторить."""
-        return len(self.redo_stack) > 0
+        return bool(self.redo_stack)
 
-    def clear_history(self):
-        """Очистить всю историю."""
+    def clear_history(self) -> None:
         self.undo_stack.clear()
         self.redo_stack.clear()
+        self._emit_state()
+
+    def _emit_state(self) -> None:
+        self.history_changed.emit(self.can_undo(), self.can_redo())

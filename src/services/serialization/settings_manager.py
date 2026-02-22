@@ -1,22 +1,19 @@
 """
-Settings Manager - сервис для загрузки и сохранения настроек приложения.
-
-Отвечает за сериализацию/десериализацию настроек в JSON формате.
+Settings Manager - loads/saves app settings to JSON.
 """
+
+from __future__ import annotations
 
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 from models.config.app_settings import AppSettings
 
-
-# Global instance
-_settings_manager: Optional['SettingsManager'] = None
+_settings_manager: Optional["SettingsManager"] = None
 
 
-def get_settings_manager() -> 'SettingsManager':
-    """Get or create global SettingsManager instance."""
+def get_settings_manager() -> "SettingsManager":
     global _settings_manager
     if _settings_manager is None:
         _settings_manager = SettingsManager()
@@ -24,71 +21,71 @@ def get_settings_manager() -> 'SettingsManager':
 
 
 class SettingsManager:
-    """Сервис для загрузки и сохранения настроек приложения."""
-
     def __init__(self, config_path: str = "config.json"):
         self.config_path = config_path
 
-    def load_settings(self) -> Optional[AppSettings]:
-        """Загрузить настройки из файла."""
+    def _load_raw(self) -> Dict[str, Any]:
         if not os.path.exists(self.config_path):
-            return None
-
+            return {}
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Создаем объект настроек из словаря
-            return AppSettings.from_dict(data)
-
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                return json.load(f) or {}
         except Exception as e:
             print(f"Error loading settings: {e}")
+            return {}
+
+    def _save_raw(self, data: Dict[str, Any]) -> bool:
+        try:
+            with open(self.config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+            return False
+
+    def load_settings(self) -> Optional[AppSettings]:
+        raw = self._load_raw()
+        if not raw:
+            return None
+        try:
+            return AppSettings.from_dict(raw)
+        except Exception as e:
+            print(f"Error parsing settings: {e}")
             return None
 
     def save_settings(self, settings: AppSettings) -> bool:
-        """Сохранить настройки в файл."""
         try:
-            # Преобразуем объект настроек в словарь
-            data = settings.to_dict()
-
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-            return True
-
+            return self._save_raw(settings.to_dict())
         except Exception as e:
             print(f"Error saving settings: {e}")
             return False
 
     def export_settings(self, settings: AppSettings, file_path: str) -> bool:
-        """Экспортировать настройки в указанный файл."""
         try:
-            data = settings.to_dict()
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(settings.to_dict(), f, indent=4, ensure_ascii=False)
             return True
         except Exception as e:
             print(f"Error exporting settings: {e}")
             return False
 
     def import_settings(self, file_path: str) -> Optional[AppSettings]:
-        """Импортировать настройки из файла."""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
             return AppSettings.from_dict(data)
         except Exception as e:
             print(f"Error importing settings: {e}")
             return None
 
+    # ─── Custom events persistence ─────────────────────────────────────────
+
     def load_custom_events(self) -> List[Dict]:
-        """Load custom events from settings."""
-        settings = self.load_settings()
-        if settings:
-            return settings.custom_events
-        return []
+        raw = self._load_raw()
+        events = raw.get("custom_events", [])
+        return events if isinstance(events, list) else []
 
     def save_custom_events(self, events_data: List[Dict]) -> None:
-        """Save custom events to settings."""
-        settings = self.load_settings() or AppSettings()
-        settings.custom_events = events_data
-        self.save_settings(settings)
+        raw = self._load_raw()
+        raw["custom_events"] = events_data
+        self._save_raw(raw)

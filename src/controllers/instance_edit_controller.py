@@ -5,25 +5,37 @@ Handles precise segment editing with visual timeline, loop playback,
 hotkeys, and professional NLE-style controls for individual video segments.
 """
 
+from __future__ import annotations
+
 from typing import Optional, List, Tuple
+
 from PySide6.QtCore import QObject, Signal, QTimer
 from PySide6.QtGui import QPixmap
 
-# Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 from models.domain.marker import Marker
 from utils.time_utils import frames_to_time
-from services.events.custom_event_manager import get_custom_event_manager
+from services.events.custom_event_manager import get_custom_event_manager, CustomEventManager
 
 
 class InstanceEditController(QObject):
-    """Controller for managing instance (segment) editing operations."""
+    """Controller for managing instance (segment) editing operations.
+
+    Contract recommendation:
+        start_frame is inclusive
+        end_frame is exclusive  (segment covers frames [start_frame, end_frame))
+    """
 
     # Signals
-    marker_updated = Signal()           # Marker data changed
-    marker_saved = Signal()             # Marker saved successfully
+    marker_updated = Signal()                # Marker data changed (dirty)
+    request_save_marker = Signal()           # Explicit "save now" request (optional)
+    marker_saved = Signal()                  # Marker saved successfully
+
     playback_position_changed = Signal(int)  # Current frame changed
     timeline_range_changed = Signal(int, int)  # Start/end frames changed
-    active_point_changed = Signal(str)  # 'in' or 'out' point active
+    active_point_changed = Signal(str)       # 'in' or 'out'
+
+    # Optional: expose pixmap if you want controller to provide it
+    pixmap_changed = Signal(QPixmap)
 
     def __init__(self, main_controller, parent=None):
         super().__init__(parent)
@@ -32,58 +44,74 @@ class InstanceEditController(QObject):
         self.playback_controller = main_controller.playback_controller
         self.video_service = main_controller.video_service
 
+        self.event_manager: CustomEventManager = get_custom_event_manager()
+
         # Current marker being edited
         self.marker: Optional[Marker] = None
 
-        # Navigation state
+        # Navigation state: list of (original_index, marker)
         self.filtered_markers: List[Tuple[int, Marker]] = []
-        self.current_marker_idx = 0
+        self.current_marker_idx: int = 0
 
         # Playback state
-        self.is_playing = False
-        self.loop_enabled = True
-        self.playback_timer = QTimer()
+        self.is_playing: bool = False
+        self.loop_enabled: bool = True
+        self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self._on_playback_tick)
 
         # Editing state
-        self.active_point = 'in'  # 'in' or 'out'
+        self.active_point: str = "in"  # 'in' or 'out'
 
-        # Video display state
-        self.current_frame_pixmap: Optional[QPixmap] = None
+        # If PlaybackController emits pixmap, you can forward it
+        if hasattr(self.playback_controller, "pixmap_changed"):
+            self.playback_controller.pixmap_changed.connect(self._on_pixmap_changed)
 
-    def set_marker(self, marker: Marker, filtered_markers: List[Tuple[int, Marker]] = None,
-                   current_idx: int = 0):
+    # ─── Marker lifecycle ───
+
+    def set_marker(
+        self,
+        marker: Marker,
+        filtered_markers: Optional[List[Tuple[int, Marker]]] = None,
+        current_idx: int = 0
+    ) -> None:
         """Set the marker to edit."""
         self.marker = marker
         self.filtered_markers = filtered_markers or []
         self.current_marker_idx = current_idx
 
         # Seek to marker start
-        self.playback_controller.seek_to_frame(marker.start_frame)
-        self._update_current_frame()
+        self.seek_to_frame(marker.start_frame)
+        self.timeline_range_changed.emit(marker.start_frame, marker.end_frame)
 
     def get_marker(self) -> Optional[Marker]:
-        """Get the current marker."""
-        return self.marker.to_marker() if self.marker else None
+        """Get the current marker (live object)."""
+        return self.marker
+
+    # ─── Video info ───
 
     def get_fps(self) -> float:
-        """Get video FPS."""
-        return self.video_service.get_fps() if self.video_service.cap else 30.0
+        return self.video_service.get_fps() if getattr(self.video_service, "cap", None) else 30.0
 
     def get_total_frames(self) -> int:
-        """Get total video frames."""
         return self.video_service.get_total_frames()
 
-    # Timeline operations
-    def set_timeline_range(self, start_frame: int, end_frame: int):
+    # ─── Timeline operations ───
+
+    def set_timeline_range(self, start_frame: int, end_frame: int) -> None:
         """Update marker range from timeline drag."""
         if not self.marker:
             return
 
-        # Validate range
         total_frames = self.get_total_frames()
-        start_frame = max(0, min(start_frame, total_frames - 1))
+
+        # Clamp: start in [0, total_frames-1]
+        start_frame = max(0, min(start_frame, max(0, total_frames - 1)))
+
+        # Clamp: end in [start+1, total_frames] (exclusive end allowed = total_frames)
         end_frame = max(start_frame + 1, min(end_frame, total_frames))
+
+        if (start_frame, end_frame) == (self.marker.start_frame, self.marker.end_frame):
+            return
 
         self.marker.start_frame = start_frame
         self.marker.end_frame = end_frame
@@ -91,15 +119,15 @@ class InstanceEditController(QObject):
         self.timeline_range_changed.emit(start_frame, end_frame)
         self.marker_updated.emit()
 
-    def seek_to_frame(self, frame: int):
+    def seek_to_frame(self, frame: int) -> None:
         """Seek playback to specific frame."""
         self.playback_controller.seek_to_frame(frame)
         self._update_current_frame()
         self.playback_position_changed.emit(frame)
 
-    # Nudge operations
-    def nudge_in_point(self, frames: int):
-        """Nudge IN point by specified frames."""
+    # ─── Nudge operations ───
+
+    def nudge_in_point(self, frames: int) -> None:
         if not self.marker:
             return
 
@@ -107,10 +135,10 @@ class InstanceEditController(QObject):
         if new_start < self.marker.end_frame:
             self.marker.start_frame = new_start
             self.seek_to_frame(new_start)
+            self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
             self.marker_updated.emit()
 
-    def nudge_out_point(self, frames: int):
-        """Nudge OUT point by specified frames."""
+    def nudge_out_point(self, frames: int) -> None:
         if not self.marker:
             return
 
@@ -118,200 +146,186 @@ class InstanceEditController(QObject):
         new_end = min(total_frames, self.marker.end_frame + frames)
         if new_end > self.marker.start_frame:
             self.marker.end_frame = new_end
-            self.seek_to_frame(new_end)
+            # Seek to last visible frame in the segment (end is exclusive)
+            self.seek_to_frame(max(self.marker.start_frame, new_end - 1))
+            self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
             self.marker_updated.emit()
 
-    # Point setting operations
-    def set_in_point(self):
-        """Set IN point to current playback position."""
+    # ─── Point setting operations ───
+
+    def set_in_point(self) -> None:
         if not self.marker:
             return
 
         current_frame = self.playback_controller.current_frame
         if current_frame < self.marker.end_frame:
             self.marker.start_frame = current_frame
+            self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
             self.marker_updated.emit()
 
-    def set_out_point(self):
-        """Set OUT point to current playback position."""
+    def set_out_point(self) -> None:
+        """Set OUT point to current playback position (exclusive end)."""
         if not self.marker:
             return
 
         current_frame = self.playback_controller.current_frame
-        if current_frame > self.marker.start_frame:
-            self.marker.end_frame = current_frame
+
+        # If OUT is set on current frame, make end exclusive => current_frame + 1
+        new_end = current_frame + 1
+        total_frames = self.get_total_frames()
+        new_end = min(total_frames, new_end)
+
+        if new_end > self.marker.start_frame:
+            self.marker.end_frame = new_end
+            self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
             self.marker_updated.emit()
 
-    # Active point management
-    def set_active_point(self, point: str):
-        """Set active editing point ('in' or 'out')."""
-        if point in ['in', 'out']:
-            self.active_point = point
-            self.active_point_changed.emit(point)
+    # ─── Active point management ───
 
-            # Seek to active point
-            frame = self.marker.start_frame if point == 'in' else self.marker.end_frame
-            self.seek_to_frame(frame)
+    def set_active_point(self, point: str) -> None:
+        if point not in ("in", "out"):
+            return
+        if not self.marker:
+            return
 
-    def toggle_active_point(self):
-        """Toggle between IN and OUT points."""
-        new_point = 'out' if self.active_point == 'in' else 'in'
-        self.set_active_point(new_point)
+        self.active_point = point
+        self.active_point_changed.emit(point)
 
-    def step_active_point(self, frames: int):
-        """Step active point by specified frames."""
-        if self.active_point == 'in':
+        frame = self.marker.start_frame if point == "in" else max(self.marker.start_frame, self.marker.end_frame - 1)
+        self.seek_to_frame(frame)
+
+    def toggle_active_point(self) -> None:
+        self.set_active_point("out" if self.active_point == "in" else "in")
+
+    def step_active_point(self, frames: int) -> None:
+        if self.active_point == "in":
             self.nudge_in_point(frames)
         else:
             self.nudge_out_point(frames)
 
-    # Playback operations
-    def toggle_playback(self):
-        """Toggle play/pause."""
+    # ─── Playback operations ───
+
+    def toggle_playback(self) -> None:
         if self.is_playing:
             self._pause_playback()
         else:
             self._start_playback()
 
-    def _start_playback(self):
-        """Start loop playback."""
+    def _start_playback(self) -> None:
         if not self.marker:
             return
 
         self.is_playing = True
 
-        # If we're at or past the end, restart from beginning
         current_frame = self.playback_controller.current_frame
-        if current_frame >= self.marker.end_frame or current_frame < self.marker.start_frame:
+        last_frame = max(self.marker.start_frame, self.marker.end_frame - 1)
+
+        if current_frame > last_frame or current_frame < self.marker.start_frame:
             self.seek_to_frame(self.marker.start_frame)
 
-        # Start timer
         fps = self.get_fps()
         if fps > 0:
-            interval = int(1000 / fps)
-            self.playback_timer.start(interval)
+            interval_ms = max(1, round(1000 / fps))
+            self.playback_timer.start(interval_ms)
 
-    def _pause_playback(self):
-        """Pause playback."""
+    def _pause_playback(self) -> None:
         self.is_playing = False
         self.playback_timer.stop()
 
-    def _on_playback_tick(self):
-        """Handle playback timer tick."""
+    def _on_playback_tick(self) -> None:
         if not self.is_playing or not self.marker:
             return
 
-        # Advance frame
         current_frame = self.playback_controller.current_frame + 1
+        last_frame = max(self.marker.start_frame, self.marker.end_frame - 1)
 
-        # Handle loop logic
-        if self.loop_enabled:
-            if current_frame >= self.marker.end_frame:
-                current_frame = self.marker.start_frame
+        if self.loop_enabled and current_frame > last_frame:
+            current_frame = self.marker.start_frame
 
-        # Seek to new frame
         self.seek_to_frame(current_frame)
 
-        # Stop if we've reached the end and loop is disabled
-        if not self.loop_enabled and current_frame >= self.marker.end_frame:
+        if not self.loop_enabled and current_frame >= last_frame:
             self._pause_playback()
 
-    def set_loop_enabled(self, enabled: bool):
-        """Enable/disable loop playback."""
+    def set_loop_enabled(self, enabled: bool) -> None:
         self.loop_enabled = enabled
 
-    # Navigation operations
-    def navigate_previous(self):
-        """Navigate to previous marker in filtered list."""
+    # ─── Navigation operations ───
+
+    def navigate_previous(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx <= 0:
             return False
 
-        self.marker_updated.emit()  # Save current changes
+        self.request_save_marker.emit()
 
         prev_idx = self.current_marker_idx - 1
-        original_idx, prev_marker = self.filtered_markers[prev_idx]
-
+        _, prev_marker = self.filtered_markers[prev_idx]
         self.set_marker(prev_marker, self.filtered_markers, prev_idx)
         return True
 
-    def navigate_next(self):
-        """Navigate to next marker in filtered list."""
+    def navigate_next(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx >= len(self.filtered_markers) - 1:
             return False
 
-        self.marker_updated.emit()  # Save current changes
+        self.request_save_marker.emit()
 
         next_idx = self.current_marker_idx + 1
-        original_idx, next_marker = self.filtered_markers[next_idx]
-
+        _, next_marker = self.filtered_markers[next_idx]
         self.set_marker(next_marker, self.filtered_markers, next_idx)
         return True
 
-    # Data operations
-    def update_event_type(self, event_name: str):
-        """Update marker event type."""
-        if self.marker:
+    # ─── Data operations ───
+
+    def update_event_type(self, event_name: str) -> None:
+        if not self.marker:
+            return
+        if self.marker.event_name != event_name:
             self.marker.event_name = event_name
             self.marker_updated.emit()
 
-    def update_note(self, note: str):
-        """Update marker note."""
-        if self.marker:
+    def update_note(self, note: str) -> None:
+        if not self.marker:
+            return
+        if self.marker.note != note:
             self.marker.note = note
             self.marker_updated.emit()
 
-    def save_changes(self):
-        """Save current marker changes."""
-        self.marker_updated.emit()
+    def save_changes(self) -> None:
+        """Request save of current marker and optionally auto-advance."""
+        self.request_save_marker.emit()
         self.marker_saved.emit()
 
-        # Navigate to next marker if available
-        if not self.navigate_next():
-            # No more markers, caller should close window
-            pass
+        self.navigate_next()  # if cannot, just stay
 
-    # Video display operations
-    def get_current_frame_pixmap(self) -> Optional[QPixmap]:
-        """Get current frame as pixmap."""
-        return self.current_frame_pixmap
+    # ─── Video display operations ───
 
-    def _update_current_frame(self):
-        """Update current frame display."""
-        # ВАЖНО: не читаем видео здесь повторно.
-        # Кадр будет отрисован через PlaybackController.pixmap_changed.
+    def _on_pixmap_changed(self, pixmap: QPixmap) -> None:
+        self.pixmap_changed.emit(pixmap)
+
+    def _update_current_frame(self) -> None:
+        # We don't decode frames here; PlaybackController is responsible.
         self.playback_position_changed.emit(self.playback_controller.current_frame)
 
-    # Utility methods
+    # ─── Utility ───
+
     def get_time_string(self, frame: int) -> str:
-        """Get formatted time string for frame."""
-        fps = self.get_fps()
-        return frames_to_time(frame, fps)
+        return frames_to_time(frame, self.get_fps())
 
     def get_marker_time_strings(self) -> Tuple[str, str]:
-        """Get formatted time strings for marker start/end."""
         if not self.marker:
             return "00:00", "00:00"
-
         return (
             self.get_time_string(self.marker.start_frame),
-            self.get_time_string(self.marker.end_frame)
+            self.get_time_string(self.marker.end_frame),
         )
 
-    def get_available_event_types(self) -> List[str]:
-        """Get available event types for combo box."""
-        event_manager = get_custom_event_manager()
-        return [event.get_localized_name() for event in event_manager.get_all_events()]
+    def get_event_type_items(self) -> List[Tuple[str, str]]:
+        """Return list of (display_text, data_event_name)."""
+        return [(e.get_localized_name(), e.name) for e in self.event_manager.get_all_events()]
 
-    def get_event_type_data(self, display_name: str) -> Optional[str]:
-        """Get event name from display name."""
-        event_manager = get_custom_event_manager()
-        for event in event_manager.get_all_events():
-            if event.get_localized_name() == display_name:
-                return event.name
-        return None
+    # ─── Cleanup ───
 
-    def cleanup(self):
-        """Cleanup resources."""
+    def cleanup(self) -> None:
         self._pause_playback()
         self.marker = None
         self.filtered_markers.clear()

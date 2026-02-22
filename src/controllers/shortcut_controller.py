@@ -1,25 +1,28 @@
-"""
-Shortcut Controller - manages keyboard shortcuts and hotkeys for the application.
+from __future__ import annotations
 
-Handles global shortcuts, event shortcuts, and provides interface for
-shortcut management and rebinding.
-"""
+import logging
+from typing import Optional, Dict
 
-from typing import Optional, Dict, Callable, Any
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 
-# Импорты для работы из корня проекта (main.py добавляет src в sys.path)
 from utils.shortcut_manager import ShortcutManager
 from services.events.custom_event_manager import get_custom_event_manager
+
+logger = logging.getLogger(__name__)
 
 
 class ShortcutController(QObject):
     """Controller for managing keyboard shortcuts and hotkeys."""
 
-    # Signals
-    shortcut_pressed = Signal(str)  # Emitted when a shortcut is pressed (key_name)
-    shortcuts_updated = Signal()    # Emitted when shortcuts are updated
+    # Emitted when a shortcut is pressed (key_name). For event shortcuts: emits the shortcut key (e.g. "A").
+    shortcut_pressed = Signal(str)
+    shortcuts_updated = Signal()
+
+    # Global shortcuts reserved by application (should not be used for event shortcuts)
+    RESERVED_GLOBALS = {
+        "SPACE", "CTRL+O", "ESCAPE", "CTRL+Z", "CTRL+SHIFT+Z", "LEFT", "RIGHT", "DELETE"
+    }
 
     def __init__(self, parent_window: Optional[QObject] = None) -> None:
         super().__init__(parent_window)
@@ -27,165 +30,152 @@ class ShortcutController(QObject):
         self.parent_window = parent_window
         self.shortcut_manager = ShortcutManager(parent_window)
         self.event_manager = get_custom_event_manager()
+
         self.event_shortcuts: Dict[str, QShortcut] = {}
 
-        # Connect to event manager changes
         self.event_manager.events_changed.connect(self._on_events_changed)
-
-        # Setup initial shortcuts
         self._setup_shortcuts()
 
+    # ─── Setup ────────────────────────────────────────────────────────────────
+
     def _setup_shortcuts(self) -> None:
-        """Setup all shortcuts."""
         self._clear_event_shortcuts()
+        self._clear_global_shortcuts()
         self._setup_event_shortcuts()
         self._setup_global_shortcuts()
 
     def _clear_event_shortcuts(self) -> None:
-        """Clear all event shortcuts."""
         for shortcut in self.event_shortcuts.values():
             if shortcut:
-                shortcut.setEnabled(False)  # Отключаем сначала
-                shortcut.setParent(None)   # Удаляем из родителя
-                shortcut.deleteLater()     # Помечаем на удаление
+                shortcut.setEnabled(False)
+                shortcut.setParent(None)
+                shortcut.deleteLater()
         self.event_shortcuts.clear()
 
+    def _clear_global_shortcuts(self) -> None:
+        # depends on ShortcutManager implementation, but typical pattern:
+        for name in list(getattr(self.shortcut_manager, "shortcuts", {}).keys()):
+            self.shortcut_manager.unregister_shortcut(name)
+
     def _setup_event_shortcuts(self) -> None:
-        """Setup shortcuts for events (A, D, S and custom)."""
-        print(f"DEBUG: _setup_event_shortcuts called")
         all_events = self.event_manager.get_all_events()
-        print(f"DEBUG: Found {len(all_events)} events total")
+        logger.debug("Setting up event shortcuts. Events count=%d", len(all_events))
+
         for event in all_events:
-            print(f"DEBUG: Processing event {event.name} with shortcut {event.shortcut}")
             if not event.shortcut:
-                print(f"DEBUG: Skipping event {event.name} - no shortcut")
                 continue
 
-            # Создаем локальную копию для замыкания
             event_name = event.name
-            event_shortcut = event.shortcut.upper()
-            
-            shortcut = QShortcut(QKeySequence(event_shortcut), self.parent_window)
-            shortcut.activated.connect(
-                lambda checked=False, name=event_name, key=event_shortcut: self._on_event_shortcut_activated(name, key)
+            key_seq = event.shortcut.upper()
+
+            # Optional: prevent conflict with reserved globals
+            if key_seq.upper() in self.RESERVED_GLOBALS:
+                logger.warning("Event '%s' uses reserved global shortcut '%s' - skipped", event_name, key_seq)
+                continue
+
+            sc = QShortcut(QKeySequence(key_seq), self.parent_window)
+            # If you need application-wide shortcuts, you can change context:
+            # sc.setContext(Qt.ApplicationShortcut)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+
+            sc.activated.connect(
+                lambda name=event_name, key=key_seq: self._on_event_shortcut_activated(name, key)
             )
-            self.event_shortcuts[event_name] = shortcut
-            print(f"DEBUG: Setup event shortcut - {event_name}: {event_shortcut}")
 
-    def _on_event_shortcut_activated(self, event_name: str, key: str):
-        """Handle event shortcut activation with debug logging."""
-        print(f"DEBUG: Event shortcut activated - event: {event_name}, key: {key}")
-        self.shortcut_pressed.emit(key)
-
-    def _on_global_shortcut_activated(self, key: str):
-        """Handle global shortcut activation with debug logging."""
-        print(f"DEBUG: Global shortcut activated - key: {key}")
-        self.shortcut_pressed.emit(key)
+            self.event_shortcuts[event_name] = sc
+            logger.debug("Bound event shortcut: %s -> %s", event_name, key_seq)
 
     def _setup_global_shortcuts(self) -> None:
-        """Setup global application shortcuts."""
-        # Playback shortcuts
-        self.shortcut_manager.register_shortcut('PLAY_PAUSE', 'Space',
-            lambda: self._on_global_shortcut_activated('PLAY_PAUSE'))
-        self.shortcut_manager.register_shortcut('OPEN_VIDEO', 'Ctrl+O',
-            lambda: self._on_global_shortcut_activated('OPEN_VIDEO'))
-        self.shortcut_manager.register_shortcut('CANCEL', 'Escape',
-            lambda: self._on_global_shortcut_activated('CANCEL'))
-
-        # Menu shortcuts (handled by menu system)
-        # SETTINGS, EXPORT, PREVIEW are handled through menu actions
+        # Playback
+        self.shortcut_manager.register_shortcut("PLAY_PAUSE", "Space",
+            lambda: self._on_global_shortcut_activated("PLAY_PAUSE"))
+        self.shortcut_manager.register_shortcut("OPEN_VIDEO", "Ctrl+O",
+            lambda: self._on_global_shortcut_activated("OPEN_VIDEO"))
+        self.shortcut_manager.register_shortcut("CANCEL", "Escape",
+            lambda: self._on_global_shortcut_activated("CANCEL"))
 
         # Undo/Redo
-        self.shortcut_manager.register_shortcut('UNDO', 'Ctrl+Z',
-            lambda: self._on_global_shortcut_activated('UNDO'))
-        self.shortcut_manager.register_shortcut('REDO', 'Ctrl+Shift+Z',
-            lambda: self._on_global_shortcut_activated('REDO'))
+        self.shortcut_manager.register_shortcut("UNDO", "Ctrl+Z",
+            lambda: self._on_global_shortcut_activated("UNDO"))
+        self.shortcut_manager.register_shortcut("REDO", "Ctrl+Shift+Z",
+            lambda: self._on_global_shortcut_activated("REDO"))
 
-        # Seek shortcuts
-        self.shortcut_manager.register_shortcut('SKIP_LEFT', 'Left',
-            lambda: self._on_global_shortcut_activated('SKIP_LEFT'))
-        self.shortcut_manager.register_shortcut('SKIP_RIGHT', 'Right',
-            lambda: self._on_global_shortcut_activated('SKIP_RIGHT'))
+        # Seek
+        self.shortcut_manager.register_shortcut("SKIP_LEFT", "Left",
+            lambda: self._on_global_shortcut_activated("SKIP_LEFT"))
+        self.shortcut_manager.register_shortcut("SKIP_RIGHT", "Right",
+            lambda: self._on_global_shortcut_activated("SKIP_RIGHT"))
 
-        # Delete shortcut for removing selected segments
-        self.shortcut_manager.register_shortcut('DELETE', 'Delete',
-            lambda: self._on_global_shortcut_activated('DELETE'))
+        # Delete
+        self.shortcut_manager.register_shortcut("DELETE", "Delete",
+            lambda: self._on_global_shortcut_activated("DELETE"))
 
-        print("DEBUG: Setup global shortcuts")
+        logger.debug("Global shortcuts set up")
 
-    def _on_global_shortcut_activated(self, key: str):
-        """Handle global shortcut activation with debug logging."""
-        print(f"DEBUG: Global shortcut activated - key: {key}")
+    # ─── Handlers ──────────────────────────────────────────────────────────────
+
+    def _on_event_shortcut_activated(self, event_name: str, key: str) -> None:
+        logger.debug("Event shortcut activated: event=%s key=%s", event_name, key)
+        # сохраняем текущее поведение: наружу отдаём key, а не event_name
+        self.shortcut_pressed.emit(key)
+
+    def _on_global_shortcut_activated(self, key: str) -> None:
+        logger.debug("Global shortcut activated: key=%s", key)
         self.shortcut_pressed.emit(key)
 
     def _on_events_changed(self) -> None:
-        """Handle event manager changes - rebind shortcuts."""
-        print("DEBUG: _on_events_changed called - rebind shortcuts")
+        logger.debug("Events changed -> rebind shortcuts")
         self._setup_shortcuts()
         self.shortcuts_updated.emit()
 
     def rebind_shortcuts(self) -> None:
-        """Rebind all shortcuts after settings changes."""
-        print("DEBUG: rebind_shortcuts called")
+        logger.debug("Rebind shortcuts called")
         self._setup_shortcuts()
         self.shortcuts_updated.emit()
 
-    def cleanup_all_shortcuts(self):
-        """Complete cleanup of all shortcuts."""
-        # Clear event shortcuts
+    # ─── Public API ────────────────────────────────────────────────────────────
+
+    def cleanup_all_shortcuts(self) -> None:
         self._clear_event_shortcuts()
-        
-        # Clear global shortcuts
-        for name in list(self.shortcut_manager.shortcuts.keys()):
-            self.shortcut_manager.unregister_shortcut(name)
+        self._clear_global_shortcuts()
 
     def get_shortcut_for_event(self, event_name: str) -> Optional[str]:
-        """Get the shortcut for a specific event."""
         event = self.event_manager.get_event(event_name)
         return event.shortcut if event else None
 
     def set_shortcut_for_event(self, event_name: str, shortcut: str) -> bool:
-        """Set a shortcut for an event.
-
-        Args:
-            event_name: Name of the event
-            shortcut: New shortcut string
-
-        Returns:
-            True if successful, False otherwise
-        """
         event = self.event_manager.get_event(event_name)
         if not event:
             return False
 
-        event.shortcut = shortcut.upper()
+        shortcut = (shortcut or "").upper()
+
+        # Optional: check reserved global conflicts
+        if shortcut and shortcut in self.RESERVED_GLOBALS:
+            return False
+
+        event.shortcut = shortcut
         success = self.event_manager.update_event(event_name, event)
-
         if success:
-            self._setup_shortcuts()  # Rebind shortcuts
+            self._setup_shortcuts()
             self.shortcuts_updated.emit()
-
         return success
 
     def is_shortcut_available(self, shortcut: str, exclude_event: Optional[str] = None) -> bool:
-        """Check if a shortcut is available for use.
+        shortcut = (shortcut or "").upper()
 
-        Args:
-            shortcut: Shortcut to check
-            exclude_event: Event name to exclude from check
+        if shortcut in self.RESERVED_GLOBALS:
+            return False
 
-        Returns:
-            True if shortcut is available
-        """
-        return self.event_manager._is_shortcut_available(shortcut.upper(), exclude_event)
+        # Prefer public API if exists
+        if hasattr(self.event_manager, "is_shortcut_available"):
+            return self.event_manager.is_shortcut_available(shortcut, exclude_event)
+
+        # Fallback to old private method (not recommended)
+        return self.event_manager._is_shortcut_available(shortcut, exclude_event)
 
     def get_all_shortcuts(self) -> Dict[str, str]:
-        """Get all current shortcuts.
-
-        Returns:
-            Dictionary mapping event names to shortcuts
-        """
-        shortcuts = {}
+        shortcuts: Dict[str, str] = {}
         for event in self.event_manager.get_all_events():
             if event.shortcut:
                 shortcuts[event.name] = event.shortcut

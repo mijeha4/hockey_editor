@@ -1276,6 +1276,57 @@ class PreviewWindow(QMainWindow):
         # Выделить текущую активную карточку
         self._update_active_card_highlight()
 
+    def _on_event_filter_changed(self, index=None):
+        """Обработка изменения фильтра типов событий."""
+        current_data = self.event_filter_combo.currentData()
+        if current_data is None:  # "Все"
+            self.filter_event_types.clear()
+        else:
+            self.filter_event_types = {current_data}
+
+        # Обновить фильтр в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.set_event_type_filter(self.filter_event_types)
+
+    def _on_notes_filter_changed(self):
+        """Обработка изменения фильтра заметок."""
+        self.filter_has_notes = self.notes_filter_checkbox.isChecked()
+        
+        # Обновить фильтр в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.set_notes_filter(self.filter_has_notes)
+
+    def _on_notes_search_changed(self):
+        """Обработка изменения поиска по заметкам."""
+        self.filter_notes_search = self.notes_search_edit.text().strip().lower()
+        
+        # Обновить фильтр в FilterController
+        if hasattr(self, 'filter_controller'):
+            # FilterController пока не поддерживает поиск по заметкам,
+            # но можно добавить эту функциональность в будущем
+            pass
+
+    def _on_reset_filters(self):
+        """Сбросить все фильтры."""
+        if self.event_filter_combo:
+            self.event_filter_combo.blockSignals(True)
+            self.event_filter_combo.setCurrentIndex(0)  # "Все"
+            self.event_filter_combo.blockSignals(False)
+
+        if self.notes_filter_checkbox:
+            self.notes_filter_checkbox.setChecked(False)
+
+        if self.notes_search_edit:
+            self.notes_search_edit.clear()
+
+        self.filter_event_types.clear()
+        self.filter_has_notes = False
+        self.filter_notes_search = ""
+
+        # Сбросить фильтры в FilterController
+        if hasattr(self, 'filter_controller'):
+            self.filter_controller.reset_all_filters()
+
     def set_filtered_markers(self, markers):
         """Set filtered markers directly."""
         fps = self.controller.get_fps() if self.controller else 30.0

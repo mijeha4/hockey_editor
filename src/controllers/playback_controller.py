@@ -1,20 +1,15 @@
-from PySide6.QtCore import QObject, QTimer, Signal, Qt
-from PySide6.QtGui import QPixmap, QImage
-import cv2
-import numpy as np
+from __future__ import annotations
+
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Optional
 
-if TYPE_CHECKING:
-    from services.video_engine import VideoService
-    from views.widgets.player_controls import PlayerControls
-    from views.windows.main_window import MainWindow
+import cv2
+import numpy as np
 
-# Используем абсолютные импорты для совместимости с run_test.py
-try:
-    from services.video_engine import VideoService
-    from views.widgets.player_controls import PlayerControls
-except ImportError:
-    # Для случаев, когда запускаем из src/
+from PySide6.QtCore import QObject, QTimer, Signal, Qt
+from PySide6.QtGui import QPixmap, QImage
+
+if TYPE_CHECKING:
     from services.video_engine import VideoService
     from views.widgets.player_controls import PlayerControls
 
@@ -22,272 +17,214 @@ except ImportError:
 class PlaybackController(QObject):
     """Контроллер управления воспроизведением видео."""
 
-    # Сигнал для синхронизации плейхеда с timeline
     frame_changed = Signal(int)
-    # Сигнал с уже подготовленным изображением кадра (для Preview/InstanceEdit),
-    # чтобы не декодировать/конвертировать один и тот же кадр в нескольких окнах.
     pixmap_changed = Signal(QPixmap, int)  # pixmap, frame_idx
 
-    def __init__(self, video_service: VideoService,
-                 player_controls: PlayerControls,
-                 main_window):
+    def __init__(self, video_service: "VideoService", player_controls: "PlayerControls", main_window):
         super().__init__()
 
         self.video_service = video_service
         self.player_controls = player_controls
         self.main_window = main_window
 
-        # Таймер воспроизведения
-        self.playback_timer = QTimer()
+        self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self._on_playback_tick)
 
-        self.playing = False
-        self.current_frame = 0
-        self._speed = 1.0  # Скорость воспроизведения
-
-        # Последний отрисованный кадр (как QPixmap) для переиспользования другими окнами
-        self._last_pixmap: QPixmap | None = None
-        self._last_pixmap_frame: int | None = None
-
-        # Таймер для "отложенного" обновления кадра при частых перемотках/кликах.
-        # Идея: если пользователь быстро кликает по таймлайну или жмёт +-5 сек,
-        # мы не будем каждый раз декодировать и показывать кадр, а подождём
-        # небольшой интервал и покажем только последний выбранный кадр.
-        self.seek_update_timer = QTimer()
+        self.seek_update_timer = QTimer(self)
         self.seek_update_timer.setSingleShot(True)
         self.seek_update_timer.timeout.connect(self._display_current_frame)
 
-        # Кэш для масштабированных кадров.
-        # ВАЖНО: ключом используем (frame_index, width, height), а НЕ содержимое кадра,
-        # чтобы избежать дорогостоящего hash(frame.tobytes()), которое сильно тормозит
-        # воспроизведение и перемотку на больших видео.
-        self.frame_cache = {}
-        self.cache_size = 100  # Максимальное количество кэшируемых кадров
-        self.target_width = 800  # Целевая ширина для масштабирования
-        self.use_high_quality_scaling = False  # Флаг для высококачественного масштабирования
+        self.playing = False
+        self.current_frame = 0
+        self._speed = 1.0
 
-        # Подключить сигналы от View
+        self._last_pixmap: Optional[QPixmap] = None
+        self._last_pixmap_frame: Optional[int] = None
+
+        # LRU cache: key=(frame_idx, target_width, quality_flag) -> QPixmap
+        self.cache_size = 100
+        self.frame_cache: "OrderedDict[tuple, QPixmap]" = OrderedDict()
+
+        self.target_width = 800
+        self.use_high_quality_scaling = False
+
         self.player_controls.playClicked.connect(self._on_play_clicked)
         self.player_controls.speedChanged.connect(self._on_speed_changed)
         self.player_controls.speedStepChanged.connect(self._on_speed_step_changed)
 
+    # ─── Public API ───
+
     def load_video(self, video_path: str) -> bool:
-        """Загрузить видео."""
         try:
             success = self.video_service.load_video(video_path)
-            if success:
-                # Настроить UI
-                total_frames = self.video_service.get_total_frames()
-                self.player_controls.set_duration(total_frames)
-                self.player_controls.set_current_frame(0)
+            if not success:
+                return False
 
-                # Показать первый кадр
-                self.current_frame = 0
-                self._display_current_frame()
+            total_frames = self.video_service.get_total_frames()
+            self.player_controls.set_duration(total_frames)
+            self.player_controls.set_current_frame(0)
 
-                # Остановить воспроизведение
-                self.pause()
+            self.current_frame = 0
+            self._clear_cache()
+            self._display_current_frame()
 
-            return success
+            self.pause()
+            return True
         except Exception as e:
             print(f"Error loading video: {e}")
             return False
 
-    def play(self):
-        """Начать воспроизведение."""
+    def play(self) -> None:
         if not self.video_service.cap or self.playing:
             return
 
         self.playing = True
-        # Рассчитать интервал на основе FPS и скорости воспроизведения
-        fps = self.video_service.get_fps()
-        interval_ms = int(1000 / (fps * self._speed)) if fps > 0 else 33
-        self.playback_timer.start(interval_ms)
+        self._restart_timer_for_speed()
 
-    def pause(self):
-        """Пауза."""
+    def pause(self) -> None:
         self.playing = False
         self.playback_timer.stop()
 
-    def seek_to_frame(self, frame_idx: int):
-        """Перемотать на кадр."""
+    def toggle_play_pause(self) -> None:
+        self.pause() if self.playing else self.play()
+
+    def get_speed(self) -> float:
+        return self._speed
+
+    def seek_to_frame(self, frame_idx: int) -> None:
+        frame_idx = self._clamp_frame(frame_idx)
         self.current_frame = frame_idx
 
-        # Отложенное обновление кадра для снижения нагрузки при частых перемотках.
-        # Если пользователь быстро меняет позицию, предыдущий запрос на отрисовку
-        # отменяется, и в итоге отрисуется только последнее положение.
         if self.seek_update_timer.isActive():
             self.seek_update_timer.stop()
-        # Небольшая задержка (в мс); можно варьировать от 20 до 50.
         self.seek_update_timer.start(30)
 
-        # Синхронизировать плейхед на таймлайне
         self.frame_changed.emit(self.current_frame)
 
-    def seek_to_frame_immediate(self, frame_idx: int):
-        """Перемотать на кадр и отрисовать сразу (без debounce).
-
-        Используется для покадрового воспроизведения в предпросмотре/редакторе отрезков,
-        чтобы избежать задержки и при этом не читать видео повторно в каждом окне.
-        """
+    def seek_to_frame_immediate(self, frame_idx: int) -> None:
+        frame_idx = self._clamp_frame(frame_idx)
         self.current_frame = frame_idx
+
         if self.seek_update_timer.isActive():
             self.seek_update_timer.stop()
+
         self._display_current_frame()
         self.frame_changed.emit(self.current_frame)
 
-    def get_cached_pixmap(self, frame_idx: int) -> QPixmap | None:
-        """Попытаться получить pixmap кадра из кэша (без декодирования видео)."""
+    def get_cached_pixmap(self, frame_idx: int) -> Optional[QPixmap]:
         if self._last_pixmap_frame == frame_idx and self._last_pixmap is not None:
             return self._last_pixmap
 
-        # Ключ кэша совпадает с тем, что используется в _numpy_to_pixmap
-        w, h = self.video_service.get_resolution()
-        cached = self.frame_cache.get((frame_idx, w, h))
-        return cached
+        # Try cache by any quality mode that matches current settings
+        key = self._cache_key(frame_idx)
+        pix = self.frame_cache.get(key)
+        if pix is not None:
+            # refresh LRU
+            self.frame_cache.move_to_end(key)
+        return pix
 
-    def toggle_play_pause(self):
-        """Переключить воспроизведение/паузу."""
-        if self.playing:
-            self.pause()
-        else:
-            self.play()
+    # ─── Internals ───
 
-    def get_speed(self) -> float:
-        """Возвращает текущую скорость воспроизведения."""
-        return self._speed
+    def _clamp_frame(self, frame_idx: int) -> int:
+        total = self.video_service.get_total_frames()
+        if total <= 0:
+            return 0
+        return max(0, min(frame_idx, total - 1))
 
-    def cancel_recording(self):
-        """Отменить текущую запись маркера в TimelineController."""
-        # Проверяем, есть ли у нас доступ к timeline_controller через main_window
-        if hasattr(self.main_window, '_timeline_controller'):
-            timeline_controller = self.main_window._timeline_controller
-            if timeline_controller and timeline_controller.is_recording:
-                # Сбросить состояние записи
-                timeline_controller.recording_start_frame = None
-                timeline_controller.is_recording = False
-                # Уведомить о завершении записи (с пустыми параметрами для отмены)
-                timeline_controller.recording_state_changed.emit(False, "", 0)
-                print("Recording cancelled")
-        else:
-            print("TimelineController not available, cannot cancel recording")
+    def _restart_timer_for_speed(self) -> None:
+        fps = self.video_service.get_fps()
+        interval_ms = int(1000 / (fps * self._speed)) if fps > 0 else 33
+        self.playback_timer.start(max(1, interval_ms))
 
-    def _on_play_clicked(self):
-        """Handle play/pause click from player controls."""
-        if self.playing:
-            self.pause()
-        else:
-            self.play()
+    def _on_play_clicked(self) -> None:
+        self.toggle_play_pause()
 
-    def _on_speed_step_changed(self, step: int):
-        """Handle speed step change from player controls."""
-        # Get current speed and adjust it
+    def _on_speed_step_changed(self, step: int) -> None:
         current_speed = self.player_controls.get_current_speed()
         speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-
         try:
             current_index = speeds.index(current_speed)
             new_index = max(0, min(len(speeds) - 1, current_index + step))
-            new_speed = speeds[new_index]
-            self.player_controls.set_speed(new_speed)
+            self.player_controls.set_speed(speeds[new_index])
         except ValueError:
-            # If current speed not in list, set to 1.0x
             self.player_controls.set_speed(1.0)
 
-    def _on_speed_changed(self, speed: float):
-        """Handle speed change from player controls."""
+    def _on_speed_changed(self, speed: float) -> None:
         self._speed = speed
-        print(f"Playback speed changed to: {speed}x")
-
-        # Если видео воспроизводится, перезапустить таймер с новым интервалом
         if self.playing:
-            fps = self.video_service.get_fps()
-            interval_ms = int(1000 / (fps * self._speed)) if fps > 0 else 33
-            self.playback_timer.setInterval(interval_ms)
+            self._restart_timer_for_speed()
 
-    def _on_playback_tick(self):
-        """Таймер воспроизведения."""
+    def _on_playback_tick(self) -> None:
         if not self.playing:
             return
 
-        # Перейти к следующему кадру
-        self.current_frame += 1
+        self.current_frame = self._clamp_frame(self.current_frame + 1)
 
-        # Проверить границы
         total_frames = self.video_service.get_total_frames()
-        if self.current_frame >= total_frames:
-            self.current_frame = total_frames - 1
+        if total_frames > 0 and self.current_frame >= total_frames - 1:
             self.pause()
-            return
 
-        # Обновить UI
         self.player_controls.set_current_frame(self.current_frame)
         self._display_current_frame()
-
-        # Синхронизировать плейхед на таймлайне
         self.frame_changed.emit(self.current_frame)
 
-    def _display_current_frame(self):
-        """Показать текущий кадр."""
+    def _display_current_frame(self) -> None:
         try:
-            # Получить кадр из сервиса
-            frame = self.video_service.get_frame(self.current_frame)
+            frame_idx = self._clamp_frame(self.current_frame)
+            self.current_frame = frame_idx
 
-            # Конвертировать numpy array в QPixmap
-            pixmap = self._numpy_to_pixmap(frame)
+            frame = self.video_service.get_frame(frame_idx)
+            if frame is None:
+                return
 
-            # Показать в MainWindow
+            pixmap = self._numpy_to_pixmap(frame, frame_idx)
+
             self.main_window.set_video_image(pixmap)
 
-            # Запомнить и разослать другим окнам
             self._last_pixmap = pixmap
-            self._last_pixmap_frame = self.current_frame
-            self.pixmap_changed.emit(pixmap, self.current_frame)
+            self._last_pixmap_frame = frame_idx
+            self.pixmap_changed.emit(pixmap, frame_idx)
 
         except Exception as e:
             print(f"Error displaying frame: {e}")
 
-    def _numpy_to_pixmap(self, frame: np.ndarray) -> QPixmap:
-        """Конвертировать numpy array (BGR) в QPixmap с кэшированием и оптимизацией.
+    def _cache_key(self, frame_idx: int) -> tuple:
+        # include scaling params; if you change target_width or quality, cache must differ
+        quality = self.use_high_quality_scaling or self._speed <= 1.0
+        return (frame_idx, self.target_width, quality)
 
-        Оптимизация производительности:
-        - используем лёгкий ключ кэша (номер кадра + размер),
-          вместо вычисления hash(frame.tobytes()), которое
-          каждый раз пробегало весь буфер кадра и вызывало
-          фризы при перемотке и воспроизведении.
-        """
-        # Лёгкий ключ кэша: (текущий кадр, ширина, высота)
-        h, w, ch = frame.shape
-        cache_key = (self.current_frame, w, h)
-
-        # Проверить кэш
-        cached = self.frame_cache.get(cache_key)
+    def _numpy_to_pixmap(self, frame: np.ndarray, frame_idx: int) -> QPixmap:
+        key = self._cache_key(frame_idx)
+        cached = self.frame_cache.get(key)
         if cached is not None:
+            self.frame_cache.move_to_end(key)
             return cached
 
-        # Конвертировать BGR в RGB
+        # BGR -> RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
 
-        # Создать QImage
-        qt_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        # Safe QImage
+        image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888).copy()
+        pixmap = QPixmap.fromImage(image)
 
-        # Конвертировать в QPixmap
-        pixmap = QPixmap.fromImage(qt_image)
+        quality_mode = Qt.TransformationMode.SmoothTransformation \
+            if (self.use_high_quality_scaling or self._speed <= 1.0) \
+            else Qt.TransformationMode.FastTransformation
 
-        # Оптимизированное масштабирование
-        if self.use_high_quality_scaling or self._speed <= 1.0:
-            # Использовать высококачественное масштабирование для нормальной скорости
-            pixmap = pixmap.scaledToWidth(self.target_width, Qt.TransformationMode.SmoothTransformation)
-        else:
-            # Для ускоренного воспроизведения использовать быстрое масштабирование
-            pixmap = pixmap.scaledToWidth(self.target_width, Qt.TransformationMode.FastTransformation)
+        pixmap = pixmap.scaledToWidth(self.target_width, quality_mode)
 
-        # Сохранить в кэш
-        if len(self.frame_cache) >= self.cache_size:
-            # Очистить кэш, если он слишком большой
-            self.frame_cache.clear()
-        self.frame_cache[cache_key] = pixmap
-
+        self._lru_put(key, pixmap)
         return pixmap
+
+    def _lru_put(self, key: tuple, pixmap: QPixmap) -> None:
+        self.frame_cache[key] = pixmap
+        self.frame_cache.move_to_end(key)
+        while len(self.frame_cache) > self.cache_size:
+            self.frame_cache.popitem(last=False)
+
+    def _clear_cache(self) -> None:
+        self.frame_cache.clear()
+        self._last_pixmap = None
+        self._last_pixmap_frame = None

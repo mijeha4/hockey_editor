@@ -1,3 +1,5 @@
-from .widgets import *
-from .windows import *
-from .dialogs import *
+"""Views - UI компоненты приложения.
+
+НЕ используем from .xxx import * чтобы избежать циклических импортов.
+Каждый модуль импортируется напрямую там, где нужен.
+"""

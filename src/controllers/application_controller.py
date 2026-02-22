@@ -11,7 +11,6 @@ from typing import List, Optional, TYPE_CHECKING
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal
 
-# Отложенный импорт для избежания циклической зависимости
 if TYPE_CHECKING:
     from .main_controller import MainController
 
@@ -20,78 +19,86 @@ class ApplicationController(QObject):
     """Контроллер управления приложением и окнами."""
 
     # Сигналы
-    window_closed = Signal()  # Окно закрылось
-    last_window_closed = Signal()  # Последнее окно закрылось
+    window_closed = Signal()
+    last_window_closed = Signal()
 
     def __init__(self):
         super().__init__()
-        self.windows: List = []  # Список контроллеров окон
-        self.app: Optional[QApplication] = None
+        self._windows: List["MainController"] = []
+        self._app: Optional[QApplication] = None
 
-    def initialize(self, app: QApplication):
-        """Инициализация контроллера с экземпляром QApplication."""
-        self.app = app
+    def initialize(self, app: QApplication) -> None:
+        """Инициализация контроллера с экземпляром QApplication.
 
-    def create_new_window(self):
+        Args:
+            app: Экземпляр QApplication.
+        """
+        self._app = app
+
+    def create_new_window(self) -> "MainController":
         """Создает новое окно приложения.
 
         Returns:
-            MainController: Контроллер нового окна
+            MainController: Контроллер нового окна.
         """
-        # Отложенный импорт для избежания циклической зависимости
         try:
             from .main_controller import MainController
         except ImportError:
             from controllers.main_controller import MainController
 
-        # Создаем новый MainController (он автоматически создаст MainWindow)
-        main_controller = MainController()
+        controller = MainController()
+        self._windows.append(controller)
 
-        # Добавляем в список окон
-        self.windows.append(main_controller)
+        # Подписка на сигнал закрытия окна (MainWindow должен иметь window_closing)
+        controller.window_close_requested.connect(
+            lambda: self._on_window_close(controller)
+        )
 
-        # Подключаем сигнал закрытия окна
-        main_controller.main_window.closeEvent = lambda event: self._on_window_close(main_controller, event)
+        controller.run()
+        return controller
 
-        # Показываем окно
-        main_controller.run()
+    def _on_window_close(self, controller: "MainController") -> None:
+        """Обработка закрытия окна.
 
-        return main_controller
+        Args:
+            controller: Контроллер закрываемого окна.
+        """
+        if controller in self._windows:
+            self._windows.remove(controller)
 
-    def _on_window_close(self, controller, event):
-        """Обработка закрытия окна."""
-        # Удаляем контроллер из списка
-        if controller in self.windows:
-            self.windows.remove(controller)
+        # Очистка ресурсов контроллера
+        controller.cleanup()
 
-        # Сигнализируем о закрытии окна
         self.window_closed.emit()
 
-        # Если это было последнее окно, завершаем приложение
-        if not self.windows:
+        if not self._windows:
             self.last_window_closed.emit()
-            if self.app:
-                self.app.quit()
-
-        # Принимаем событие закрытия
-        event.accept()
+            if self._app:
+                self._app.quit()
 
     def get_window_count(self) -> int:
         """Возвращает количество открытых окон."""
-        return len(self.windows)
+        return len(self._windows)
 
-    def get_windows(self) -> List:
-        """Возвращает список всех контроллеров окон."""
-        return self.windows.copy()
+    def get_windows(self) -> List["MainController"]:
+        """Возвращает копию списка всех контроллеров окон."""
+        return self._windows.copy()
 
-    def close_all_windows(self):
+    def close_all_windows(self) -> None:
         """Закрывает все окна приложения."""
-        for controller in self.windows[:]:  # Копируем список, так как он изменится
-            controller.main_window.close()
+        for controller in self._windows[:]:
+            controller.close()
+
+    def cleanup(self) -> None:
+        """Очистка ресурсов контроллера приложения."""
+        self.close_all_windows()
+        self._app = None
 
 
-# Глобальный экземпляр ApplicationController
-_app_controller = None
+# ─── Глобальный экземпляр ───
+
+_app_controller: Optional[ApplicationController] = None
+
 
 def get_application_controller() -> ApplicationController:
     """Возвращает глобальный экземпляр ApplicationController."""
@@ -100,8 +107,16 @@ def get_application_controller() -> ApplicationController:
         _app_controller = ApplicationController()
     return _app_controller
 
-def initialize_application_controller(app: QApplication):
-    """Инициализирует глобальный ApplicationController."""
+
+def initialize_application_controller(app: QApplication) -> ApplicationController:
+    """Инициализирует глобальный ApplicationController.
+
+    Args:
+        app: Экземпляр QApplication.
+
+    Returns:
+        Инициализированный ApplicationController.
+    """
     controller = get_application_controller()
     controller.initialize(app)
     return controller

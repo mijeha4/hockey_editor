@@ -1,128 +1,154 @@
-import cv2
-import numpy as np
+from __future__ import annotations
+
 import os
 from typing import Optional, Tuple
 
+import cv2
+import numpy as np
+
 
 class VideoService:
-    """Сервис для работы с видео через OpenCV."""
+    """Video service wrapper around OpenCV VideoCapture.
+
+    Notes:
+    - Not thread-safe. Use one VideoCapture per thread/process.
+    - Frames returned are BGR np.ndarray.
+    """
 
     def __init__(self):
         self.cap: Optional[cv2.VideoCapture] = None
         self.video_path: Optional[str] = None
+
         self.fps: float = 0.0
         self.total_frames: int = 0
         self.frame_width: int = 0
         self.frame_height: int = 0
 
+        # Internal cursor tracking (next frame index that cap.read() would read)
+        self._next_read_index: Optional[int] = None
+
+    # ──────────────────────────────────────────────────────────────────────
+    # State
+    # ──────────────────────────────────────────────────────────────────────
+
+    @property
+    def is_loaded(self) -> bool:
+        return self.cap is not None and self.cap.isOpened()
+
     def load_video(self, video_path: str) -> bool:
-        """Загрузить видеофайл."""
+        """Load video file."""
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
         self.cleanup()
 
-        self.cap = cv2.VideoCapture(video_path)
-        if not self.cap.isOpened():
-            self.cap = None
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            cap.release()
             raise RuntimeError(f"Failed to open video: {video_path}")
 
+        self.cap = cap
         self.video_path = video_path
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        self.fps = fps if fps > 0 else 30.0  # fallback
+
+        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+        # After open, the next read is typically frame 0
+        self._next_read_index = 0
 
         return True
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Frame access
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _clamp_frame(self, frame_index: int) -> int:
+        if self.total_frames <= 0:
+            return max(0, int(frame_index))
+        return max(0, min(int(frame_index), self.total_frames - 1))
+
     def get_frame(self, frame_index: int) -> np.ndarray:
-        """Получить кадр по индексу."""
-        if not self.cap:
-            raise RuntimeError("No video loaded")
-
-        frame_index = max(0, min(frame_index, self.total_frames - 1))
-
-        # Оптимизация: не дергать cap.set(CAP_PROP_POS_FRAMES) на каждый кадр,
-        # если мы и так идём последовательно. Частые установки позиции сильно
-        # тормозят воспроизведение и особенно заметны на "тяжёлых" участках.
-        try:
-            current_pos = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
-        except Exception:
-            current_pos = -1
-
-        # Если запрошенный кадр далеко от текущей позиции — делаем seek.
-        # Если рядом (тот же или соседний), читаем последовательно без seek.
-        if current_pos < 0 or abs(frame_index - current_pos) > 1:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-
-        ret, frame = self.cap.read()
-        if not ret:
+        """Get a frame by index. Raises on errors."""
+        frame = self.try_get_frame(frame_index)
+        if frame is None:
             raise RuntimeError(f"Failed to read frame {frame_index}")
-
-        return frame  # numpy array BGR
-
-    def get_current_frame(self) -> Optional[np.ndarray]:
-        """
-        Возвращает текущий кадр без смещения позиции курсора.
-        Используется окном предпросмотра для отрисовки.
-        """
-        if self.cap is None or not self.cap.isOpened():
-            print("VideoService: Видео не загружено или ошибка открытия")
-            return None
-
-        # 1. Запоминаем текущую позицию
-        current_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-
-        # 2. Принудительно ставим курсор на эту позицию (иногда он сбивается)
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
-
-        # 3. Читаем кадр
-        ret, frame = self.cap.read()
-
-        # 4. Возвращаем курсор назад (так как read сдвигает его на +1)
-        # Это важно, чтобы видео не "дергалось"
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_pos)
-
-        if not ret:
-            print(f"VideoService: Не удалось прочитать кадр {current_pos}")
-            return None
-
         return frame
 
+    def try_get_frame(self, frame_index: int) -> Optional[np.ndarray]:
+        """Get a frame by index. Returns None on errors."""
+        if not self.is_loaded:
+            return None
+
+        assert self.cap is not None
+
+        frame_index = self._clamp_frame(frame_index)
+
+        # Fast path: sequential read if we're exactly at expected next index
+        if self._next_read_index is not None and frame_index == self._next_read_index:
+            ret, frame = self.cap.read()
+            if not ret:
+                return None
+            self._next_read_index = frame_index + 1
+            return frame
+
+        # Otherwise do a seek
+        ok = self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        # Some backends return False but still seek; we proceed regardless.
+        ret, frame = self.cap.read()
+        if not ret:
+            # after failed read, cursor position is unknown
+            self._next_read_index = None
+            return None
+
+        self._next_read_index = frame_index + 1
+        return frame
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Conversions
+    # ──────────────────────────────────────────────────────────────────────
+
     def get_time_from_frame(self, frame: int) -> float:
-        """Конвертировать номер кадра в секунды."""
-        if self.fps == 0:
-            return 0.0
-        return frame / self.fps
+        return (frame / self.fps) if self.fps > 0 else 0.0
 
     def get_frame_from_time(self, time_sec: float) -> int:
-        """Конвертировать секунды в номер кадра."""
-        if self.fps == 0:
-            return 0
-        return int(time_sec * self.fps)
+        return int(time_sec * self.fps) if self.fps > 0 else 0
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Info
+    # ──────────────────────────────────────────────────────────────────────
 
     def get_fps(self) -> float:
-        """Получить FPS видео."""
         return self.fps
 
     def get_total_frames(self) -> int:
-        """Получить общее количество кадров."""
         return self.total_frames
 
     def get_resolution(self) -> Tuple[int, int]:
-        """Получить разрешение (width, height)."""
+        """(width, height)"""
         return self.frame_width, self.frame_height
 
-    def cleanup(self):
-        """Закрыть видеофайл."""
-        if self.cap:
-            self.cap.release()
+    # ──────────────────────────────────────────────────────────────────────
+    # Cleanup
+    # ──────────────────────────────────────────────────────────────────────
+
+    def cleanup(self) -> None:
+        if self.cap is not None:
+            try:
+                self.cap.release()
+            except Exception:
+                pass
             self.cap = None
+
         self.video_path = None
         self.fps = 0.0
         self.total_frames = 0
         self.frame_width = 0
         self.frame_height = 0
+        self._next_read_index = None
 
     def __del__(self):
         self.cleanup()
