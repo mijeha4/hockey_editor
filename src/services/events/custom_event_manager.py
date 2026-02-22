@@ -36,6 +36,11 @@ class CustomEventManager(QObject):
         super().__init__()
         self.settings = get_settings_manager()
         self._custom_events: Dict[str, CustomEventType] = {}
+
+        # FIX: Overrides for default events (shortcut rebinding etc.)
+        # Stored separately so defaults are never lost, but can be customized
+        self._default_overrides: Dict[str, CustomEventType] = {}
+
         self._load_custom_events()
 
     @property
@@ -51,20 +56,28 @@ class CustomEventManager(QObject):
     def _load_custom_events(self) -> None:
         data = self.settings.load_custom_events() or []
         custom: Dict[str, CustomEventType] = {}
+        overrides: Dict[str, CustomEventType] = {}
+
         for d in data:
             ev = CustomEventType.from_dict(d)
             if not ev.name:
                 continue
             if not ev.get_qcolor().isValid():
                 continue
-            # do not override defaults from settings
+
             if ev.name in self._default_names:
-                continue
-            custom[ev.name] = ev
+                # FIX: This is an override for a default event (e.g. rebound shortcut)
+                overrides[ev.name] = ev
+            else:
+                custom[ev.name] = ev
+
         self._custom_events = custom
+        self._default_overrides = overrides
 
     def _save_custom_events(self) -> None:
-        data = [e.to_dict() for e in self.get_custom_events()]
+        # FIX: Save both custom events AND default overrides
+        all_to_save = list(self.get_custom_events()) + list(self._default_overrides.values())
+        data = [e.to_dict() for e in all_to_save]
         self.settings.save_custom_events(data)
 
     def get_custom_events(self) -> List[CustomEventType]:
@@ -72,12 +85,17 @@ class CustomEventManager(QObject):
 
     def get_all_events(self) -> List[CustomEventType]:
         merged: Dict[str, CustomEventType] = {e.name: e for e in self.DEFAULT_EVENTS}
+        # FIX: Apply overrides for default events (e.g. rebound shortcuts)
+        merged.update(self._default_overrides)
         merged.update(self._custom_events)
         return sorted(merged.values(), key=lambda e: e.name)
 
     def get_event(self, name: str) -> Optional[CustomEventType]:
         if name in self._custom_events:
             return self._custom_events[name]
+        # FIX: Check overrides before raw defaults
+        if name in self._default_overrides:
+            return self._default_overrides[name]
         for e in self.DEFAULT_EVENTS:
             if e.name == name:
                 return e
@@ -92,7 +110,6 @@ class CustomEventManager(QObject):
                 return False
         return True
 
-    # backward compatible private alias
     def _is_shortcut_available(self, shortcut: str, exclude_event: str = "") -> bool:
         return self.is_shortcut_available(shortcut, exclude_event)
 
@@ -110,19 +127,41 @@ class CustomEventManager(QObject):
         return True
 
     def update_event(self, old_name: str, new_event: CustomEventType) -> bool:
-        if not old_name or old_name not in self._custom_events:
+        """Update an event (custom or default).
+
+        For default events: stores an override (original default is preserved).
+        For custom events: replaces the event, optionally renaming.
+        """
+        if not old_name or not new_event.name:
             return False
-        if not new_event.name:
+
+        if not new_event.get_qcolor().isValid():
             return False
+
+        if new_event.shortcut and not self.is_shortcut_available(
+            new_event.shortcut, exclude_event=old_name
+        ):
+            return False
+
+        # ─── Case 1: Default event override ───
+        if old_name in self._default_names:
+            # Default events cannot be renamed
+            if new_event.name != old_name:
+                return False
+
+            self._default_overrides[old_name] = new_event
+            self._save_custom_events()
+            self.events_changed.emit()
+            return True
+
+        # ─── Case 2: Custom event update ───
+        if old_name not in self._custom_events:
+            return False
+
+        # Rename check
         if new_event.name != old_name:
             if new_event.name in self._default_names or new_event.name in self._custom_events:
                 return False
-        if not new_event.get_qcolor().isValid():
-            return False
-        if new_event.shortcut and not self.is_shortcut_available(new_event.shortcut, exclude_event=old_name):
-            return False
-
-        if new_event.name != old_name:
             del self._custom_events[old_name]
 
         self._custom_events[new_event.name] = new_event
@@ -131,6 +170,13 @@ class CustomEventManager(QObject):
         return True
 
     def delete_event(self, name: str) -> bool:
+        # FIX: Allow removing overrides (restores default)
+        if name in self._default_overrides:
+            del self._default_overrides[name]
+            self._save_custom_events()
+            self.events_changed.emit()
+            return True
+
         if name not in self._custom_events:
             return False
         del self._custom_events[name]
@@ -139,9 +185,10 @@ class CustomEventManager(QObject):
         return True
 
     def reset_to_defaults(self) -> None:
-        if not self._custom_events:
+        if not self._custom_events and not self._default_overrides:
             return
         self._custom_events.clear()
+        self._default_overrides.clear()
         self._save_custom_events()
         self.events_changed.emit()
 
@@ -161,7 +208,6 @@ class CustomEventManager(QObject):
         return ev.shortcut if ev else ""
 
 
-# Singleton
 _manager: Optional[CustomEventManager] = None
 
 

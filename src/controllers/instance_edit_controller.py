@@ -1,8 +1,5 @@
 """
 Instance Edit Controller - manages segment editing operations.
-
-Handles precise segment editing with visual timeline, loop playback,
-hotkeys, and professional NLE-style controls for individual video segments.
 """
 
 from __future__ import annotations
@@ -18,23 +15,17 @@ from services.events.custom_event_manager import get_custom_event_manager, Custo
 
 
 class InstanceEditController(QObject):
-    """Controller for managing instance (segment) editing operations.
-
-    Contract recommendation:
-        start_frame is inclusive
-        end_frame is exclusive  (segment covers frames [start_frame, end_frame))
-    """
+    """Controller for managing instance (segment) editing operations."""
 
     # Signals
-    marker_updated = Signal()                # Marker data changed (dirty)
-    request_save_marker = Signal()           # Explicit "save now" request (optional)
-    marker_saved = Signal()                  # Marker saved successfully
+    marker_updated = Signal()
+    request_save_marker = Signal()
+    marker_saved = Signal()
 
-    playback_position_changed = Signal(int)  # Current frame changed
-    timeline_range_changed = Signal(int, int)  # Start/end frames changed
-    active_point_changed = Signal(str)       # 'in' or 'out'
+    playback_position_changed = Signal(int)
+    timeline_range_changed = Signal(int, int)
+    active_point_changed = Signal(str)
 
-    # Optional: expose pixmap if you want controller to provide it
     pixmap_changed = Signal(QPixmap)
 
     def __init__(self, main_controller, parent=None):
@@ -46,25 +37,67 @@ class InstanceEditController(QObject):
 
         self.event_manager: CustomEventManager = get_custom_event_manager()
 
-        # Current marker being edited
         self.marker: Optional[Marker] = None
 
-        # Navigation state: list of (original_index, marker)
         self.filtered_markers: List[Tuple[int, Marker]] = []
         self.current_marker_idx: int = 0
 
-        # Playback state
         self.is_playing: bool = False
         self.loop_enabled: bool = True
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self._on_playback_tick)
 
-        # Editing state
-        self.active_point: str = "in"  # 'in' or 'out'
+        self.active_point: str = "in"
 
-        # If PlaybackController emits pixmap, you can forward it
+        # Keep reference to edit window to prevent garbage collection
+        self._edit_window = None
+
         if hasattr(self.playback_controller, "pixmap_changed"):
             self.playback_controller.pixmap_changed.connect(self._on_pixmap_changed)
+
+    # ─── Open editor ───
+
+    def open_editor(self, marker_idx: int) -> None:
+        """Open the instance edit window for specific marker by original index."""
+        markers = self.main_controller.project.markers
+        if not (0 <= marker_idx < len(markers)):
+            return
+
+        marker = markers[marker_idx]
+
+        # Build navigation list: all markers as (orig_idx, marker) pairs
+        all_pairs = [(i, m) for i, m in enumerate(markers)]
+
+        # Find position in navigation list
+        current_filtered_idx = 0
+        for i, (orig_idx, m) in enumerate(all_pairs):
+            if orig_idx == marker_idx:
+                current_filtered_idx = i
+                break
+
+        # Set marker for editing
+        self.set_marker(marker, all_pairs, current_filtered_idx)
+
+        # Create and show edit window
+        try:
+            from views.windows.instance_edit import InstanceEditWindow
+            self._edit_window = InstanceEditWindow(
+                marker, self.main_controller, all_pairs, current_filtered_idx, None
+            )
+            if hasattr(self._edit_window, 'marker_updated'):
+                self._edit_window.marker_updated.connect(self._on_external_marker_update)
+            self._edit_window.show()
+        except Exception as e:
+            print(f"ERROR: Failed to open instance edit window: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _on_external_marker_update(self) -> None:
+        """Handle marker update from edit window."""
+        self.marker_updated.emit()
+        # Refresh timeline
+        if hasattr(self.main_controller, 'timeline_controller'):
+            self.main_controller.timeline_controller.refresh_view()
 
     # ─── Marker lifecycle ───
 
@@ -74,17 +107,13 @@ class InstanceEditController(QObject):
         filtered_markers: Optional[List[Tuple[int, Marker]]] = None,
         current_idx: int = 0
     ) -> None:
-        """Set the marker to edit."""
         self.marker = marker
         self.filtered_markers = filtered_markers or []
         self.current_marker_idx = current_idx
-
-        # Seek to marker start
         self.seek_to_frame(marker.start_frame)
         self.timeline_range_changed.emit(marker.start_frame, marker.end_frame)
 
     def get_marker(self) -> Optional[Marker]:
-        """Get the current marker (live object)."""
         return self.marker
 
     # ─── Video info ───
@@ -98,29 +127,19 @@ class InstanceEditController(QObject):
     # ─── Timeline operations ───
 
     def set_timeline_range(self, start_frame: int, end_frame: int) -> None:
-        """Update marker range from timeline drag."""
         if not self.marker:
             return
-
         total_frames = self.get_total_frames()
-
-        # Clamp: start in [0, total_frames-1]
         start_frame = max(0, min(start_frame, max(0, total_frames - 1)))
-
-        # Clamp: end in [start+1, total_frames] (exclusive end allowed = total_frames)
         end_frame = max(start_frame + 1, min(end_frame, total_frames))
-
         if (start_frame, end_frame) == (self.marker.start_frame, self.marker.end_frame):
             return
-
         self.marker.start_frame = start_frame
         self.marker.end_frame = end_frame
-
         self.timeline_range_changed.emit(start_frame, end_frame)
         self.marker_updated.emit()
 
     def seek_to_frame(self, frame: int) -> None:
-        """Seek playback to specific frame."""
         self.playback_controller.seek_to_frame(frame)
         self._update_current_frame()
         self.playback_position_changed.emit(frame)
@@ -130,7 +149,6 @@ class InstanceEditController(QObject):
     def nudge_in_point(self, frames: int) -> None:
         if not self.marker:
             return
-
         new_start = max(0, self.marker.start_frame + frames)
         if new_start < self.marker.end_frame:
             self.marker.start_frame = new_start
@@ -141,12 +159,10 @@ class InstanceEditController(QObject):
     def nudge_out_point(self, frames: int) -> None:
         if not self.marker:
             return
-
         total_frames = self.get_total_frames()
         new_end = min(total_frames, self.marker.end_frame + frames)
         if new_end > self.marker.start_frame:
             self.marker.end_frame = new_end
-            # Seek to last visible frame in the segment (end is exclusive)
             self.seek_to_frame(max(self.marker.start_frame, new_end - 1))
             self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
             self.marker_updated.emit()
@@ -156,7 +172,6 @@ class InstanceEditController(QObject):
     def set_in_point(self) -> None:
         if not self.marker:
             return
-
         current_frame = self.playback_controller.current_frame
         if current_frame < self.marker.end_frame:
             self.marker.start_frame = current_frame
@@ -164,17 +179,12 @@ class InstanceEditController(QObject):
             self.marker_updated.emit()
 
     def set_out_point(self) -> None:
-        """Set OUT point to current playback position (exclusive end)."""
         if not self.marker:
             return
-
         current_frame = self.playback_controller.current_frame
-
-        # If OUT is set on current frame, make end exclusive => current_frame + 1
         new_end = current_frame + 1
         total_frames = self.get_total_frames()
         new_end = min(total_frames, new_end)
-
         if new_end > self.marker.start_frame:
             self.marker.end_frame = new_end
             self.timeline_range_changed.emit(self.marker.start_frame, self.marker.end_frame)
@@ -187,10 +197,8 @@ class InstanceEditController(QObject):
             return
         if not self.marker:
             return
-
         self.active_point = point
         self.active_point_changed.emit(point)
-
         frame = self.marker.start_frame if point == "in" else max(self.marker.start_frame, self.marker.end_frame - 1)
         self.seek_to_frame(frame)
 
@@ -214,15 +222,11 @@ class InstanceEditController(QObject):
     def _start_playback(self) -> None:
         if not self.marker:
             return
-
         self.is_playing = True
-
         current_frame = self.playback_controller.current_frame
         last_frame = max(self.marker.start_frame, self.marker.end_frame - 1)
-
         if current_frame > last_frame or current_frame < self.marker.start_frame:
             self.seek_to_frame(self.marker.start_frame)
-
         fps = self.get_fps()
         if fps > 0:
             interval_ms = max(1, round(1000 / fps))
@@ -235,15 +239,11 @@ class InstanceEditController(QObject):
     def _on_playback_tick(self) -> None:
         if not self.is_playing or not self.marker:
             return
-
         current_frame = self.playback_controller.current_frame + 1
         last_frame = max(self.marker.start_frame, self.marker.end_frame - 1)
-
         if self.loop_enabled and current_frame > last_frame:
             current_frame = self.marker.start_frame
-
         self.seek_to_frame(current_frame)
-
         if not self.loop_enabled and current_frame >= last_frame:
             self._pause_playback()
 
@@ -255,9 +255,7 @@ class InstanceEditController(QObject):
     def navigate_previous(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx <= 0:
             return False
-
         self.request_save_marker.emit()
-
         prev_idx = self.current_marker_idx - 1
         _, prev_marker = self.filtered_markers[prev_idx]
         self.set_marker(prev_marker, self.filtered_markers, prev_idx)
@@ -266,9 +264,7 @@ class InstanceEditController(QObject):
     def navigate_next(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx >= len(self.filtered_markers) - 1:
             return False
-
         self.request_save_marker.emit()
-
         next_idx = self.current_marker_idx + 1
         _, next_marker = self.filtered_markers[next_idx]
         self.set_marker(next_marker, self.filtered_markers, next_idx)
@@ -291,11 +287,9 @@ class InstanceEditController(QObject):
             self.marker_updated.emit()
 
     def save_changes(self) -> None:
-        """Request save of current marker and optionally auto-advance."""
         self.request_save_marker.emit()
         self.marker_saved.emit()
-
-        self.navigate_next()  # if cannot, just stay
+        self.navigate_next()
 
     # ─── Video display operations ───
 
@@ -303,7 +297,6 @@ class InstanceEditController(QObject):
         self.pixmap_changed.emit(pixmap)
 
     def _update_current_frame(self) -> None:
-        # We don't decode frames here; PlaybackController is responsible.
         self.playback_position_changed.emit(self.playback_controller.current_frame)
 
     # ─── Utility ───
@@ -320,12 +313,17 @@ class InstanceEditController(QObject):
         )
 
     def get_event_type_items(self) -> List[Tuple[str, str]]:
-        """Return list of (display_text, data_event_name)."""
         return [(e.get_localized_name(), e.name) for e in self.event_manager.get_all_events()]
 
     # ─── Cleanup ───
 
     def cleanup(self) -> None:
         self._pause_playback()
+        if self._edit_window:
+            try:
+                self._edit_window.close()
+            except Exception:
+                pass
+            self._edit_window = None
         self.marker = None
         self.filtered_markers.clear()

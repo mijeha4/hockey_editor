@@ -11,12 +11,11 @@ from .marker import Marker
 class Project(QObject):
     """Project model with Qt reactivity (signals)."""
 
-    # Signals
-    marker_added = Signal(int, Marker)     # index, marker
-    marker_removed = Signal(int)           # index
+    marker_added = Signal(int, Marker)
+    marker_removed = Signal(int)
     markers_cleared = Signal()
-    markers_replaced = Signal()            # bulk update (optional)
-    modified_changed = Signal(bool)        # dirty flag changed (optional)
+    markers_replaced = Signal()
+    modified_changed = Signal(bool)
 
     def __init__(self, name: str, video_path: str = "", fps: float = 30.0):
         super().__init__()
@@ -70,7 +69,20 @@ class Project(QObject):
 
     @property
     def markers(self) -> List[Marker]:
-        """Return a copy to prevent external mutation without signals."""
+        """Direct access to internal markers list.
+        
+        WARNING: Returns the ACTUAL internal list, not a copy.
+        This is necessary because:
+        1. ModifyMarkerCommand writes markers[idx] = new_marker
+        2. TimelineController reads markers to display them
+        3. Returning a copy would silently discard modifications
+        
+        If you need a safe copy, use markers_copy().
+        """
+        return self._markers
+
+    def markers_copy(self) -> List[Marker]:
+        """Return a defensive copy of markers list."""
         return list(self._markers)
 
     def marker_at(self, index: int) -> Optional[Marker]:
@@ -120,8 +132,8 @@ class Project(QObject):
     # Marker operations
     # ──────────────────────────────────────────────────────────────────────
 
-    def add_marker(self, marker: Marker, index: int = -1, *, emit_signal: bool = True, mark_modified: bool = True) -> None:
-        """Add marker to project."""
+    def add_marker(self, marker: Marker, index: int = -1, *,
+                   emit_signal: bool = True, mark_modified: bool = True) -> None:
         if index == -1 or index > len(self._markers):
             index = len(self._markers)
         if index < 0:
@@ -135,8 +147,8 @@ class Project(QObject):
         if emit_signal:
             self.marker_added.emit(index, marker)
 
-    def remove_marker(self, index: int, *, emit_signal: bool = True, mark_modified: bool = True) -> None:
-        """Remove marker by index."""
+    def remove_marker(self, index: int, *,
+                      emit_signal: bool = True, mark_modified: bool = True) -> None:
         if 0 <= index < len(self._markers):
             self._markers.pop(index)
 
@@ -146,8 +158,23 @@ class Project(QObject):
             if emit_signal:
                 self.marker_removed.emit(index)
 
+    def update_marker(self, index: int, new_marker: Marker, *,
+                      emit_signal: bool = True, mark_modified: bool = True) -> bool:
+        """Update marker at index. Returns True if successful."""
+        if not (0 <= index < len(self._markers)):
+            return False
+
+        self._markers[index] = new_marker
+
+        if mark_modified:
+            self._touch_modified()
+
+        if emit_signal:
+            self.marker_added.emit(index, new_marker)  # reuse signal
+
+        return True
+
     def clear_markers(self, *, emit_signal: bool = True, mark_modified: bool = True) -> None:
-        """Clear markers."""
         if not self._markers:
             return
 
@@ -159,8 +186,8 @@ class Project(QObject):
         if emit_signal:
             self.markers_cleared.emit()
 
-    def set_markers(self, markers: List[Marker], *, emit_signal: bool = True, mark_modified: bool = True) -> None:
-        """Replace all markers at once."""
+    def set_markers(self, markers: List[Marker], *,
+                    emit_signal: bool = True, mark_modified: bool = True) -> None:
         self._markers = list(markers)
 
         if mark_modified:
@@ -175,7 +202,7 @@ class Project(QObject):
 
     def _touch_modified(self) -> None:
         self._modified_at = datetime.now().isoformat()
-        self.is_modified = True  # uses setter + signal
+        self.is_modified = True
 
     # ──────────────────────────────────────────────────────────────────────
     # Serialization
@@ -205,10 +232,7 @@ class Project(QObject):
         project._version = data.get("version", project._version)
 
         markers = [Marker.from_dict(m) for m in data.get("markers", [])]
-        # Load without signals and without marking modified
         project.set_markers(markers, emit_signal=False, mark_modified=False)
-
-        # Loaded project should not be dirty
         project.is_modified = False
 
         return project
