@@ -155,6 +155,8 @@ class MainController(QObject):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _setup_connections(self) -> None:
+        # ... existing connections ...
+
         self.main_window.open_video_triggered.connect(self._on_open_video)
         self.main_window.save_project_triggered.connect(self._on_save_project)
         self.main_window.load_project_triggered.connect(self._on_load_project)
@@ -166,8 +168,6 @@ class MainController(QObject):
         self.main_window.key_pressed.connect(self._on_key_pressed)
         self.shortcut_controller.shortcut_pressed.connect(self._on_shortcut_pressed)
 
-        # Фильтры: только обновление таймлайна.
-        # Segment list обновляется через MainWindow._on_filters_changed
         self.filter_controller.filters_changed.connect(self._on_filters_changed)
 
         self.main_window.video_dropped.connect(self._on_video_dropped)
@@ -175,6 +175,12 @@ class MainController(QObject):
         if hasattr(self.main_window, "event_shortcut_list_widget") and self.main_window.event_shortcut_list_widget is not None:
             self.main_window.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
 
+        # ─── FIX: Подключить кнопки segment_list_widget ───
+        segment_list = self.main_window.get_segment_list_widget()
+        if segment_list is not None:
+            segment_list.segment_jump_requested.connect(self._on_segment_jump)
+            segment_list.segment_edit_requested.connect(self._on_segment_edit)
+            segment_list.segment_delete_requested.connect(self._on_segment_delete)
     # ─────────────────────────────────────────────────────────────────────────
     # Window lifecycle
     # ─────────────────────────────────────────────────────────────────────────
@@ -210,6 +216,24 @@ class MainController(QObject):
     def _on_filters_changed(self) -> None:
         self.timeline_controller.refresh_view()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Segment list actions
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _on_segment_jump(self, marker_idx: int) -> None:
+        """Перейти к началу сегмента по оригинальному индексу."""
+        markers = self.project.markers
+        if 0 <= marker_idx < len(markers):
+            marker = markers[marker_idx]
+            self.playback_controller.seek_to_frame(marker.start_frame)
+
+    def _on_segment_edit(self, marker_idx: int) -> None:
+        """Открыть редактор сегмента."""
+        self.open_segment_editor(marker_idx)
+
+    def _on_segment_delete(self, marker_idx: int) -> None:
+        """Удалить сегмент."""
+        self.delete_marker(marker_idx)
     # ─────────────────────────────────────────────────────────────────────────
     # Segment editor
     # ─────────────────────────────────────────────────────────────────────────
