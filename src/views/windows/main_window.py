@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, Signal
 
 from views.widgets.player_controls import PlayerControls
 from views.widgets.segment_list import SegmentListWidget
+from views.widgets.stats_widget import StatsWidget
 from views.widgets.timeline import TimelineWidget
 from views.styles import get_application_stylesheet
 from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
@@ -60,6 +61,8 @@ class MainWindow(QMainWindow):
         self._filter_indicator: Optional[QLabel] = None
         self._filter_reset_btn: Optional[QPushButton] = None
         self._segments_header_label: Optional[QLabel] = None
+        self._stats_widget: Optional[StatsWidget] = None
+        self._stats_toggle_btn: Optional[QPushButton] = None
 
         self.setWindowTitle("Хоккейный Редактор")
         self.setGeometry(0, 0, 1800, 1000)
@@ -161,24 +164,29 @@ class MainWindow(QMainWindow):
 
         self.top_splitter.addWidget(video_container)
 
-        # Segment list container
-        list_container = QWidget()
-        list_layout = QVBoxLayout(list_container)
-        list_layout.setContentsMargins(0, 0, 0, 0)
+        # Right panel: segment list + stats
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(2)
 
-        # === НОВОЕ: Заголовок с счётчиком сегментов ===
+        # Заголовок с счётчиком сегментов
         self._segments_header_label = QLabel("Отрезки:")
         self._segments_header_label.setStyleSheet(
             "color: #ffffff; font-weight: bold; font-size: 12px;"
         )
-        list_layout.addWidget(self._segments_header_label)
+        right_layout.addWidget(self._segments_header_label)
 
-        self._setup_filters(list_layout)
+        self._setup_filters(right_layout)
 
+        # Segment list
         self.segment_list_widget = SegmentListWidget()
-        list_layout.addWidget(self.segment_list_widget)
+        right_layout.addWidget(self.segment_list_widget, 1)  # stretch=1
 
-        self.top_splitter.addWidget(list_container)
+        # === НОВОЕ: Статистика (сворачиваемая) ===
+        self._setup_stats_panel(right_layout)
+
+        self.top_splitter.addWidget(right_panel)
         self.top_splitter.setSizes([600, 400])
 
         self.main_splitter.addWidget(self.top_splitter)
@@ -218,6 +226,70 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(bottom_layout)
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Stats panel
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _setup_stats_panel(self, parent_layout: QVBoxLayout) -> None:
+        """Создать сворачиваемую панель статистики."""
+        # Кнопка-заголовок для сворачивания
+        toggle_layout = QHBoxLayout()
+        toggle_layout.setContentsMargins(0, 4, 0, 0)
+        toggle_layout.setSpacing(4)
+
+        self._stats_toggle_btn = QPushButton("▼ Statistics")
+        self._stats_toggle_btn.setFixedHeight(22)
+        self._stats_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e1e1e;
+                color: #aaaaaa;
+                border: 1px solid #444444;
+                border-radius: 3px;
+                text-align: left;
+                padding: 2px 8px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #333333;
+                color: #ffffff;
+            }
+        """)
+        self._stats_toggle_btn.clicked.connect(self._toggle_stats)
+        toggle_layout.addWidget(self._stats_toggle_btn)
+
+        parent_layout.addLayout(toggle_layout)
+
+        # Виджет статистики
+        self._stats_widget = StatsWidget()
+        self._stats_widget.setVisible(True)
+        parent_layout.addWidget(self._stats_widget, 0)  # stretch=0
+
+    def _toggle_stats(self) -> None:
+        """Свернуть/развернуть панель статистики."""
+        if not self._stats_widget or not self._stats_toggle_btn:
+            return
+
+        is_visible = self._stats_widget.isVisible()
+        self._stats_widget.setVisible(not is_visible)
+
+        if is_visible:
+            self._stats_toggle_btn.setText("▶ Statistics")
+        else:
+            self._stats_toggle_btn.setText("▼ Statistics")
+
+    def _update_stats(self) -> None:
+        """Обновить данные статистики из текущих маркеров."""
+        if not self._stats_widget:
+            return
+
+        if not self._timeline_controller:
+            self._stats_widget.clear()
+            return
+
+        all_markers = self._timeline_controller.markers
+        self._stats_widget.set_markers(all_markers)
+
+    # ──────────────────────────────────────────────────────────────────────────
     # MVC integration
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -244,6 +316,17 @@ class MainWindow(QMainWindow):
 
         if hasattr(controller, "set_main_window"):
             controller.set_main_window(self)
+
+        # === НОВОЕ: Подключить обновление статистики к сигналу маркеров ===
+        if hasattr(controller, "markers_changed"):
+            controller.markers_changed.connect(self._update_stats)
+
+        # Установить FPS для статистики
+        if self._stats_widget and hasattr(controller, "fps"):
+            self._stats_widget.set_fps(controller.fps)
+
+        # Начальное обновление
+        self._update_stats()
 
     def _ctor_accepts_controller(self) -> bool:
         try:
@@ -278,14 +361,12 @@ class MainWindow(QMainWindow):
         self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
         row.addWidget(self.notes_filter_checkbox)
 
-        # === НОВОЕ: Кнопка сброса с динамической подсветкой ===
         self._filter_reset_btn = QPushButton("Сброс")
         self._filter_reset_btn.setMaximumWidth(80)
         self._filter_reset_btn.clicked.connect(self._on_reset_filters)
         self._filter_reset_btn.setToolTip("Сбросить все фильтры")
         row.addWidget(self._filter_reset_btn)
 
-        # === НОВОЕ: Индикатор активного фильтра ===
         self._filter_indicator = QLabel("")
         self._filter_indicator.setMinimumWidth(140)
         self._filter_indicator.setFixedHeight(20)
@@ -326,6 +407,7 @@ class MainWindow(QMainWindow):
         self._sync_filter_ui_with_controller()
         self._update_segment_list_with_filters()
         self._update_filter_indicator()
+        self._update_stats()  # === НОВОЕ: обновить статистику при изменении фильтров ===
 
     def _sync_filter_ui_with_controller(self) -> None:
         if not self.filter_controller:
@@ -360,20 +442,11 @@ class MainWindow(QMainWindow):
         self.segment_list_widget.set_segments(segments_with_idx)
 
     def _update_filter_indicator(self) -> None:
-        """Обновить индикатор фильтра и счётчик сегментов.
-
-        Показывает:
-        - Заголовок "Отрезки: 5 из 23" когда фильтр активен
-        - Заголовок "Отрезки: 23" когда фильтры сброшены
-        - Индикатор "🔍 Фильтр активен" с оранжевым текстом
-        - Подсветку кнопки "Сброс" при активных фильтрах
-        """
         if not self.filter_controller:
             return
 
         is_filtered = self.filter_controller.has_active_filters
 
-        # --- Счётчик в заголовке ---
         total = 0
         filtered = 0
 
@@ -402,14 +475,11 @@ class MainWindow(QMainWindow):
                     "color: #ffffff; font-weight: bold; font-size: 12px;"
                 )
 
-        # --- Индикатор фильтра ---
         if self._filter_indicator:
             if is_filtered:
-                # Собираем описание активных фильтров
                 filter_parts = []
                 event_types = self.filter_controller.filter_event_types
                 if event_types:
-                    # Показать название выбранного типа
                     type_name = next(iter(event_types))
                     event = self.event_manager.get_event(type_name)
                     display_name = event.get_localized_name() if event else type_name
@@ -430,7 +500,6 @@ class MainWindow(QMainWindow):
                 self._filter_indicator.setText("")
                 self._filter_indicator.setToolTip("")
 
-        # --- Подсветка кнопки "Сброс" ---
         if self._filter_reset_btn:
             if is_filtered:
                 self._filter_reset_btn.setStyleSheet("""
@@ -454,7 +523,7 @@ class MainWindow(QMainWindow):
                     f"Сбросить фильтры (показано {filtered} из {total})"
                 )
             else:
-                self._filter_reset_btn.setStyleSheet("")  # Возврат к стилю по умолчанию
+                self._filter_reset_btn.setStyleSheet("")
                 self._filter_reset_btn.setToolTip("Сбросить все фильтры")
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -500,6 +569,9 @@ class MainWindow(QMainWindow):
     def get_timeline_widget(self) -> Optional[TimelineWidget]:
         return self.timeline_widget
 
+    def get_stats_widget(self) -> Optional[StatsWidget]:
+        return self._stats_widget
+
     def set_window_title(self, title: str) -> None:
         self.setWindowTitle(f"Hockey Editor - {title}" if title else "Hockey Editor")
 
@@ -513,7 +585,6 @@ class MainWindow(QMainWindow):
         self.mode_indicator.setText(f"{mode_text} | {params_text}")
 
     def open_segment_editor(self, marker_idx: int) -> None:
-        """Открыть редактор сегмента — делегирует main_controller."""
         if self.main_controller and hasattr(self.main_controller, 'open_segment_editor'):
             self.main_controller.open_segment_editor(marker_idx)
 

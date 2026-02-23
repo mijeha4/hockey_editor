@@ -4,6 +4,8 @@ Widgets - UI компоненты для отображения данных.
 Ленивые импорты для предотвращения циклических зависимостей.
 """
 
+from .stats_widget import StatsWidget
+
 __all__ = [
     'PlayerControls', 'SegmentListWidget', 'TimelineWidget',
     'EventCardDelegate', 'EventShortcutListWidget',
