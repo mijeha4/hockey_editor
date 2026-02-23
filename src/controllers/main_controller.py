@@ -4,7 +4,7 @@ Main Controller - главный контроллер одного окна пр
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, List
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QPixmap
@@ -95,8 +95,6 @@ class MainController(QObject):
         self._load_and_apply_settings()
 
         self.timeline_controller.set_playback_controller(self.playback_controller)
-
-        # FIX: Подключить FilterController к TimelineController
         self.timeline_controller.set_filter_controller(self.filter_controller)
 
         self.playback_controller.frame_changed.connect(
@@ -115,8 +113,6 @@ class MainController(QObject):
 
         self.timeline_controller.set_custom_event_controller(self.get_custom_event_controller())
 
-        # FIX: Связать MainWindow с контроллером — без этого filter_controller = None
-        # и все фильтры в UI не работают
         self.main_window.set_controller(self)
 
         self._setup_connections()
@@ -173,12 +169,18 @@ class MainController(QObject):
         if hasattr(self.main_window, "event_shortcut_list_widget") and self.main_window.event_shortcut_list_widget is not None:
             self.main_window.event_shortcut_list_widget.event_selected.connect(self._on_event_btn_clicked)
 
-        # ─── FIX: Подключить кнопки segment_list_widget ───
+        # Одиночные действия из segment_list
         segment_list = self.main_window.get_segment_list_widget()
         if segment_list is not None:
             segment_list.segment_jump_requested.connect(self._on_segment_jump)
             segment_list.segment_edit_requested.connect(self._on_segment_edit)
             segment_list.segment_delete_requested.connect(self._on_segment_delete)
+
+            # === НОВОЕ: Групповые действия из segment_list ===
+            segment_list.batch_delete_requested.connect(self._on_batch_delete)
+            segment_list.batch_change_type_requested.connect(self._on_batch_change_type)
+            segment_list.batch_export_requested.connect(self._on_batch_export)
+            segment_list.batch_duplicate_requested.connect(self._on_batch_duplicate)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Window lifecycle
@@ -213,35 +215,75 @@ class MainController(QObject):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_filters_changed(self) -> None:
-        """Обработка изменения фильтров — обновить timeline и UI индикаторы."""
         self.timeline_controller.refresh_view()
-        # Индикатор обновляется автоматически через main_window._on_filters_changed
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Segment list actions
+    # Segment list actions — одиночные
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_segment_jump(self, marker_idx: int) -> None:
-        """Перейти к началу сегмента по оригинальному индексу."""
         markers = self.project.markers
         if 0 <= marker_idx < len(markers):
             marker = markers[marker_idx]
             self.playback_controller.seek_to_frame(marker.start_frame)
 
     def _on_segment_edit(self, marker_idx: int) -> None:
-        """Открыть редактор сегмента."""
         self.open_segment_editor(marker_idx)
 
     def _on_segment_delete(self, marker_idx: int) -> None:
-        """Удалить сегмент."""
         self.delete_marker(marker_idx)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Segment list actions — ГРУППОВЫЕ (NEW)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _on_batch_delete(self, marker_indices: List[int]) -> None:
+        """Удалить несколько маркеров одной операцией."""
+        if not marker_indices:
+            return
+
+        from PySide6.QtWidgets import QMessageBox
+        count = len(marker_indices)
+        reply = QMessageBox.question(
+            self.main_window,
+            "Удаление сегментов",
+            f"Удалить {count} выделенных сегментов?\n\n"
+            f"Это действие можно отменить (Ctrl+Z).",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.timeline_controller.batch_delete_markers(marker_indices)
+            self.project_controller.mark_as_modified()
+
+    def _on_batch_change_type(self, marker_indices: List[int], new_event_name: str) -> None:
+        """Изменить тип события для нескольких маркеров."""
+        if not marker_indices or not new_event_name:
+            return
+        self.timeline_controller.batch_change_event_type(marker_indices, new_event_name)
+        self.project_controller.mark_as_modified()
+
+    def _on_batch_export(self, marker_indices: List[int]) -> None:
+        """Экспортировать несколько клипов."""
+        if not marker_indices:
+            return
+        # TODO: Реализовать пакетный экспорт в ExportController
+        # Пока открываем обычный диалог экспорта
+        self._on_export()
+
+    def _on_batch_duplicate(self, marker_indices: List[int]) -> None:
+        """Дублировать несколько маркеров."""
+        if not marker_indices:
+            return
+        self.timeline_controller.batch_duplicate_markers(marker_indices)
+        self.project_controller.mark_as_modified()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Segment editor
     # ─────────────────────────────────────────────────────────────────────────
 
     def open_segment_editor(self, marker_idx: int) -> None:
-        """Открыть редактор сегмента по оригинальному индексу."""
         if not (0 <= marker_idx < len(self.project.markers)):
             return
         controller = self.get_instance_edit_controller()
@@ -257,21 +299,18 @@ class MainController(QObject):
     # ─────────────────────────────────────────────────────────────────────────
 
     def set_playback_speed(self, speed: float) -> None:
-        """Установить скорость воспроизведения."""
         if hasattr(self.playback_controller, 'set_speed'):
             self.playback_controller.set_speed(speed)
         elif hasattr(self.playback_controller, 'speed'):
             self.playback_controller.speed = speed
 
     def get_video_width(self) -> int:
-        """Получить ширину видео."""
         if self.video_service and self.video_service.cap:
             import cv2
             return int(self.video_service.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         return 0
 
     def get_video_height(self) -> int:
-        """Получить высоту видео."""
         if self.video_service and self.video_service.cap:
             import cv2
             return int(self.video_service.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -338,7 +377,6 @@ class MainController(QObject):
             self.main_window.get_timeline_widget().set_total_frames(total_frames)
             self.main_window.get_timeline_widget().set_fps(fps)
 
-            # Также обновить timeline_controller
             self.timeline_controller.set_fps(fps)
             self.timeline_controller.init_tracks(total_frames)
 
@@ -423,7 +461,6 @@ class MainController(QObject):
         self.main_window.set_video_image(QPixmap())
         self.main_window.set_window_title("Untitled")
         self.history_manager.clear_history()
-        # Сбросить фильтры при новом проекте
         self.filter_controller.reset_all_filters()
 
     def _create_new_project_in_new_window(self) -> None:

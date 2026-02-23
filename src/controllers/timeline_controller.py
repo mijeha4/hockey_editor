@@ -20,11 +20,7 @@ from views.widgets.timeline_scene import TimelineWidget
 # ──────────────────────────────────────────────────────────────────────────────
 
 class AddMarkerCommand(Command):
-    """Команда добавления маркера.
-
-    Сохраняет индекс при execute, восстанавливает при undo.
-    Redo (повторный execute) вставляет в тот же индекс.
-    """
+    """Команда добавления маркера."""
 
     def __init__(self, project: Project, marker: Marker):
         super().__init__(f"Add {marker.event_name} marker")
@@ -43,11 +39,7 @@ class AddMarkerCommand(Command):
 
 
 class ModifyMarkerCommand(Command):
-    """Команда изменения маркера по индексу.
-
-    FIX: Использует project.update_marker() вместо прямой записи
-    в project.markers[idx], которая раньше писала в копию списка.
-    """
+    """Команда изменения маркера по индексу."""
 
     def __init__(self, project: Project, marker_idx: int,
                  old_marker: Marker, new_marker: Marker):
@@ -67,12 +59,7 @@ class ModifyMarkerCommand(Command):
 
 
 class DeleteMarkerCommand(Command):
-    """Команда удаления маркера.
-
-    FIX: Хранит marker_idx при создании, а не ищет через list.index().
-    Раньше list.index() мог найти другой маркер при дубликатах,
-    или бросить ValueError если маркер уже удалён.
-    """
+    """Команда удаления маркера."""
 
     def __init__(self, project: Project, marker_idx: int, marker: Marker):
         super().__init__(f"Delete {marker.event_name} marker")
@@ -86,6 +73,26 @@ class DeleteMarkerCommand(Command):
 
     def undo(self) -> None:
         self.project.add_marker(self.marker, self.marker_idx)
+
+
+class BatchCommand(Command):
+    """Составная команда для групповых операций.
+
+    Выполняет список подкоманд как одну атомарную операцию.
+    Undo отменяет все подкоманды в обратном порядке.
+    """
+
+    def __init__(self, description: str, commands: List[Command]):
+        super().__init__(description)
+        self.commands = list(commands)
+
+    def execute(self) -> None:
+        for cmd in self.commands:
+            cmd.execute()
+
+    def undo(self) -> None:
+        for cmd in reversed(self.commands):
+            cmd.undo()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -207,17 +214,15 @@ class TimelineController(QObject):
         return self.project.markers
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Undo / Redo (convenience wrappers)
+    # Undo / Redo
     # ──────────────────────────────────────────────────────────────────────────
 
     def undo(self) -> None:
-        """Отменить последнее действие."""
         if self.history_manager.undo():
             self.refresh_view()
             self.project_modified.emit()
 
     def redo(self) -> None:
-        """Повторить отменённое действие."""
         if self.history_manager.redo():
             self.refresh_view()
             self.project_modified.emit()
@@ -279,7 +284,7 @@ class TimelineController(QObject):
         self.add_marker(start_frame, end_frame, event_name)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # CRUD markers with history (FIXED)
+    # CRUD markers with history
     # ──────────────────────────────────────────────────────────────────────────
 
     def add_marker(self, start_frame: int, end_frame: int, event_name: str, note: str = "") -> None:
@@ -296,11 +301,6 @@ class TimelineController(QObject):
         self.project_modified.emit()
 
     def delete_marker(self, marker_idx: int) -> None:
-        """Удалить маркер по оригинальному индексу.
-
-        FIX: Передаём marker_idx в DeleteMarkerCommand вместо поиска
-        через list.index() — это надёжнее при дубликатах и undo/redo.
-        """
         if 0 <= marker_idx < len(self.project.markers):
             marker = self.project.markers[marker_idx]
             self.history_manager.execute_command(
@@ -309,10 +309,7 @@ class TimelineController(QObject):
             self.project_modified.emit()
 
     def duplicate_marker(self, marker_idx: int) -> None:
-        """Дублировать маркер — создать копию с новым ID.
-
-        Копия добавляется сразу после оригинала.
-        """
+        """Дублировать маркер — создать копию с новым ID."""
         if not (0 <= marker_idx < len(self.project.markers)):
             return
 
@@ -338,10 +335,6 @@ class TimelineController(QObject):
         new_event_name: Optional[str] = None,
         new_note: Optional[str] = None,
     ) -> None:
-        """Изменить маркер с записью в историю.
-
-        FIX: Использует project.update_marker() через ModifyMarkerCommand.
-        """
         if not (0 <= marker_idx < len(self.project.markers)):
             return
 
@@ -359,6 +352,95 @@ class TimelineController(QObject):
         )
 
         self.marker_updated.emit(marker_idx)
+        self.project_modified.emit()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Batch operations (NEW)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def batch_delete_markers(self, marker_indices: List[int]) -> None:
+        """Удалить несколько маркеров одной операцией (undo отменяет все).
+
+        ВАЖНО: Индексы обрабатываются в обратном порядке (от большего к меньшему),
+        чтобы удаление не сдвигало индексы оставшихся маркеров.
+        """
+        sorted_indices = sorted(marker_indices, reverse=True)
+
+        commands: List[Command] = []
+        for idx in sorted_indices:
+            if 0 <= idx < len(self.project.markers):
+                marker = self.project.markers[idx]
+                commands.append(DeleteMarkerCommand(self.project, idx, marker))
+
+        if not commands:
+            return
+
+        batch = BatchCommand(
+            f"Delete {len(commands)} markers",
+            commands
+        )
+        self.history_manager.execute_command(batch)
+        self.project_modified.emit()
+
+    def batch_change_event_type(self, marker_indices: List[int], new_event_name: str) -> None:
+        """Изменить тип события для нескольких маркеров одной операцией."""
+        commands: List[Command] = []
+
+        for idx in sorted(marker_indices):
+            if not (0 <= idx < len(self.project.markers)):
+                continue
+
+            old_marker = self.project.markers[idx]
+            if old_marker.event_name == new_event_name:
+                continue  # Уже этот тип — пропускаем
+
+            new_marker = Marker(
+                id=old_marker.id,
+                start_frame=old_marker.start_frame,
+                end_frame=old_marker.end_frame,
+                event_name=new_event_name,
+                note=old_marker.note,
+            )
+            commands.append(ModifyMarkerCommand(self.project, idx, old_marker, new_marker))
+
+        if not commands:
+            return
+
+        batch = BatchCommand(
+            f"Change {len(commands)} markers to '{new_event_name}'",
+            commands
+        )
+        self.history_manager.execute_command(batch)
+        self.project_modified.emit()
+
+    def batch_duplicate_markers(self, marker_indices: List[int]) -> None:
+        """Дублировать несколько маркеров одной операцией."""
+        commands: List[Command] = []
+
+        for idx in sorted(marker_indices):
+            if not (0 <= idx < len(self.project.markers)):
+                continue
+
+            original = self.project.markers[idx]
+            new_id = self._generate_marker_id() + len(commands)
+
+            duplicate = Marker(
+                id=new_id,
+                start_frame=original.start_frame,
+                end_frame=original.end_frame,
+                event_name=original.event_name,
+                note=f"{original.note} (копия)" if original.note else "(копия)",
+            )
+            commands.append(AddMarkerCommand(self.project, duplicate))
+
+        if not commands:
+            return
+
+        batch = BatchCommand(
+            f"Duplicate {len(commands)} markers",
+            commands
+        )
+        self.history_manager.execute_command(batch)
         self.project_modified.emit()
 
     def _generate_marker_id(self) -> int:
@@ -420,7 +502,7 @@ class TimelineController(QObject):
             if hasattr(self.timeline_widget, "segment_edit_requested"):
                 self.timeline_widget.segment_edit_requested.connect(self._on_event_double_clicked)
 
-        # === НОВОЕ: Подключение сигналов контекстного меню ===
+        # Сигналы контекстного меню
         if hasattr(self.timeline_widget, "context_edit_requested"):
             self.timeline_widget.context_edit_requested.connect(self._on_context_edit)
         if hasattr(self.timeline_widget, "context_delete_requested"):
@@ -432,32 +514,26 @@ class TimelineController(QObject):
         if hasattr(self.timeline_widget, "context_export_requested"):
             self.timeline_widget.context_export_requested.connect(self._on_context_export)
 
-    # === НОВЫЕ ОБРАБОТЧИКИ контекстного меню ===
+    # Context menu handlers
 
     def _on_context_edit(self, marker_idx: int) -> None:
-        """Редактировать маркер из контекстного меню."""
         self.edit_marker_requested(marker_idx)
 
     def _on_context_delete(self, marker_idx: int) -> None:
-        """Удалить маркер из контекстного меню."""
         self.delete_marker(marker_idx)
 
     def _on_context_duplicate(self, marker_idx: int) -> None:
-        """Дублировать маркер из контекстного меню."""
         self.duplicate_marker(marker_idx)
 
     def _on_context_jump(self, marker_idx: int) -> None:
-        """Перейти к началу маркера из контекстного меню."""
         if 0 <= marker_idx < len(self.project.markers):
             marker = self.project.markers[marker_idx]
             self.seek_frame(marker.start_frame)
 
     def _on_context_export(self, marker_idx: int) -> None:
-        """Экспортировать один клип из контекстного меню."""
         if self._main_controller and hasattr(self._main_controller, 'export_single_clip'):
             self._main_controller.export_single_clip(marker_idx)
         elif self._main_controller and hasattr(self._main_controller, '_on_export'):
-            # Fallback: открыть общий диалог экспорта
             self._main_controller._on_export()
 
     def _on_timeline_seek(self, frame: int) -> None:
@@ -562,7 +638,6 @@ class TimelineController(QObject):
         filtered_pairs = self.get_filtered_pairs()
         filtered_markers = [m for _, m in filtered_pairs]
 
-        # === НОВОЕ: Передаём маппинг индексов для контекстного меню ===
         if self.timeline_widget:
             index_map = {m.id: idx for idx, m in filtered_pairs}
             if hasattr(self.timeline_widget, "set_markers_with_indices"):
@@ -682,7 +757,6 @@ class TimelineController(QObject):
 
         table = self.segment_list_widget.table
 
-        # === FIX: QTableView не имеет rowCount() — берём из модели ===
         model = table.model()
         if model is None:
             return
@@ -697,7 +771,6 @@ class TimelineController(QObject):
                 return
 
             for row in range(model.rowCount()):
-                # === FIX: QTableView не имеет item() — берём через model.data() ===
                 index = model.index(row, 0)
                 orig_idx = model.data(index, Qt.ItemDataRole.UserRole)
                 if orig_idx in selected_orig:
@@ -716,11 +789,6 @@ class TimelineController(QObject):
         pass
 
     def _on_event_deleted(self, event_name: str) -> None:
-        """Удалить все маркеры с этим event_name.
-
-        FIX: Используем новый DeleteMarkerCommand с marker_idx.
-        Удаляем в обратном порядке, чтобы индексы не сдвигались.
-        """
         indices_to_remove = [
             i for i, m in enumerate(self.project.markers)
             if m.event_name == event_name
