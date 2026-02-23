@@ -265,12 +265,20 @@ class MainController(QObject):
         self.project_controller.mark_as_modified()
 
     def _on_batch_export(self, marker_indices: List[int]) -> None:
-        """Экспортировать несколько клипов."""
+        """Экспортировать выбранные клипы с пресетом выделения."""
         if not marker_indices:
             return
-        # TODO: Реализовать пакетный экспорт в ExportController
-        # Пока открываем обычный диалог экспорта
-        self._on_export()
+        video_path = getattr(self.project, "video_path", "")
+        fps = self.video_service.get_fps() if self.video_service.cap else 30.0
+        settings_ctrl = self.get_settings_controller()
+        self.export_controller = ExportController(
+            self.project, video_path, fps, settings_ctrl
+        )
+        preselected_ids = []
+        for idx in marker_indices:
+            if 0 <= idx < len(self.project.markers):
+                preselected_ids.append(self.project.markers[idx].id)
+        self.export_controller.show_dialog(preselected_ids=preselected_ids)
 
     def _on_batch_duplicate(self, marker_indices: List[int]) -> None:
         """Дублировать несколько маркеров."""
@@ -485,10 +493,12 @@ class MainController(QObject):
         self._update_mode_indicator()
 
     def _on_export(self) -> None:
-        if self.export_controller is None:
-            video_path = getattr(self.project, "video_path", "")
-            fps = self.video_service.get_fps() if self.video_service.cap else 30.0
-            self.export_controller = ExportController(self.project, video_path, fps)
+        video_path = getattr(self.project, "video_path", "")
+        fps = self.video_service.get_fps() if self.video_service.cap else 30.0
+        settings_ctrl = self.get_settings_controller()
+        self.export_controller = ExportController(
+            self.project, video_path, fps, settings_ctrl
+        )
         self.export_controller.show_dialog()
 
     def _on_open_preview(self) -> None:

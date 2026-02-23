@@ -1,3 +1,8 @@
+"""
+Export Controller — управляет экспортом видео, CSV, PDF.
+Настройки берутся из SettingsController.
+"""
+
 from __future__ import annotations
 
 from typing import List, Dict, Optional, Any
@@ -14,11 +19,12 @@ from views.windows.export_dialog import ExportDialog
 class ExportWorker(QThread):
     """Worker thread для экспорта видео без блокировки UI."""
 
-    progress = Signal(int)          # 0-100
-    finished = Signal(bool, str)    # success, message
+    progress = Signal(int)
+    finished = Signal(bool, str)
     cancelled = Signal()
 
-    def __init__(self, video_path: str, markers: List[Marker], fps: float, params: Dict[str, Any]):
+    def __init__(self, video_path: str, markers: List[Marker],
+                 fps: float, params: Dict[str, Any]):
         super().__init__()
         self.video_path = video_path
         self.markers = markers
@@ -38,7 +44,7 @@ class ExportWorker(QThread):
 
             if self._cancel_check():
                 self.cancelled.emit()
-                self.finished.emit(False, "Export cancelled")
+                self.finished.emit(False, "Экспорт отменён")
                 return
 
             success = VideoExporter.export_segments(
@@ -46,101 +52,103 @@ class ExportWorker(QThread):
                 markers=self.markers,
                 fps=self.fps,
                 output_path=self.params["output_path"],
-                codec=self.params["codec"],
-                quality=self.params["quality"],
-                resolution=self.params["resolution"],
-                include_audio=self.params["include_audio"],
-                merge_segments=self.params["merge_segments"],
-                progress_callback=getattr(self, "_progress_callback", None),
+                codec=self.params.get("codec", "libx264"),
+                quality=self.params.get("quality", 23),
+                resolution=self.params.get("resolution", "source"),
+                include_audio=self.params.get("include_audio", True),
+                merge_segments=self.params.get("merge_segments", True),
+                padding_before=self.params.get("padding_before", 0.0),
+                padding_after=self.params.get("padding_after", 0.0),
+                file_template=self.params.get("file_template"),
+                progress_callback=self._emit_progress,
                 cancel_check=self._cancel_check,
             )
 
             if self._cancel_check():
                 self.cancelled.emit()
-                self.finished.emit(False, "Export cancelled")
+                self.finished.emit(False, "Экспорт отменён")
                 return
 
             self.progress.emit(100)
 
             if success:
-                if self.params["merge_segments"]:
-                    message = f"Export completed: {self.params['output_path']}"
+                if self.params.get("merge_segments", True):
+                    message = f"Экспорт завершён: {self.params['output_path']}"
                 else:
                     message = (
-                        f"Export completed: {len(self.markers)} separate files in "
+                        f"Экспорт завершён: {len(self.markers)} файлов в "
                         f"{self.params['output_path']}"
                     )
             else:
-                message = "Export failed"
+                message = "Экспорт не удался"
 
             self.finished.emit(success, message)
 
-        except TypeError:
-            try:
-                success = VideoExporter.export_segments(
-                    video_path=self.video_path,
-                    markers=self.markers,
-                    fps=self.fps,
-                    output_path=self.params["output_path"],
-                    codec=self.params["codec"],
-                    quality=self.params["quality"],
-                    resolution=self.params["resolution"],
-                    include_audio=self.params["include_audio"],
-                    merge_segments=self.params["merge_segments"],
-                )
-                self.progress.emit(100)
-                self.finished.emit(bool(success), "Export completed" if success else "Export failed")
-            except Exception as e:
-                self.finished.emit(False, f"Export failed: {e}")
-
         except Exception as e:
-            self.finished.emit(False, f"Export failed: {e}")
+            self.finished.emit(False, f"Ошибка экспорта: {e}")
+
+    def _emit_progress(self, value: int) -> None:
+        self.progress.emit(value)
 
 
 class ExportController(QObject):
     """Контроллер управления экспортом видео и отчётов."""
 
-    def __init__(self, project: Project, video_path: str, fps: float):
+    def __init__(self, project: Project, video_path: str, fps: float,
+                 settings_controller=None):
         super().__init__()
         self.project = project
         self.video_path = video_path
         self.fps = fps
+        self.settings_controller = settings_controller
 
         self.view: Optional[ExportDialog] = None
         self.export_worker: Optional[ExportWorker] = None
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
     # Dialog
-    # ──────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
 
-    def show_dialog(self) -> None:
+    def show_dialog(self, preselected_ids: Optional[List[int]] = None) -> None:
         """Показать диалог экспорта."""
         self.view = ExportDialog()
+
+        # Сигналы
         self.view.export_requested.connect(self._on_export_requested)
-
-        if hasattr(self.view, "cancel_requested"):
-            self.view.cancel_requested.connect(self._on_cancel_requested)
-
-        # === НОВОЕ: подключение сигналов экспорта отчётов ===
         if hasattr(self.view, "csv_export_requested"):
             self.view.csv_export_requested.connect(self._on_csv_export)
         if hasattr(self.view, "pdf_export_requested"):
             self.view.pdf_export_requested.connect(self._on_pdf_export)
 
+        # Данные
+        self.view.set_video_path(self.video_path)
+        self.view.set_fps(self.fps)
+
         segments_data = self._prepare_segments_data()
         self.view.set_segments(segments_data)
 
-        self.view.set_video_path(self.video_path)
-        self.view.set_fps(self.fps)
+        # Загрузить настройки экспорта из Settings
+        if self.settings_controller is not None:
+            try:
+                defaults = self.settings_controller.get_export_defaults()
+                self.view.set_export_defaults(defaults)
+            except Exception as e:
+                print(f"Warning: could not load export defaults: {e}")
+
+        # Пресет выделения (для batch export)
+        if preselected_ids is not None:
+            preselected_set = set(preselected_ids)
+            for item in self.view._segment_items:
+                item["checkbox"].setChecked(item["id"] in preselected_set)
 
         self.view.exec()
 
     def _prepare_segments_data(self) -> List[Dict[str, Any]]:
         segments_data: List[Dict[str, Any]] = []
-        fps = self.fps if self.fps > 0 else 0.0
+        fps = self.fps if self.fps > 0 else 1.0
 
         for marker in self.project.markers:
-            duration_sec = ((marker.end_frame - marker.start_frame) / fps) if fps > 0 else 0.0
+            duration_sec = (marker.end_frame - marker.start_frame) / fps
             segments_data.append({
                 "id": marker.id,
                 "event_name": marker.event_name,
@@ -151,15 +159,12 @@ class ExportController(QObject):
 
         return segments_data
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
     # Video Export
-    # ──────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
 
     def _on_export_requested(self, params: Dict[str, Any]) -> None:
-        if not self.view:
-            return
-
-        if self.export_worker is not None:
+        if not self.view or self.export_worker is not None:
             return
 
         selected_ids = params.get("selected_segment_ids", [])
@@ -167,17 +172,12 @@ class ExportController(QObject):
             return
 
         marker_by_id = {m.id: m for m in self.project.markers}
-        selected_markers: List[Marker] = []
-        for mid in selected_ids:
-            m = marker_by_id.get(mid)
-            if m is not None:
-                selected_markers.append(m)
-
+        selected_markers = [marker_by_id[mid] for mid in selected_ids if mid in marker_by_id]
         if not selected_markers:
             return
 
         self.view.set_controls_enabled(False)
-        self.view.set_progress(0, "Exporting...")
+        self.view.set_progress(0, "Экспорт...")
 
         self.export_worker = ExportWorker(
             video_path=self.video_path,
@@ -188,16 +188,11 @@ class ExportController(QObject):
         self.export_worker.progress.connect(self._on_progress_update)
         self.export_worker.finished.connect(self._on_export_finished)
         self.export_worker.cancelled.connect(self._on_export_cancelled)
-
         self.export_worker.start()
-
-    def _on_cancel_requested(self) -> None:
-        if self.export_worker is not None:
-            self.export_worker.cancel()
 
     def _on_progress_update(self, value: int) -> None:
         if self.view:
-            self.view.set_progress(value, f"Exporting... {value}%")
+            self.view.set_progress(value, f"Экспорт... {value}%")
 
     def _on_export_cancelled(self) -> None:
         pass
@@ -215,12 +210,11 @@ class ExportController(QObject):
                 pass
             self.export_worker = None
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # CSV / PDF Export (NEW)
-    # ──────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────
+    # CSV / PDF Export
+    # ──────────────────────────────────────────────────────────────────────
 
     def _on_csv_export(self, output_path: str) -> None:
-        """Экспорт данных сегментов в CSV."""
         try:
             markers = self._get_selected_markers_from_view()
             if not markers:
@@ -239,13 +233,11 @@ class ExportController(QObject):
                     self.view.show_export_result(True, f"CSV экспортирован: {output_path}")
                 else:
                     self.view.show_export_result(False, "Ошибка экспорта CSV")
-
         except Exception as e:
             if self.view:
                 self.view.show_export_result(False, f"Ошибка CSV: {e}")
 
     def _on_pdf_export(self, output_path: str) -> None:
-        """Экспорт отчёта в PDF (или HTML)."""
         try:
             markers = self._get_selected_markers_from_view()
             if not markers:
@@ -264,19 +256,15 @@ class ExportController(QObject):
                     self.view.show_export_result(True, f"Отчёт экспортирован: {output_path}")
                 else:
                     self.view.show_export_result(False, "Ошибка экспорта отчёта")
-
         except Exception as e:
             if self.view:
                 self.view.show_export_result(False, f"Ошибка отчёта: {e}")
 
     def _get_selected_markers_from_view(self) -> List[Marker]:
-        """Получить выбранные маркеры из диалога."""
         if not self.view:
             return []
-
         selected_ids = self.view.get_selected_segment_ids()
         if not selected_ids:
             return []
-
         marker_by_id = {m.id: m for m in self.project.markers}
         return [marker_by_id[mid] for mid in selected_ids if mid in marker_by_id]

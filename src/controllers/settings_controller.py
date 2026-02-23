@@ -1,8 +1,5 @@
 """
 Settings Controller - manages application settings.
-
-Handles loading, saving, validation, and application of application settings
-through a centralized interface for settings dialogs.
 """
 
 from __future__ import annotations
@@ -20,8 +17,8 @@ class SettingsController(QObject):
 
     settings_loaded = Signal(AppSettings)
     settings_saved = Signal()
-    settings_changed = Signal(str, Any)        # (key, value) or ("*", AppSettings)
-    validation_error = Signal(str, str)        # (field, message)
+    settings_changed = Signal(str, Any)
+    validation_error = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,15 +26,13 @@ class SettingsController(QObject):
         self.settings: AppSettings = AppSettings()
         self.settings_manager = SettingsManager()
 
-        # Snapshot for change tracking (dict is safest; no aliasing)
         self._original_settings_dict: Optional[Dict[str, Any]] = None
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Load / Save / Change tracking
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def load_settings(self) -> bool:
-        """Load settings from storage."""
         try:
             loaded_settings = self.settings_manager.load_settings()
             if loaded_settings:
@@ -54,7 +49,6 @@ class SettingsController(QObject):
             return False
 
     def save_settings(self) -> bool:
-        """Save current settings to storage."""
         try:
             success = self.settings_manager.save_settings(self.settings)
             if success:
@@ -67,23 +61,18 @@ class SettingsController(QObject):
             return False
 
     def reset_to_defaults(self) -> None:
-        """Reset settings to application defaults (does not auto-save)."""
         self.settings = AppSettings()
         self.settings_changed.emit("*", self.settings)
 
     def has_unsaved_changes(self) -> bool:
-        """Check if there are unsaved changes."""
         if self._original_settings_dict is None:
-            # not loaded yet => treat as changed
             return True
         return self.settings.to_dict() != self._original_settings_dict
 
     def apply_changes(self) -> bool:
-        """Apply current settings (called when dialog is accepted)."""
         return self.save_settings()
 
     def discard_changes(self) -> None:
-        """Discard current changes and revert to last loaded/saved snapshot."""
         if self._original_settings_dict is None:
             return
         try:
@@ -92,9 +81,9 @@ class SettingsController(QObject):
         except Exception as e:
             print(f"Error discarding changes: {e}")
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Recording settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_recording_mode(self, mode: str) -> None:
         if mode in ("dynamic", "fixed_length") and self.settings.recording_mode != mode:
@@ -139,9 +128,9 @@ class SettingsController(QObject):
     def get_post_roll(self) -> float:
         return self.settings.post_roll_sec
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Hotkeys settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_hotkey(self, action: str, key: str) -> None:
         err = self.validate_hotkey(action, key)
@@ -159,12 +148,11 @@ class SettingsController(QObject):
     def get_all_hotkeys(self) -> Dict[str, str]:
         return self.settings.hotkeys.copy()
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Track color settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_track_color(self, track: str, color: str) -> None:
-        # Optional: validate color format #RRGGBB if you want
         if self.settings.track_colors.get(track) != color:
             self.settings.track_colors[track] = color
             self.settings_changed.emit("track_colors", self.settings.track_colors.copy())
@@ -175,9 +163,9 @@ class SettingsController(QObject):
     def get_all_track_colors(self) -> Dict[str, str]:
         return self.settings.track_colors.copy()
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Window settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_window_geometry(self, x: int, y: int, width: int, height: int) -> None:
         err = self.validate_window_size(width, height)
@@ -206,9 +194,9 @@ class SettingsController(QObject):
             self.settings.window_height,
         )
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Autosave settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_autosave_enabled(self, enabled: bool) -> None:
         if self.settings.autosave_enabled != enabled:
@@ -229,9 +217,9 @@ class SettingsController(QObject):
     def get_autosave_interval(self) -> int:
         return self.settings.autosave_interval_minutes
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Language settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_language(self, language: str) -> None:
         if self.settings.language != language:
@@ -241,9 +229,9 @@ class SettingsController(QObject):
     def get_language(self) -> str:
         return self.settings.language
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Playback settings
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def set_playback_speed(self, speed: float) -> None:
         if speed <= 0:
@@ -256,9 +244,9 @@ class SettingsController(QObject):
     def get_playback_speed(self) -> float:
         return self.settings.playback_speed
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Recent projects
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def add_recent_project(self, path: str) -> None:
         if not path:
@@ -282,9 +270,126 @@ class SettingsController(QObject):
             self.settings.recent_projects.clear()
             self.settings_changed.emit("recent_projects", [])
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Export settings (NEW)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def set_export_default_dir(self, path: str) -> None:
+        if self.settings.export_default_dir != path:
+            self.settings.export_default_dir = path
+            self.settings_changed.emit("export_default_dir", path)
+
+    def get_export_default_dir(self) -> str:
+        return self.settings.export_default_dir
+
+    def set_export_codec(self, codec: str) -> None:
+        valid = ("libx264", "libx265", "mpeg4", "copy")
+        if codec not in valid:
+            self.validation_error.emit("export_codec", f"Unknown codec: {codec}")
+            return
+        if self.settings.export_codec != codec:
+            self.settings.export_codec = codec
+            self.settings_changed.emit("export_codec", codec)
+
+    def get_export_codec(self) -> str:
+        return self.settings.export_codec
+
+    def set_export_quality_crf(self, crf: int) -> None:
+        if not (0 <= crf <= 51):
+            self.validation_error.emit("export_quality_crf", "CRF must be 0-51")
+            return
+        if self.settings.export_quality_crf != crf:
+            self.settings.export_quality_crf = crf
+            self.settings_changed.emit("export_quality_crf", crf)
+
+    def get_export_quality_crf(self) -> int:
+        return self.settings.export_quality_crf
+
+    def set_export_resolution(self, resolution: str) -> None:
+        valid = ("source", "2160p", "1080p", "720p", "480p", "360p")
+        if resolution not in valid:
+            self.validation_error.emit("export_resolution", f"Unknown resolution: {resolution}")
+            return
+        if self.settings.export_resolution != resolution:
+            self.settings.export_resolution = resolution
+            self.settings_changed.emit("export_resolution", resolution)
+
+    def get_export_resolution(self) -> str:
+        return self.settings.export_resolution
+
+    def set_export_include_audio(self, enabled: bool) -> None:
+        if self.settings.export_include_audio != enabled:
+            self.settings.export_include_audio = enabled
+            self.settings_changed.emit("export_include_audio", enabled)
+
+    def get_export_include_audio(self) -> bool:
+        return self.settings.export_include_audio
+
+    def set_export_merge_segments(self, enabled: bool) -> None:
+        if self.settings.export_merge_segments != enabled:
+            self.settings.export_merge_segments = enabled
+            self.settings_changed.emit("export_merge_segments", enabled)
+
+    def get_export_merge_segments(self) -> bool:
+        return self.settings.export_merge_segments
+
+    def set_export_file_template(self, template: str) -> None:
+        template = template.strip()
+        if not template:
+            self.validation_error.emit("export_file_template", "Template cannot be empty")
+            return
+        if self.settings.export_file_template != template:
+            self.settings.export_file_template = template
+            self.settings_changed.emit("export_file_template", template)
+
+    def get_export_file_template(self) -> str:
+        return self.settings.export_file_template
+
+    def set_export_padding_before(self, seconds: float) -> None:
+        if seconds < 0:
+            self.validation_error.emit("export_padding_before", "Padding cannot be negative")
+            return
+        if seconds > 60:
+            self.validation_error.emit("export_padding_before", "Padding cannot exceed 60s")
+            return
+        if self.settings.export_padding_before != seconds:
+            self.settings.export_padding_before = seconds
+            self.settings_changed.emit("export_padding_before", seconds)
+
+    def get_export_padding_before(self) -> float:
+        return self.settings.export_padding_before
+
+    def set_export_padding_after(self, seconds: float) -> None:
+        if seconds < 0:
+            self.validation_error.emit("export_padding_after", "Padding cannot be negative")
+            return
+        if seconds > 60:
+            self.validation_error.emit("export_padding_after", "Padding cannot exceed 60s")
+            return
+        if self.settings.export_padding_after != seconds:
+            self.settings.export_padding_after = seconds
+            self.settings_changed.emit("export_padding_after", seconds)
+
+    def get_export_padding_after(self) -> float:
+        return self.settings.export_padding_after
+
+    def get_export_defaults(self) -> Dict[str, Any]:
+        """Convenience: all export defaults as a dict for ExportDialog."""
+        return {
+            "default_dir": self.settings.export_default_dir,
+            "codec": self.settings.export_codec,
+            "quality_crf": self.settings.export_quality_crf,
+            "resolution": self.settings.export_resolution,
+            "include_audio": self.settings.export_include_audio,
+            "merge_segments": self.settings.export_merge_segments,
+            "file_template": self.settings.export_file_template,
+            "padding_before": self.settings.export_padding_before,
+            "padding_after": self.settings.export_padding_after,
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Validation
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def validate_hotkey(self, action: str, key: str) -> Optional[str]:
         for other_action, other_key in self.settings.hotkeys.items():
@@ -306,9 +411,9 @@ class SettingsController(QObject):
             return "Window size cannot exceed 4000x3000"
         return None
 
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
     # Utility
-    # ─────────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
 
     def get_settings_dict(self) -> Dict[str, Any]:
         return self.settings.to_dict()
@@ -343,6 +448,4 @@ class SettingsController(QObject):
             return False
 
     def cleanup(self) -> None:
-        """Cleanup resources (if needed)."""
-        # If you add long-lived connections/timers later, disconnect/stop here.
         pass

@@ -49,16 +49,13 @@ class AppSettings:
         EventType(name="Shot on Goal", color="#FF5722", shortcut="H", description="Shot on goal"),
         EventType(name="Missed Shot", color="#FF9800", shortcut="M", description="Shot missed the net"),
         EventType(name="Blocked Shot", color="#795548", shortcut="B", description="Shot blocked"),
-
         EventType(name="Zone Entry", color="#2196F3", shortcut="Z", description="Entry into offensive zone"),
         EventType(name="Zone Exit", color="#03A9F4", shortcut="X", description="Exit from defensive zone"),
         EventType(name="Dump In", color="#00BCD4", shortcut="D", description="Dump puck into zone"),
-
         EventType(name="Turnover", color="#607D8B", shortcut="T", description="Loss of puck possession"),
         EventType(name="Takeaway", color="#4CAF50", shortcut="A", description="Puck possession gained"),
         EventType(name="Faceoff Win", color="#8BC34A", shortcut="F", description="Faceoff won"),
         EventType(name="Faceoff Loss", color="#558B2F", shortcut="L", description="Faceoff lost"),
-
         EventType(name="Defensive Block", color="#3F51B5", shortcut="K", description="Shot blocked in defense"),
         EventType(name="Penalty", color="#9C27B0", shortcut="P", description="Penalty called"),
     ])
@@ -94,9 +91,19 @@ class AppSettings:
     playback_speed: float = 1.0
     theme: str = Theme.DARK.value
 
+    # ─── Export defaults (NEW) ──────────────────────────────────────────────
+    export_default_dir: str = ""
+    export_codec: str = "libx264"
+    export_quality_crf: int = 23
+    export_resolution: str = "source"
+    export_include_audio: bool = True
+    export_merge_segments: bool = True
+    export_file_template: str = "{event}_{index}_{time}"
+    export_padding_before: float = 0.0
+    export_padding_after: float = 0.0
+
     def to_dict(self) -> Dict[str, Any]:
         return {
-            # include default_events so it can be customized if needed
             "default_events": [e.to_dict() for e in self.default_events],
 
             "hotkeys": dict(self.hotkeys),
@@ -122,13 +129,23 @@ class AppSettings:
             "language": self.language,
             "playback_speed": float(self.playback_speed),
             "theme": self.theme,
+
+            # Export defaults
+            "export_default_dir": self.export_default_dir,
+            "export_codec": self.export_codec,
+            "export_quality_crf": int(self.export_quality_crf),
+            "export_resolution": self.export_resolution,
+            "export_include_audio": bool(self.export_include_audio),
+            "export_merge_segments": bool(self.export_merge_segments),
+            "export_file_template": self.export_file_template,
+            "export_padding_before": float(self.export_padding_before),
+            "export_padding_after": float(self.export_padding_after),
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AppSettings":
         default = cls()
 
-        # recording_mode validation
         rec = str(data.get("recording_mode", default.recording_mode))
         if rec not in (RecordingMode.DYNAMIC.value, RecordingMode.FIXED_LENGTH.value):
             rec = default.recording_mode
@@ -137,15 +154,25 @@ class AppSettings:
         if theme not in (Theme.DARK.value, Theme.LIGHT.value):
             theme = default.theme
 
-        # default_events (optional key)
         default_events_data = data.get("default_events")
         if isinstance(default_events_data, list):
             default_events = [EventType.from_dict(x) for x in default_events_data]
-            # if bad config produces empty list, fallback
             if not default_events:
                 default_events = default.default_events
         else:
             default_events = default.default_events
+
+        # Export codec validation
+        export_codec = str(data.get("export_codec", default.export_codec))
+        valid_codecs = ("libx264", "libx265", "mpeg4", "copy")
+        if export_codec not in valid_codecs:
+            export_codec = default.export_codec
+
+        # Export resolution validation
+        export_resolution = str(data.get("export_resolution", default.export_resolution))
+        valid_resolutions = ("source", "2160p", "1080p", "720p", "480p", "360p")
+        if export_resolution not in valid_resolutions:
+            export_resolution = default.export_resolution
 
         return cls(
             default_events=default_events,
@@ -173,4 +200,15 @@ class AppSettings:
             language=str(data.get("language", default.language)),
             playback_speed=float(data.get("playback_speed", default.playback_speed)),
             theme=theme,
+
+            # Export defaults
+            export_default_dir=str(data.get("export_default_dir", default.export_default_dir)),
+            export_codec=export_codec,
+            export_quality_crf=max(0, min(51, int(data.get("export_quality_crf", default.export_quality_crf)))),
+            export_resolution=export_resolution,
+            export_include_audio=bool(data.get("export_include_audio", default.export_include_audio)),
+            export_merge_segments=bool(data.get("export_merge_segments", default.export_merge_segments)),
+            export_file_template=str(data.get("export_file_template", default.export_file_template)),
+            export_padding_before=max(0.0, float(data.get("export_padding_before", default.export_padding_before))),
+            export_padding_after=max(0.0, float(data.get("export_padding_after", default.export_padding_after))),
         )

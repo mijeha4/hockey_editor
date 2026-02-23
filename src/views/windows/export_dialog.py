@@ -1,166 +1,81 @@
-from PySide6.QtCore import Qt, QThread, Signal
+"""
+Export Dialog — экспорт видео, CSV, PDF с фильтрацией событий.
+Настройки видео (кодек, качество, разрешение и т.д.) берутся из Settings.
+"""
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
-    QSpinBox, QCheckBox, QProgressBar, QMessageBox, QFileDialog, QGroupBox,
-    QScrollArea, QWidget, QTabWidget
+    QCheckBox, QProgressBar, QMessageBox, QFileDialog, QGroupBox,
+    QScrollArea, QWidget, QTabWidget, QLineEdit
 )
 from typing import List, Dict, Optional
-
-
-class ExportWorker(QThread):
-    """Worker thread для экспорта видео без блокировки UI."""
-
-    progress = Signal(int)
-    finished = Signal(bool, str)
-
-    def __init__(self, video_path: str, markers: List[Dict], output_path: str,
-                 fps: float, codec: str, quality: int, resolution: str = "source",
-                 include_audio: bool = True, merge_segments: bool = False):
-        super().__init__()
-        self.video_path = video_path
-        self.markers = markers
-        self.output_path = output_path
-        self.fps = fps
-        self.codec = codec
-        self.quality = quality
-        self.resolution = resolution
-        self.include_audio = include_audio
-        self.merge_segments = merge_segments
-        self.is_cancelled = False
-
-    def run(self):
-        try:
-            self.progress.emit(0)
-            from services.export.video_exporter import VideoExporter
-
-            for idx, marker in enumerate(self.markers):
-                if self.is_cancelled:
-                    self.finished.emit(False, "Export cancelled")
-                    return
-                progress = int((idx + 1) / len(self.markers) * 100)
-                self.progress.emit(progress)
-
-            success = VideoExporter.export_segments(
-                video_path=self.video_path,
-                markers=self.markers,
-                fps=self.fps,
-                output_path=self.output_path,
-                codec=self.codec,
-                quality=self.quality,
-                resolution=self.resolution,
-                include_audio=self.include_audio,
-                merge_segments=self.merge_segments
-            )
-
-            self.progress.emit(100)
-            if success:
-                if self.merge_segments:
-                    message = f"Export completed: {self.output_path}"
-                else:
-                    message = f"Export completed: {len(self.markers)} separate files"
-                self.finished.emit(True, message)
-            else:
-                self.finished.emit(False, "Export failed")
-
-        except Exception as e:
-            self.finished.emit(False, f"Export failed: {str(e)}")
-
-    def cancel(self):
-        self.is_cancelled = True
+import os
 
 
 class ExportDialog(QDialog):
-    """Диалог экспорта — видео, CSV, PDF."""
+    """Диалог экспорта — выбор сегментов + запуск экспорта.
 
-    # Сигналы для Controller
-    export_requested = Signal(dict)       # параметры видео экспорта
-    csv_export_requested = Signal(str)    # output_path для CSV
-    pdf_export_requested = Signal(str)    # output_path для PDF
+    Все настройки видео (кодек, качество, разрешение, padding, аудио, merge)
+    загружаются из AppSettings и НЕ редактируются здесь.
+    """
+
+    export_requested = Signal(dict)
+    csv_export_requested = Signal(str)
+    pdf_export_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.setWindowTitle("Экспорт")
-        self.setGeometry(200, 200, 720, 700)
+        self.setGeometry(200, 200, 700, 620)
 
-        self.output_path = None
-        self.video_path = None
-        self.fps = 30.0
-        self.segment_checkboxes = []
-        self.export_worker = None
+        self.output_path: Optional[str] = None
+        self.video_path: Optional[str] = None
+        self.fps: float = 30.0
+
+        # Директория по умолчанию для диалогов
+        self._default_dir: str = ""
+
+        # Настройки видео из Settings (заполняются через set_export_defaults)
+        self._export_settings: Dict = {
+            "codec": "libx264",
+            "quality_crf": 23,
+            "resolution": "source",
+            "include_audio": True,
+            "merge_segments": True,
+            "padding_before": 0.0,
+            "padding_after": 0.0,
+            "file_template": "{event}_{index}_{time}",
+        }
+
+        self._segment_items: List[Dict] = []
+        self._all_event_types: List[str] = []
 
         self._setup_ui()
 
+    # ══════════════════════════════════════════════════════════════════════
+    #  UI
+    # ══════════════════════════════════════════════════════════════════════
+
     def _setup_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        # ===== ВЫБОР ОТРЕЗКОВ (общий для всех вкладок) =====
-        segments_group = QGroupBox("Сегменты для экспорта")
-        segments_layout = QVBoxLayout()
+        # ── Сегменты с фильтрацией ──
+        layout.addWidget(self._create_segments_group())
 
-        select_btn_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("Выбрать все")
-        self.select_all_btn.clicked.connect(self._select_all_segments)
-        select_btn_layout.addWidget(self.select_all_btn)
-
-        self.deselect_all_btn = QPushButton("Снять все")
-        self.deselect_all_btn.clicked.connect(self._deselect_all_segments)
-        select_btn_layout.addWidget(self.deselect_all_btn)
-
-        select_btn_layout.addStretch()
-        segments_layout.addLayout(select_btn_layout)
-
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(150)
-
-        scroll_widget = QWidget()
-        self.segments_layout = QVBoxLayout()
-        scroll_widget.setLayout(self.segments_layout)
-        scroll_area.setWidget(scroll_widget)
-
-        segments_layout.addWidget(scroll_area)
-        segments_group.setLayout(segments_layout)
-        layout.addWidget(segments_group)
-
-        # ===== ВКЛАДКИ: Видео / CSV / PDF =====
+        # ── Вкладки ──
         self.tabs = QTabWidget()
-
-        # --- Вкладка: Видео ---
-        video_tab = QWidget()
-        self._setup_video_tab(video_tab)
-        self.tabs.addTab(video_tab, "🎬 Видео")
-
-        # --- Вкладка: CSV ---
-        csv_tab = QWidget()
-        self._setup_csv_tab(csv_tab)
-        self.tabs.addTab(csv_tab, "📊 CSV")
-
-        # --- Вкладка: PDF/HTML ---
-        pdf_tab = QWidget()
-        self._setup_pdf_tab(pdf_tab)
-        self.tabs.addTab(pdf_tab, "📄 Отчёт PDF")
-
+        self.tabs.addTab(self._create_video_tab(), "🎬 Видео")
+        self.tabs.addTab(self._create_csv_tab(), "📊 CSV")
+        self.tabs.addTab(self._create_pdf_tab(), "📄 Отчёт PDF")
         layout.addWidget(self.tabs)
 
-        # ===== ПРОГРЕСС =====
-        progress_group = QGroupBox("Прогресс")
-        progress_layout = QVBoxLayout()
+        # ── Прогресс ──
+        layout.addWidget(self._create_progress_group())
 
-        self.progress_label = QLabel("Готов к экспорту")
-        progress_layout.addWidget(self.progress_label)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimum(0)
-        self.progress_bar.setMaximum(100)
-        self.progress_bar.setValue(0)
-        progress_layout.addWidget(self.progress_bar)
-
-        progress_group.setLayout(progress_layout)
-        layout.addWidget(progress_group)
-
-        # ===== КНОПКА ЗАКРЫТИЯ =====
+        # ── Закрыть ──
         close_layout = QHBoxLayout()
         close_layout.addStretch()
         close_btn = QPushButton("Закрыть")
@@ -171,70 +86,108 @@ class ExportDialog(QDialog):
         self.setLayout(layout)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Video tab
+    # Segments group
     # ──────────────────────────────────────────────────────────────────────
 
-    def _setup_video_tab(self, tab: QWidget) -> None:
+    def _create_segments_group(self) -> QGroupBox:
+        group = QGroupBox("Сегменты для экспорта")
+        root = QVBoxLayout()
+
+        # Строка фильтров
+        filter_row = QHBoxLayout()
+
+        filter_row.addWidget(QLabel("Тип:"))
+        self.event_type_filter = QComboBox()
+        self.event_type_filter.setMinimumWidth(160)
+        self.event_type_filter.addItem("Все типы")
+        self.event_type_filter.currentIndexChanged.connect(self._apply_filter)
+        filter_row.addWidget(self.event_type_filter)
+
+        filter_row.addSpacing(12)
+        filter_row.addWidget(QLabel("🔍"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск по названию…")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._apply_filter)
+        filter_row.addWidget(self.search_edit)
+
+        root.addLayout(filter_row)
+
+        # Кнопки выбора + счётчик
+        btn_row = QHBoxLayout()
+
+        self.select_all_btn = QPushButton("Выбрать видимые")
+        self.select_all_btn.clicked.connect(self._select_visible)
+        btn_row.addWidget(self.select_all_btn)
+
+        self.deselect_all_btn = QPushButton("Снять видимые")
+        self.deselect_all_btn.clicked.connect(self._deselect_visible)
+        btn_row.addWidget(self.deselect_all_btn)
+
+        btn_row.addStretch()
+
+        self.counter_label = QLabel("0 из 0")
+        self.counter_label.setStyleSheet("color: #aaaaaa; font-size: 11px;")
+        btn_row.addWidget(self.counter_label)
+
+        root.addLayout(btn_row)
+
+        # Скролл с чекбоксами
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(200)
+
+        scroll_widget = QWidget()
+        self._checkboxes_layout = QVBoxLayout()
+        self._checkboxes_layout.setContentsMargins(4, 4, 4, 4)
+        self._checkboxes_layout.setSpacing(2)
+        scroll_widget.setLayout(self._checkboxes_layout)
+        scroll.setWidget(scroll_widget)
+
+        root.addWidget(scroll)
+        group.setLayout(root)
+        return group
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Video tab — только путь и кнопка экспорта
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _create_video_tab(self) -> QWidget:
+        tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Кодек
-        codec_layout = QHBoxLayout()
-        codec_layout.addWidget(QLabel("Кодек:"))
-        self.codec_combo = QComboBox()
-        self.codec_combo.addItems(["libx264", "libx265", "mpeg4", "copy"])
-        self.codec_combo.setToolTip("Видеокодек (рекомендуется libx264)")
-        codec_layout.addWidget(self.codec_combo)
-        codec_layout.addStretch()
-        layout.addLayout(codec_layout)
+        # ── Информация о текущих настройках (read-only) ──
+        self.settings_info_label = QLabel("")
+        self.settings_info_label.setWordWrap(True)
+        self.settings_info_label.setStyleSheet(
+            "color: #aaaaaa; font-size: 11px; padding: 8px; "
+            "background-color: #2a2a2a; border-radius: 4px;"
+        )
+        layout.addWidget(self.settings_info_label)
 
-        # Разрешение
-        res_layout = QHBoxLayout()
-        res_layout.addWidget(QLabel("Разрешение:"))
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(["source", "2160p", "1080p", "720p", "480p", "360p"])
-        res_layout.addWidget(self.resolution_combo)
-        res_layout.addStretch()
-        layout.addLayout(res_layout)
+        hint = QLabel("Изменить параметры: Настройки → вкладка «Экспорт»")
+        hint.setStyleSheet("color: #666666; font-size: 10px; font-style: italic;")
+        layout.addWidget(hint)
 
-        # Качество
-        quality_layout = QHBoxLayout()
-        quality_layout.addWidget(QLabel("Качество:"))
-        self.quality_combo = QComboBox()
-        self.quality_combo.addItems(["Высокое (CRF 18)", "Среднее (CRF 23)", "Низкое (CRF 28)", "Своё"])
-        self.quality_combo.setCurrentIndex(1)
-        self.quality_combo.currentIndexChanged.connect(self._on_quality_changed)
-        quality_layout.addWidget(self.quality_combo)
+        layout.addSpacing(12)
 
-        self.quality_spin = QSpinBox()
-        self.quality_spin.setRange(0, 51)
-        self.quality_spin.setValue(23)
-        self.quality_spin.setSuffix(" CRF")
-        self.quality_spin.setVisible(False)
-        quality_layout.addWidget(self.quality_spin)
+        # ── Путь вывода ──
+        path_row = QHBoxLayout()
+        self.output_path_label = QLabel("Путь не выбран")
+        self.output_path_label.setStyleSheet("color: #999999; font-size: 11px;")
+        self.output_path_label.setWordWrap(True)
+        path_row.addWidget(self.output_path_label, 1)
 
-        quality_layout.addStretch()
-        layout.addLayout(quality_layout)
-
-        # Опции
-        opts_layout = QHBoxLayout()
-        self.audio_check = QCheckBox("Включить аудио")
-        self.audio_check.setChecked(True)
-        opts_layout.addWidget(self.audio_check)
-
-        self.merge_check = QCheckBox("Объединить в один файл")
-        self.merge_check.setChecked(True)
-        opts_layout.addWidget(self.merge_check)
-
-        opts_layout.addStretch()
-        layout.addLayout(opts_layout)
-
-        # Кнопки
-        btn_layout = QHBoxLayout()
         self.video_browse_btn = QPushButton("📁 Выбрать путь")
         self.video_browse_btn.clicked.connect(self._on_browse_video_output)
-        btn_layout.addWidget(self.video_browse_btn)
+        path_row.addWidget(self.video_browse_btn)
+        layout.addLayout(path_row)
 
-        btn_layout.addStretch()
+        layout.addStretch()
+
+        # ── Кнопка экспорта ──
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
 
         self.export_btn = QPushButton("▶ Экспортировать видео")
         self.export_btn.setStyleSheet("""
@@ -245,16 +198,17 @@ class ExportDialog(QDialog):
             QPushButton:hover { background-color: #3d6b1f; }
         """)
         self.export_btn.clicked.connect(self._on_export_video_clicked)
-        btn_layout.addWidget(self.export_btn)
+        btn_row.addWidget(self.export_btn)
+        layout.addLayout(btn_row)
 
-        layout.addLayout(btn_layout)
-        layout.addStretch()
+        return tab
 
     # ──────────────────────────────────────────────────────────────────────
     # CSV tab
     # ──────────────────────────────────────────────────────────────────────
 
-    def _setup_csv_tab(self, tab: QWidget) -> None:
+    def _create_csv_tab(self) -> QWidget:
+        tab = QWidget()
         layout = QVBoxLayout(tab)
 
         info = QLabel(
@@ -266,12 +220,10 @@ class ExportDialog(QDialog):
         info.setStyleSheet("color: #aaaaaa; padding: 10px;")
         info.setWordWrap(True)
         layout.addWidget(info)
-
         layout.addStretch()
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         csv_btn = QPushButton("📊 Экспортировать CSV")
         csv_btn.setStyleSheet("""
             QPushButton {
@@ -281,15 +233,16 @@ class ExportDialog(QDialog):
             QPushButton:hover { background-color: #2471a3; }
         """)
         csv_btn.clicked.connect(self._on_export_csv_clicked)
-        btn_layout.addWidget(csv_btn)
-
-        layout.addLayout(btn_layout)
+        btn_row.addWidget(csv_btn)
+        layout.addLayout(btn_row)
+        return tab
 
     # ──────────────────────────────────────────────────────────────────────
     # PDF tab
     # ──────────────────────────────────────────────────────────────────────
 
-    def _setup_pdf_tab(self, tab: QWidget) -> None:
+    def _create_pdf_tab(self) -> QWidget:
+        tab = QWidget()
         layout = QVBoxLayout(tab)
 
         info = QLabel(
@@ -304,12 +257,10 @@ class ExportDialog(QDialog):
         info.setStyleSheet("color: #aaaaaa; padding: 10px;")
         info.setWordWrap(True)
         layout.addWidget(info)
-
         layout.addStretch()
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         pdf_btn = QPushButton("📄 Экспортировать отчёт")
         pdf_btn.setStyleSheet("""
             QPushButton {
@@ -319,41 +270,97 @@ class ExportDialog(QDialog):
             QPushButton:hover { background-color: #9b59b6; }
         """)
         pdf_btn.clicked.connect(self._on_export_pdf_clicked)
-        btn_layout.addWidget(pdf_btn)
-
-        layout.addLayout(btn_layout)
+        btn_row.addWidget(pdf_btn)
+        layout.addLayout(btn_row)
+        return tab
 
     # ──────────────────────────────────────────────────────────────────────
-    # Segments list
+    # Progress group
     # ──────────────────────────────────────────────────────────────────────
+
+    def _create_progress_group(self) -> QGroupBox:
+        group = QGroupBox("Прогресс")
+        layout = QVBoxLayout()
+
+        self.progress_label = QLabel("Готов к экспорту")
+        layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        group.setLayout(layout)
+        return group
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  PUBLIC API
+    # ══════════════════════════════════════════════════════════════════════
 
     def set_segments(self, segments_data: List[Dict]):
-        for cb in self.segment_checkboxes:
-            if isinstance(cb, tuple):
-                cb[1].setParent(None)
-            else:
-                cb.setParent(None)
-        self.segment_checkboxes.clear()
+        """Заполнить список сегментов с чекбоксами."""
+        for item in self._segment_items:
+            item["checkbox"].setParent(None)
+        self._segment_items.clear()
 
-        for segment in segments_data:
-            segment_id = segment['id']
-            event_name = segment['event_name']
-            start_frame = segment['start_frame']
-            end_frame = segment['end_frame']
-            duration_sec = segment['duration_sec']
+        event_types: set = set()
 
-            start_time = self._format_time(start_frame / self.fps)
-            end_time = self._format_time(end_frame / self.fps)
+        for seg in segments_data:
+            event_types.add(seg["event_name"])
 
-            text = f"{event_name} ({start_time}–{end_time}) [{duration_sec:.1f}с]"
-            checkbox = QCheckBox(text)
-            checkbox.setChecked(True)
+            start_time = self._format_time(seg["start_frame"] / self.fps)
+            end_time = self._format_time(seg["end_frame"] / self.fps)
+            text = f"{seg['event_name']}  ({start_time} – {end_time})  [{seg['duration_sec']:.1f}с]"
 
-            self.segment_checkboxes.append((segment_id, checkbox))
-            self.segments_layout.addWidget(checkbox)
+            cb = QCheckBox(text)
+            cb.setChecked(True)
+            cb.stateChanged.connect(self._update_counter)
 
-    def set_filtered_segments(self, segments_data: List[Dict]):
-        self.set_segments(segments_data)
+            self._segment_items.append({
+                "id": seg["id"],
+                "event_name": seg["event_name"],
+                "start_frame": seg["start_frame"],
+                "end_frame": seg["end_frame"],
+                "duration_sec": seg["duration_sec"],
+                "checkbox": cb,
+            })
+            self._checkboxes_layout.addWidget(cb)
+
+        # Обновить фильтр по типу
+        self._all_event_types = sorted(event_types)
+        self.event_type_filter.blockSignals(True)
+        self.event_type_filter.clear()
+        self.event_type_filter.addItem(f"Все типы ({len(segments_data)})")
+        for et in self._all_event_types:
+            cnt = sum(1 for s in segments_data if s["event_name"] == et)
+            self.event_type_filter.addItem(f"{et} ({cnt})")
+        self.event_type_filter.blockSignals(False)
+
+        self._update_counter()
+
+    set_filtered_segments = set_segments
+
+    def set_export_defaults(self, defaults: Dict):
+        """Сохранить настройки экспорта из Settings и обновить info-label."""
+        if not defaults:
+            return
+
+        # Сохраняем ВСЕ настройки
+        for key in (
+            "codec", "quality_crf", "resolution", "include_audio",
+            "merge_segments", "padding_before", "padding_after", "file_template"
+        ):
+            if key in defaults:
+                self._export_settings[key] = defaults[key]
+
+        # Директория для диалогов
+        default_dir = defaults.get("default_dir", "")
+        if default_dir and os.path.isdir(default_dir):
+            self._default_dir = default_dir
+
+        # Обновить информационный label
+        self._update_settings_info()
+        self._update_path_label()
 
     def set_video_path(self, video_path: str):
         self.video_path = video_path
@@ -362,21 +369,22 @@ class ExportDialog(QDialog):
         self.fps = fps if fps > 0 else 30.0
 
     def get_selected_segment_ids(self) -> List[int]:
-        selected_ids = []
-        for segment_id, checkbox in self.segment_checkboxes:
-            if checkbox.isChecked():
-                selected_ids.append(segment_id)
-        return selected_ids
+        return [item["id"] for item in self._segment_items if item["checkbox"].isChecked()]
 
     def get_export_params(self) -> Dict:
+        """Собрать параметры экспорта: настройки из Settings + путь + выбранные сегменты."""
+        s = self._export_settings
         return {
-            'codec': self.codec_combo.currentText(),
-            'quality': self.quality_spin.value(),
-            'resolution': self.resolution_combo.currentText(),
-            'include_audio': self.audio_check.isChecked(),
-            'merge_segments': self.merge_check.isChecked(),
-            'output_path': self.output_path,
-            'selected_segment_ids': self.get_selected_segment_ids()
+            "codec": s["codec"],
+            "quality": s["quality_crf"],
+            "resolution": s["resolution"],
+            "include_audio": s["include_audio"],
+            "merge_segments": s["merge_segments"],
+            "padding_before": s["padding_before"],
+            "padding_after": s["padding_after"],
+            "file_template": s.get("file_template"),
+            "output_path": self.output_path,
+            "selected_segment_ids": self.get_selected_segment_ids(),
         }
 
     def set_progress(self, value: int, message: str):
@@ -393,87 +401,242 @@ class ExportDialog(QDialog):
     def set_controls_enabled(self, enabled: bool):
         self.export_btn.setEnabled(enabled)
         self.video_browse_btn.setEnabled(enabled)
-        self.codec_combo.setEnabled(enabled)
-        self.quality_spin.setEnabled(enabled)
-        self.resolution_combo.setEnabled(enabled)
-        self.audio_check.setEnabled(enabled)
-        self.merge_check.setEnabled(enabled)
         self.tabs.setEnabled(enabled)
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Handlers
-    # ──────────────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+    #  FILTERING
+    # ══════════════════════════════════════════════════════════════════════
 
-    def _select_all_segments(self):
-        for _, checkbox in self.segment_checkboxes:
-            checkbox.setChecked(True)
+    def _apply_filter(self):
+        search = self.search_edit.text().lower().strip()
 
-    def _deselect_all_segments(self):
-        for _, checkbox in self.segment_checkboxes:
-            checkbox.setChecked(False)
+        type_idx = self.event_type_filter.currentIndex()
+        selected_type: Optional[str] = None
+        if type_idx > 0 and (type_idx - 1) < len(self._all_event_types):
+            selected_type = self._all_event_types[type_idx - 1]
 
-    def _on_quality_changed(self):
-        text = self.quality_combo.currentText()
-        if "Своё" in text:
-            self.quality_spin.setVisible(True)
+        for item in self._segment_items:
+            visible = True
+            if selected_type and item["event_name"] != selected_type:
+                visible = False
+            if search and search not in item["checkbox"].text().lower():
+                visible = False
+            item["checkbox"].setVisible(visible)
+
+        self._update_counter()
+
+    def _select_visible(self):
+        for item in self._segment_items:
+            if item["checkbox"].isVisible():
+                item["checkbox"].setChecked(True)
+
+    def _deselect_visible(self):
+        for item in self._segment_items:
+            if item["checkbox"].isVisible():
+                item["checkbox"].setChecked(False)
+
+    def _update_counter(self):
+        total = len(self._segment_items)
+        visible = sum(1 for i in self._segment_items if i["checkbox"].isVisible())
+        selected = sum(
+            1 for i in self._segment_items
+            if i["checkbox"].isChecked() and i["checkbox"].isVisible()
+        )
+        all_selected = sum(1 for i in self._segment_items if i["checkbox"].isChecked())
+
+        if visible < total:
+            txt = f"Выбрано: {selected} из {visible} видимых (всего отмечено: {all_selected}/{total})"
         else:
-            self.quality_spin.setVisible(False)
-            if "Высокое" in text:
-                self.quality_spin.setValue(18)
-            elif "Среднее" in text:
-                self.quality_spin.setValue(23)
-            elif "Низкое" in text:
-                self.quality_spin.setValue(28)
+            txt = f"Выбрано: {all_selected} из {total}"
+
+        self.counter_label.setText(txt)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  SETTINGS INFO (read-only display)
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _update_settings_info(self):
+        """Показать текущие настройки экспорта в виде текста."""
+        s = self._export_settings
+
+        codec = s.get("codec", "libx264")
+        crf = s.get("quality_crf", 23)
+        resolution = s.get("resolution", "source")
+        audio = "да" if s.get("include_audio", True) else "нет"
+        merge = "один файл" if s.get("merge_segments", True) else "отдельные файлы"
+        pad_before = s.get("padding_before", 0.0)
+        pad_after = s.get("padding_after", 0.0)
+        template = s.get("file_template", "")
+
+        # Название качества
+        if crf <= 18:
+            quality_name = f"Высокое (CRF {crf})"
+        elif crf <= 23:
+            quality_name = f"Среднее (CRF {crf})"
+        elif crf <= 28:
+            quality_name = f"Низкое (CRF {crf})"
+        else:
+            quality_name = f"CRF {crf}"
+
+        lines = [
+            f"Кодек: {codec}  •  Качество: {quality_name}  •  Разрешение: {resolution}",
+            f"Аудио: {audio}  •  Режим: {merge}",
+        ]
+
+        if pad_before > 0 or pad_after > 0:
+            lines.append(f"Отступы: {pad_before:.1f}с до / {pad_after:.1f}с после")
+
+        if template and not s.get("merge_segments", True):
+            lines.append(f"Шаблон имени: {template}")
+
+        self.settings_info_label.setText("\n".join(lines))
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  PATH HANDLING
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _is_merge_mode(self) -> bool:
+        return self._export_settings.get("merge_segments", True)
+
+    def _get_browse_start_dir(self) -> str:
+        if self.output_path:
+            existing_dir = os.path.dirname(self.output_path)
+            if os.path.isdir(self.output_path):
+                existing_dir = self.output_path
+            if existing_dir and os.path.isdir(existing_dir):
+                return existing_dir
+
+        if self._default_dir and os.path.isdir(self._default_dir):
+            return self._default_dir
+
+        if self.video_path:
+            video_dir = os.path.dirname(self.video_path)
+            if os.path.isdir(video_dir):
+                return video_dir
+
+        return os.getcwd()
 
     def _on_browse_video_output(self):
-        if self.merge_check.isChecked():
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Сохранить видео", "", "Video Files (*.mp4);;All Files (*)"
-            )
-        else:
-            path = QFileDialog.getExistingDirectory(self, "Папка для файлов")
+        start_dir = self._get_browse_start_dir()
 
-        if path:
-            self.output_path = path
-            self.progress_label.setText(f"Путь: {path}")
+        if self._is_merge_mode():
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Сохранить видео",
+                os.path.join(start_dir, "export.mp4"),
+                "Video Files (*.mp4);;All Files (*)"
+            )
+            if path:
+                if not os.path.splitext(path)[1]:
+                    path += ".mp4"
+                self.output_path = path
+        else:
+            path = QFileDialog.getExistingDirectory(
+                self, "Папка для файлов", start_dir
+            )
+            if path:
+                self.output_path = path
+
+        self._update_path_label()
+
+    def _update_path_label(self):
+        if self.output_path:
+            display = self.output_path
+            if len(display) > 60:
+                display = "…" + display[-57:]
+
+            if self._is_merge_mode():
+                self.output_path_label.setText(f"📄 Файл: {display}")
+                self.output_path_label.setStyleSheet("color: #88cc88; font-size: 11px;")
+            else:
+                self.output_path_label.setText(f"📁 Папка: {display}")
+                self.output_path_label.setStyleSheet("color: #88aacc; font-size: 11px;")
+        else:
+            if self._is_merge_mode():
+                self.output_path_label.setText("Путь не выбран (нужен файл .mp4)")
+            else:
+                self.output_path_label.setText("Путь не выбран (нужна папка)")
+            self.output_path_label.setStyleSheet("color: #999999; font-size: 11px;")
+
+    def _validate_output_path(self) -> Optional[str]:
+        if not self.output_path:
+            return "Укажите путь для сохранения."
+
+        if self._is_merge_mode():
+            _base, ext = os.path.splitext(self.output_path)
+            if not ext:
+                return (
+                    f"Путь «{self.output_path}» не содержит расширения файла.\n\n"
+                    f"В режиме «Один файл» нужно указать файл,\n"
+                    f"например: export.mp4"
+                )
+            if os.path.isdir(self.output_path):
+                return (
+                    f"Путь «{self.output_path}» — это папка, а не файл.\n\n"
+                    f"Нажмите «Выбрать путь» и укажите файл .mp4"
+                )
+            parent = os.path.dirname(self.output_path)
+            if parent and not os.path.isdir(parent):
+                return f"Директория не существует: {parent}"
+        else:
+            if not os.path.isdir(self.output_path):
+                parent = os.path.dirname(self.output_path)
+                if parent and os.path.isdir(parent):
+                    self.output_path = parent
+                    self._update_path_label()
+                else:
+                    return f"Папка не существует: {self.output_path}"
+
+        return None
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  HANDLERS
+    # ══════════════════════════════════════════════════════════════════════
 
     def _on_export_video_clicked(self):
         selected = self.get_selected_segment_ids()
         if not selected:
-            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент")
+            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент.")
             return
 
-        if not self.output_path:
-            QMessageBox.warning(self, "Нет пути", "Укажите путь для сохранения")
+        error = self._validate_output_path()
+        if error:
+            QMessageBox.warning(self, "Неверный путь", error)
             return
 
         self.export_requested.emit(self.get_export_params())
 
     def _on_export_csv_clicked(self):
-        selected = self.get_selected_segment_ids()
-        if not selected:
-            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент")
+        if not self.get_selected_segment_ids():
+            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент.")
             return
 
+        start_dir = self._get_browse_start_dir()
         path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить CSV", "segments.csv",
+            self, "Сохранить CSV",
+            os.path.join(start_dir, "segments.csv"),
             "CSV Files (*.csv);;All Files (*)"
         )
         if path:
             self.csv_export_requested.emit(path)
 
     def _on_export_pdf_clicked(self):
-        selected = self.get_selected_segment_ids()
-        if not selected:
-            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент")
+        if not self.get_selected_segment_ids():
+            QMessageBox.warning(self, "Нет сегментов", "Выберите хотя бы один сегмент.")
             return
 
+        start_dir = self._get_browse_start_dir()
         path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить отчёт", "report.pdf",
+            self, "Сохранить отчёт",
+            os.path.join(start_dir, "report.pdf"),
             "PDF Files (*.pdf);;HTML Files (*.html);;All Files (*)"
         )
         if path:
             self.pdf_export_requested.emit(path)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  HELPERS
+    # ══════════════════════════════════════════════════════════════════════
 
     @staticmethod
     def _format_time(seconds: float) -> str:
@@ -482,7 +645,4 @@ class ExportDialog(QDialog):
         return f"{minutes:02d}:{secs:02d}"
 
     def closeEvent(self, event):
-        if self.export_worker and self.export_worker.isRunning():
-            self.export_worker.cancel()
-            self.export_worker.wait()
         super().closeEvent(event)
