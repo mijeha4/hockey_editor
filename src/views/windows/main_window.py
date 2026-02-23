@@ -5,7 +5,7 @@ from typing import Optional, Set, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter,
-    QComboBox, QCheckBox, QPushButton, QMessageBox
+    QComboBox, QCheckBox, QPushButton, QMessageBox, QFrame
 )
 from PySide6.QtGui import QPixmap, QKeyEvent, QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtCore import Qt, Signal
@@ -57,6 +57,9 @@ class MainWindow(QMainWindow):
         # UI state
         self.event_filter_combo: Optional[QComboBox] = None
         self.notes_filter_checkbox: Optional[QCheckBox] = None
+        self._filter_indicator: Optional[QLabel] = None
+        self._filter_reset_btn: Optional[QPushButton] = None
+        self._segments_header_label: Optional[QLabel] = None
 
         self.setWindowTitle("Хоккейный Редактор")
         self.setGeometry(0, 0, 1800, 1000)
@@ -162,7 +165,13 @@ class MainWindow(QMainWindow):
         list_container = QWidget()
         list_layout = QVBoxLayout(list_container)
         list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.addWidget(QLabel("Отрезки:"))
+
+        # === НОВОЕ: Заголовок с счётчиком сегментов ===
+        self._segments_header_label = QLabel("Отрезки:")
+        self._segments_header_label.setStyleSheet(
+            "color: #ffffff; font-weight: bold; font-size: 12px;"
+        )
+        list_layout.addWidget(self._segments_header_label)
 
         self._setup_filters(list_layout)
 
@@ -269,10 +278,18 @@ class MainWindow(QMainWindow):
         self.notes_filter_checkbox.stateChanged.connect(self._on_notes_filter_changed)
         row.addWidget(self.notes_filter_checkbox)
 
-        reset_btn = QPushButton("Сброс")
-        reset_btn.setMaximumWidth(80)
-        reset_btn.clicked.connect(self._on_reset_filters)
-        row.addWidget(reset_btn)
+        # === НОВОЕ: Кнопка сброса с динамической подсветкой ===
+        self._filter_reset_btn = QPushButton("Сброс")
+        self._filter_reset_btn.setMaximumWidth(80)
+        self._filter_reset_btn.clicked.connect(self._on_reset_filters)
+        self._filter_reset_btn.setToolTip("Сбросить все фильтры")
+        row.addWidget(self._filter_reset_btn)
+
+        # === НОВОЕ: Индикатор активного фильтра ===
+        self._filter_indicator = QLabel("")
+        self._filter_indicator.setMinimumWidth(140)
+        self._filter_indicator.setFixedHeight(20)
+        row.addWidget(self._filter_indicator)
 
         filters_layout.addLayout(row)
         parent_layout.addLayout(filters_layout)
@@ -308,6 +325,7 @@ class MainWindow(QMainWindow):
     def _on_filters_changed(self) -> None:
         self._sync_filter_ui_with_controller()
         self._update_segment_list_with_filters()
+        self._update_filter_indicator()
 
     def _sync_filter_ui_with_controller(self) -> None:
         if not self.filter_controller:
@@ -340,6 +358,104 @@ class MainWindow(QMainWindow):
         all_markers = self._timeline_controller.markers
         segments_with_idx = self.filter_controller.filter_markers(all_markers)
         self.segment_list_widget.set_segments(segments_with_idx)
+
+    def _update_filter_indicator(self) -> None:
+        """Обновить индикатор фильтра и счётчик сегментов.
+
+        Показывает:
+        - Заголовок "Отрезки: 5 из 23" когда фильтр активен
+        - Заголовок "Отрезки: 23" когда фильтры сброшены
+        - Индикатор "🔍 Фильтр активен" с оранжевым текстом
+        - Подсветку кнопки "Сброс" при активных фильтрах
+        """
+        if not self.filter_controller:
+            return
+
+        is_filtered = self.filter_controller.has_active_filters
+
+        # --- Счётчик в заголовке ---
+        total = 0
+        filtered = 0
+
+        if self._timeline_controller:
+            all_markers = self._timeline_controller.markers
+            total = len(all_markers)
+            if is_filtered:
+                filtered = len(self.filter_controller.filter_markers(all_markers))
+            else:
+                filtered = total
+
+        if self._segments_header_label:
+            if is_filtered:
+                self._segments_header_label.setText(
+                    f"Отрезки: {filtered} из {total}"
+                )
+                self._segments_header_label.setStyleSheet(
+                    "color: #ff9900; font-weight: bold; font-size: 12px;"
+                )
+            else:
+                if total > 0:
+                    self._segments_header_label.setText(f"Отрезки: {total}")
+                else:
+                    self._segments_header_label.setText("Отрезки:")
+                self._segments_header_label.setStyleSheet(
+                    "color: #ffffff; font-weight: bold; font-size: 12px;"
+                )
+
+        # --- Индикатор фильтра ---
+        if self._filter_indicator:
+            if is_filtered:
+                # Собираем описание активных фильтров
+                filter_parts = []
+                event_types = self.filter_controller.filter_event_types
+                if event_types:
+                    # Показать название выбранного типа
+                    type_name = next(iter(event_types))
+                    event = self.event_manager.get_event(type_name)
+                    display_name = event.get_localized_name() if event else type_name
+                    filter_parts.append(display_name)
+                if self.filter_controller.filter_has_notes:
+                    filter_parts.append("с заметками")
+
+                filter_desc = " + ".join(filter_parts)
+                self._filter_indicator.setText(f"🔍 {filter_desc}")
+                self._filter_indicator.setStyleSheet(
+                    "color: #ff9900; font-weight: bold; font-size: 11px;"
+                )
+                self._filter_indicator.setToolTip(
+                    f"Активные фильтры: {filter_desc}\n"
+                    f"Показано {filtered} из {total} отрезков"
+                )
+            else:
+                self._filter_indicator.setText("")
+                self._filter_indicator.setToolTip("")
+
+        # --- Подсветка кнопки "Сброс" ---
+        if self._filter_reset_btn:
+            if is_filtered:
+                self._filter_reset_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #cc6600;
+                        color: #ffffff;
+                        border: 1px solid #ff9900;
+                        border-radius: 3px;
+                        font-weight: bold;
+                        padding: 2px 8px;
+                    }
+                    QPushButton:hover {
+                        background-color: #ff8800;
+                        border: 1px solid #ffaa00;
+                    }
+                    QPushButton:pressed {
+                        background-color: #aa5500;
+                    }
+                """)
+                self._filter_reset_btn.setToolTip(
+                    f"Сбросить фильтры (показано {filtered} из {total})"
+                )
+            else:
+                self._filter_reset_btn.setStyleSheet("")  # Возврат к стилю по умолчанию
+                self._filter_reset_btn.setToolTip("Сбросить все фильтры")
 
     # ──────────────────────────────────────────────────────────────────────────
     # Keyboard / Drag&Drop

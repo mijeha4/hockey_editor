@@ -109,7 +109,7 @@ class MainController(QObject):
         self.timeline_controller.set_timeline_widget(self.main_window.get_timeline_widget())
 
         if hasattr(self.timeline_controller, "set_main_window"):
-            self.timeline_controller.set_main_window(self.main_window)
+            self.timeline_controller.set_main_window(self)
 
         setattr(self.timeline_controller, "_main_controller", self)
 
@@ -155,8 +155,6 @@ class MainController(QObject):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _setup_connections(self) -> None:
-        # ... existing connections ...
-
         self.main_window.open_video_triggered.connect(self._on_open_video)
         self.main_window.save_project_triggered.connect(self._on_save_project)
         self.main_window.load_project_triggered.connect(self._on_load_project)
@@ -181,6 +179,7 @@ class MainController(QObject):
             segment_list.segment_jump_requested.connect(self._on_segment_jump)
             segment_list.segment_edit_requested.connect(self._on_segment_edit)
             segment_list.segment_delete_requested.connect(self._on_segment_delete)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Window lifecycle
     # ─────────────────────────────────────────────────────────────────────────
@@ -214,7 +213,9 @@ class MainController(QObject):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_filters_changed(self) -> None:
+        """Обработка изменения фильтров — обновить timeline и UI индикаторы."""
         self.timeline_controller.refresh_view()
+        # Индикатор обновляется автоматически через main_window._on_filters_changed
 
     # ─────────────────────────────────────────────────────────────────────────
     # Segment list actions
@@ -234,6 +235,7 @@ class MainController(QObject):
     def _on_segment_delete(self, marker_idx: int) -> None:
         """Удалить сегмент."""
         self.delete_marker(marker_idx)
+
     # ─────────────────────────────────────────────────────────────────────────
     # Segment editor
     # ─────────────────────────────────────────────────────────────────────────
@@ -421,6 +423,8 @@ class MainController(QObject):
         self.main_window.set_video_image(QPixmap())
         self.main_window.set_window_title("Untitled")
         self.history_manager.clear_history()
+        # Сбросить фильтры при новом проекте
+        self.filter_controller.reset_all_filters()
 
     def _create_new_project_in_new_window(self) -> None:
         app_controller = get_application_controller()
