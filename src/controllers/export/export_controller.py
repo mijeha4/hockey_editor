@@ -1,6 +1,5 @@
 """
 Export Controller — управляет экспортом видео, CSV, PDF.
-Настройки берутся из SettingsController.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from views.windows.export_dialog import ExportDialog
 
 
 class ExportWorker(QThread):
-    """Worker thread для экспорта видео без блокировки UI."""
+    """Worker thread для экспорта видео."""
 
     progress = Signal(int)
     finished = Signal(bool, str)
@@ -71,18 +70,16 @@ class ExportWorker(QThread):
 
             self.progress.emit(100)
 
+            count = len(self.markers)
             if success:
                 if self.params.get("merge_segments", True):
-                    message = f"Экспорт завершён: {self.params['output_path']}"
+                    msg = f"Экспорт завершён: {self.params['output_path']}"
                 else:
-                    message = (
-                        f"Экспорт завершён: {len(self.markers)} файлов в "
-                        f"{self.params['output_path']}"
-                    )
+                    msg = f"Экспорт завершён: {count} файлов"
             else:
-                message = "Экспорт не удался"
+                msg = "Экспорт не удался"
 
-            self.finished.emit(success, message)
+            self.finished.emit(success, msg)
 
         except Exception as e:
             self.finished.emit(False, f"Ошибка экспорта: {e}")
@@ -92,7 +89,7 @@ class ExportWorker(QThread):
 
 
 class ExportController(QObject):
-    """Контроллер управления экспортом видео и отчётов."""
+    """Контроллер экспорта."""
 
     def __init__(self, project: Project, video_path: str, fps: float,
                  settings_controller=None):
@@ -110,32 +107,29 @@ class ExportController(QObject):
     # ──────────────────────────────────────────────────────────────────────
 
     def show_dialog(self, preselected_ids: Optional[List[int]] = None) -> None:
-        """Показать диалог экспорта."""
         self.view = ExportDialog()
 
-        # Сигналы
         self.view.export_requested.connect(self._on_export_requested)
+        self.view.cancel_requested.connect(self._on_cancel_requested)
+
         if hasattr(self.view, "csv_export_requested"):
             self.view.csv_export_requested.connect(self._on_csv_export)
         if hasattr(self.view, "pdf_export_requested"):
             self.view.pdf_export_requested.connect(self._on_pdf_export)
 
-        # Данные
         self.view.set_video_path(self.video_path)
         self.view.set_fps(self.fps)
 
         segments_data = self._prepare_segments_data()
         self.view.set_segments(segments_data)
 
-        # Загрузить настройки экспорта из Settings
         if self.settings_controller is not None:
             try:
                 defaults = self.settings_controller.get_export_defaults()
                 self.view.set_export_defaults(defaults)
             except Exception as e:
-                print(f"Warning: could not load export defaults: {e}")
+                print(f"Warning: export defaults: {e}")
 
-        # Пресет выделения (для batch export)
         if preselected_ids is not None:
             preselected_set = set(preselected_ids)
             for item in self.view._segment_items:
@@ -144,20 +138,18 @@ class ExportController(QObject):
         self.view.exec()
 
     def _prepare_segments_data(self) -> List[Dict[str, Any]]:
-        segments_data: List[Dict[str, Any]] = []
         fps = self.fps if self.fps > 0 else 1.0
-
+        result = []
         for marker in self.project.markers:
             duration_sec = (marker.end_frame - marker.start_frame) / fps
-            segments_data.append({
+            result.append({
                 "id": marker.id,
                 "event_name": marker.event_name,
                 "start_frame": marker.start_frame,
                 "end_frame": marker.end_frame,
                 "duration_sec": duration_sec,
             })
-
-        return segments_data
+        return result
 
     # ──────────────────────────────────────────────────────────────────────
     # Video Export
@@ -190,12 +182,18 @@ class ExportController(QObject):
         self.export_worker.cancelled.connect(self._on_export_cancelled)
         self.export_worker.start()
 
+    def _on_cancel_requested(self) -> None:
+        if self.export_worker is not None:
+            self.export_worker.cancel()
+
     def _on_progress_update(self, value: int) -> None:
         if self.view:
             self.view.set_progress(value, f"Экспорт... {value}%")
 
     def _on_export_cancelled(self) -> None:
-        pass
+        if self.view:
+            self.view.set_controls_enabled(True)
+            self.view.set_progress(0, "Экспорт отменён")
 
     def _on_export_finished(self, success: bool, message: str) -> None:
         if self.view:
@@ -211,7 +209,7 @@ class ExportController(QObject):
             self.export_worker = None
 
     # ──────────────────────────────────────────────────────────────────────
-    # CSV / PDF Export
+    # CSV / PDF
     # ──────────────────────────────────────────────────────────────────────
 
     def _on_csv_export(self, output_path: str) -> None:
@@ -221,18 +219,16 @@ class ExportController(QObject):
                 markers = list(self.project.markers)
 
             success = ReportExporter.export_csv(
-                markers=markers,
-                fps=self.fps,
+                markers=markers, fps=self.fps,
                 output_path=output_path,
                 project_name=getattr(self.project, "name", ""),
                 video_path=self.video_path,
             )
-
             if self.view:
                 if success:
-                    self.view.show_export_result(True, f"CSV экспортирован: {output_path}")
+                    self.view.show_export_result(True, f"CSV: {output_path}")
                 else:
-                    self.view.show_export_result(False, "Ошибка экспорта CSV")
+                    self.view.show_export_result(False, "Ошибка CSV")
         except Exception as e:
             if self.view:
                 self.view.show_export_result(False, f"Ошибка CSV: {e}")
@@ -244,18 +240,16 @@ class ExportController(QObject):
                 markers = list(self.project.markers)
 
             success = ReportExporter.export_pdf(
-                markers=markers,
-                fps=self.fps,
+                markers=markers, fps=self.fps,
                 output_path=output_path,
                 project_name=getattr(self.project, "name", ""),
                 video_path=self.video_path,
             )
-
             if self.view:
                 if success:
-                    self.view.show_export_result(True, f"Отчёт экспортирован: {output_path}")
+                    self.view.show_export_result(True, f"Отчёт: {output_path}")
                 else:
-                    self.view.show_export_result(False, "Ошибка экспорта отчёта")
+                    self.view.show_export_result(False, "Ошибка отчёта")
         except Exception as e:
             if self.view:
                 self.view.show_export_result(False, f"Ошибка отчёта: {e}")

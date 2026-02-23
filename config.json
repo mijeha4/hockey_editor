@@ -202,12 +202,13 @@
     "playback_speed": 1.0,
     "theme": "dark",
     "export_default_dir": "C:/Users/User/Desktop/hockey_editor/Экспортированные события",
-    "export_codec": "mpeg4",
+    "export_codec": "copy",
     "export_quality_crf": 23,
     "export_resolution": "source",
     "export_include_audio": true,
     "export_merge_segments": true,
     "export_file_template": "{event}_{index}_{time}",
     "export_padding_before": 0.0,
-    "export_padding_after": 0.0
+    "export_padding_after": 0.0,
+    "export_auto_open": true
 }

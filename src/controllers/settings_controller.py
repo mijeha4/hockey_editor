@@ -271,7 +271,7 @@ class SettingsController(QObject):
             self.settings_changed.emit("recent_projects", [])
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Export settings (NEW)
+    # Export settings
     # ─────────────────────────────────────────────────────────────────────────
 
     def set_export_default_dir(self, path: str) -> None:
@@ -373,8 +373,16 @@ class SettingsController(QObject):
     def get_export_padding_after(self) -> float:
         return self.settings.export_padding_after
 
+    def set_export_auto_open(self, enabled: bool) -> None:
+        if self.settings.export_auto_open != enabled:
+            self.settings.export_auto_open = enabled
+            self.settings_changed.emit("export_auto_open", enabled)
+
+    def get_export_auto_open(self) -> bool:
+        return self.settings.export_auto_open
+
     def get_export_defaults(self) -> Dict[str, Any]:
-        """Convenience: all export defaults as a dict for ExportDialog."""
+        """Все настройки экспорта одним словарём для ExportDialog."""
         return {
             "default_dir": self.settings.export_default_dir,
             "codec": self.settings.export_codec,
@@ -385,6 +393,7 @@ class SettingsController(QObject):
             "file_template": self.settings.export_file_template,
             "padding_before": self.settings.export_padding_before,
             "padding_after": self.settings.export_padding_after,
+            "auto_open": self.settings.export_auto_open,
         }
 
     # ─────────────────────────────────────────────────────────────────────────
