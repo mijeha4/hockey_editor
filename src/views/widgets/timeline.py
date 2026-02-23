@@ -9,10 +9,10 @@ from typing import List, Optional, Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsLineItem,
     QGraphicsRectItem, QGraphicsTextItem, QScrollArea, QGraphicsItem,
-    QGraphicsSceneMouseEvent
+    QGraphicsSceneMouseEvent, QMenu
 )
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
-from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QFontMetrics
+from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QFontMetrics, QAction
 
 from services.events.custom_event_manager import get_custom_event_manager
 from models.domain.marker import Marker
@@ -46,6 +46,7 @@ class SegmentGraphicsItem(QGraphicsRectItem):
     def __init__(self, marker: Marker):
         super().__init__()
         self.marker = marker
+        self.original_idx: int = -1  # Оригинальный индекс в project.markers
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
 
@@ -118,6 +119,13 @@ class TimelineGraphicsScene(QGraphicsScene):
     event_selected = Signal(Marker)
     event_double_clicked = Signal(Marker)
 
+    # === НОВЫЕ СИГНАЛЫ для контекстного меню ===
+    context_edit_requested = Signal(int)       # original_idx
+    context_delete_requested = Signal(int)     # original_idx
+    context_duplicate_requested = Signal(int)  # original_idx
+    context_jump_requested = Signal(int)       # original_idx
+    context_export_requested = Signal(int)     # original_idx
+
     def __init__(self, controller=None):
         super().__init__()
         self.controller = controller
@@ -130,6 +138,9 @@ class TimelineGraphicsScene(QGraphicsScene):
         self._markers: List[Marker] = []
         self._total_frames: int = 0
         self._fps: float = 30.0
+
+        # Маппинг marker → original_idx для контекстного меню
+        self._marker_to_original_idx: Dict[int, int] = {}  # marker.id → original_idx
 
         self.playhead = QGraphicsLineItem()
         self.playhead.setPen(QPen(QColor("#FFFF00"), 3, Qt.SolidLine, Qt.RoundCap))
@@ -150,6 +161,22 @@ class TimelineGraphicsScene(QGraphicsScene):
     def set_markers(self, markers: List[Marker]) -> None:
         self._markers = list(markers)
 
+    def set_marker_index_map(self, index_map: Dict[int, int]) -> None:
+        """Установить маппинг marker.id → original_idx в project.markers.
+
+        Используется для контекстного меню, чтобы знать оригинальный
+        индекс маркера даже после фильтрации.
+        """
+        self._marker_to_original_idx = dict(index_map)
+
+    def get_original_idx_for_marker(self, marker: Marker) -> int:
+        """Получить оригинальный индекс маркера в project.markers.
+
+        Returns:
+            Оригинальный индекс или -1 если не найден.
+        """
+        return self._marker_to_original_idx.get(marker.id, -1)
+
     def get_total_frames(self) -> int:
         if self.controller and hasattr(self.controller, 'get_total_frames'):
             return max(self.controller.get_total_frames(), 1)
@@ -163,7 +190,7 @@ class TimelineGraphicsScene(QGraphicsScene):
         return self._fps if self._fps > 0 else 30.0
 
     # ──────────────────────────────────────────────────────────────────
-    # FIX: Mouse event handling — без этого клики по таймлайну не работают
+    # Mouse event handling
     # ──────────────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
@@ -215,6 +242,130 @@ class TimelineGraphicsScene(QGraphicsScene):
                 return
 
         super().mouseDoubleClickEvent(event)
+
+    # === НОВОЕ: Контекстное меню по правому клику ===
+    def contextMenuEvent(self, event) -> None:
+        """Контекстное меню при правом клике на сегменте таймлайна."""
+        scene_pos = event.scenePos()
+        clicked_items = self.items(scene_pos)
+
+        # Найти SegmentGraphicsItem под курсором
+        segment_item: Optional[SegmentGraphicsItem] = None
+        for item in clicked_items:
+            if isinstance(item, SegmentGraphicsItem):
+                segment_item = item
+                break
+
+        if segment_item is None:
+            # Правый клик не на сегменте — ничего не делаем
+            super().contextMenuEvent(event)
+            return
+
+        marker = segment_item.marker
+        original_idx = self.get_original_idx_for_marker(marker)
+
+        if original_idx < 0:
+            # Не удалось определить оригинальный индекс — пробуем через original_idx атрибут
+            original_idx = getattr(segment_item, 'original_idx', -1)
+
+        if original_idx < 0:
+            super().contextMenuEvent(event)
+            return
+
+        # Получить локализованное имя события
+        event_mgr = get_custom_event_manager()
+        evt = event_mgr.get_event(marker.event_name)
+        event_display_name = evt.get_localized_name() if evt else marker.event_name
+
+        # Форматировать время
+        fps = self.get_fps()
+        start_time = self._format_time(marker.start_frame / fps) if fps > 0 else "??:??"
+        end_time = self._format_time(marker.end_frame / fps) if fps > 0 else "??:??"
+        duration = self._format_time((marker.end_frame - marker.start_frame) / fps) if fps > 0 else "??:??"
+
+        # Создать меню
+        menu = QMenu()
+        menu.setStyleSheet(self._get_context_menu_style())
+
+        # Заголовок (информационный, неактивный)
+        header_action = menu.addAction(f"📌 {event_display_name}")
+        header_action.setEnabled(False)
+        time_action = menu.addAction(f"⏱ {start_time} → {end_time} ({duration})")
+        time_action.setEnabled(False)
+
+        menu.addSeparator()
+
+        # Действия
+        jump_action = menu.addAction("▶ Перейти к началу")
+        edit_action = menu.addAction("✏️ Редактировать")
+        duplicate_action = menu.addAction("📋 Дублировать")
+
+        menu.addSeparator()
+
+        export_action = menu.addAction("📤 Экспортировать клип")
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("🗑️ Удалить")
+        delete_action.setObjectName("delete_action")
+
+        # Показать меню и обработать выбор
+        chosen = menu.exec(event.screenPos())
+
+        if chosen == jump_action:
+            self.context_jump_requested.emit(original_idx)
+        elif chosen == edit_action:
+            self.context_edit_requested.emit(original_idx)
+        elif chosen == duplicate_action:
+            self.context_duplicate_requested.emit(original_idx)
+        elif chosen == export_action:
+            self.context_export_requested.emit(original_idx)
+        elif chosen == delete_action:
+            self.context_delete_requested.emit(original_idx)
+
+        event.accept()
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        """Форматировать секунды в MM:SS."""
+        if seconds < 0:
+            seconds = 0
+        minutes = int(seconds) // 60
+        secs = int(seconds) % 60
+        return f"{minutes:02d}:{secs:02d}"
+
+    @staticmethod
+    def _get_context_menu_style() -> str:
+        """Стиль контекстного меню в тёмной теме."""
+        return """
+            QMenu {
+                background-color: #2a2a2a;
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 4px 0px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                margin: 1px 4px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #1a4d7a;
+                color: #ffffff;
+            }
+            QMenu::item:disabled {
+                color: #888888;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #444444;
+                margin: 4px 8px;
+            }
+            QMenu::item#delete_action:selected {
+                background-color: #8b0000;
+            }
+        """
 
     # ──────────────────────────────────────────────────────────────────
 
@@ -374,6 +525,8 @@ class TimelineGraphicsScene(QGraphicsScene):
             w = max(10.0, (marker.end_frame - marker.start_frame) * self.pixels_per_frame)
 
             seg = SegmentGraphicsItem(marker)
+            # Сохраняем оригинальный индекс в элементе
+            seg.original_idx = self._marker_to_original_idx.get(marker.id, -1)
             seg.setRect(x, y + 8, w, self.track_height - 16)
             seg.setZValue(100)
             self.addItem(seg)
@@ -397,6 +550,13 @@ class TimelineWidget(QWidget):
     event_selected = Signal(Marker)
     event_double_clicked = Signal(Marker)
 
+    # === НОВЫЕ СИГНАЛЫ: проброс из scene ===
+    context_edit_requested = Signal(int)
+    context_delete_requested = Signal(int)
+    context_duplicate_requested = Signal(int)
+    context_jump_requested = Signal(int)
+    context_export_requested = Signal(int)
+
     def __init__(self, controller=None):
         super().__init__()
         self.controller = controller
@@ -419,9 +579,17 @@ class TimelineWidget(QWidget):
         scroll.setWidget(self.view)
         layout.addWidget(scroll)
 
+        # Проброс существующих сигналов
         self.scene.seek_requested.connect(self.seek_requested)
         self.scene.event_selected.connect(self.event_selected)
         self.scene.event_double_clicked.connect(self.event_double_clicked)
+
+        # === НОВОЕ: Проброс сигналов контекстного меню ===
+        self.scene.context_edit_requested.connect(self.context_edit_requested)
+        self.scene.context_delete_requested.connect(self.context_delete_requested)
+        self.scene.context_duplicate_requested.connect(self.context_duplicate_requested)
+        self.scene.context_jump_requested.connect(self.context_jump_requested)
+        self.scene.context_export_requested.connect(self.context_export_requested)
 
         self._markers: List[Marker] = []
         self._connect_controller_signals(controller)
@@ -452,6 +620,18 @@ class TimelineWidget(QWidget):
         self.scene.set_markers(self._markers)
         self.rebuild(False)
 
+    def set_markers_with_indices(self, markers: List[Marker], index_map: Dict[int, int]) -> None:
+        """Установить маркеры вместе с маппингом оригинальных индексов.
+
+        Args:
+            markers: Список маркеров для отображения.
+            index_map: Маппинг marker.id → original_idx в project.markers.
+        """
+        self._markers = list(markers)
+        self.scene.set_markers(self._markers)
+        self.scene.set_marker_index_map(index_map)
+        self.rebuild(False)
+
     def set_total_frames(self, total_frames: int) -> None:
         self.scene._total_frames = max(0, total_frames)
         self.rebuild(False)
@@ -472,11 +652,17 @@ class TimelineWidget(QWidget):
 
     def _on_controller_markers_changed(self) -> None:
         if self.controller:
-            self.set_markers(
-                self.controller.get_filtered_markers()
-                if hasattr(self.controller, "get_filtered_markers")
-                else self.controller.markers
-            )
+            if hasattr(self.controller, "get_filtered_pairs"):
+                pairs = self.controller.get_filtered_pairs()
+                markers = [m for _, m in pairs]
+                index_map = {m.id: idx for idx, m in pairs}
+                self.scene.set_marker_index_map(index_map)
+                self.scene.set_markers(markers)
+                self.rebuild(False)
+            elif hasattr(self.controller, "get_filtered_markers"):
+                self.set_markers(self.controller.get_filtered_markers())
+            else:
+                self.set_markers(self.controller.markers)
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
@@ -494,4 +680,5 @@ class TimelineWidget(QWidget):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):
+        # Делегируем scene — она сама обрабатывает контекстное меню
         super().contextMenuEvent(event)

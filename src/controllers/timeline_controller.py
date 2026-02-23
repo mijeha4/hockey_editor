@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple, Dict
 
 from PySide6.QtCore import Signal, QObject, Qt
 from PySide6.QtWidgets import QGraphicsRectItem
@@ -308,6 +308,28 @@ class TimelineController(QObject):
             )
             self.project_modified.emit()
 
+    def duplicate_marker(self, marker_idx: int) -> None:
+        """Дублировать маркер — создать копию с новым ID.
+
+        Копия добавляется сразу после оригинала.
+        """
+        if not (0 <= marker_idx < len(self.project.markers)):
+            return
+
+        original = self.project.markers[marker_idx]
+        new_id = self._generate_marker_id()
+
+        duplicate = Marker(
+            id=new_id,
+            start_frame=original.start_frame,
+            end_frame=original.end_frame,
+            event_name=original.event_name,
+            note=f"{original.note} (копия)" if original.note else "(копия)",
+        )
+
+        self.history_manager.execute_command(AddMarkerCommand(self.project, duplicate))
+        self.project_modified.emit()
+
     def update_marker_optimized(
         self,
         marker_idx: int,
@@ -397,6 +419,46 @@ class TimelineController(QObject):
 
             if hasattr(self.timeline_widget, "segment_edit_requested"):
                 self.timeline_widget.segment_edit_requested.connect(self._on_event_double_clicked)
+
+        # === НОВОЕ: Подключение сигналов контекстного меню ===
+        if hasattr(self.timeline_widget, "context_edit_requested"):
+            self.timeline_widget.context_edit_requested.connect(self._on_context_edit)
+        if hasattr(self.timeline_widget, "context_delete_requested"):
+            self.timeline_widget.context_delete_requested.connect(self._on_context_delete)
+        if hasattr(self.timeline_widget, "context_duplicate_requested"):
+            self.timeline_widget.context_duplicate_requested.connect(self._on_context_duplicate)
+        if hasattr(self.timeline_widget, "context_jump_requested"):
+            self.timeline_widget.context_jump_requested.connect(self._on_context_jump)
+        if hasattr(self.timeline_widget, "context_export_requested"):
+            self.timeline_widget.context_export_requested.connect(self._on_context_export)
+
+    # === НОВЫЕ ОБРАБОТЧИКИ контекстного меню ===
+
+    def _on_context_edit(self, marker_idx: int) -> None:
+        """Редактировать маркер из контекстного меню."""
+        self.edit_marker_requested(marker_idx)
+
+    def _on_context_delete(self, marker_idx: int) -> None:
+        """Удалить маркер из контекстного меню."""
+        self.delete_marker(marker_idx)
+
+    def _on_context_duplicate(self, marker_idx: int) -> None:
+        """Дублировать маркер из контекстного меню."""
+        self.duplicate_marker(marker_idx)
+
+    def _on_context_jump(self, marker_idx: int) -> None:
+        """Перейти к началу маркера из контекстного меню."""
+        if 0 <= marker_idx < len(self.project.markers):
+            marker = self.project.markers[marker_idx]
+            self.seek_frame(marker.start_frame)
+
+    def _on_context_export(self, marker_idx: int) -> None:
+        """Экспортировать один клип из контекстного меню."""
+        if self._main_controller and hasattr(self._main_controller, 'export_single_clip'):
+            self._main_controller.export_single_clip(marker_idx)
+        elif self._main_controller and hasattr(self._main_controller, '_on_export'):
+            # Fallback: открыть общий диалог экспорта
+            self._main_controller._on_export()
 
     def _on_timeline_seek(self, frame: int) -> None:
         self.seek_frame(frame)
@@ -500,8 +562,13 @@ class TimelineController(QObject):
         filtered_pairs = self.get_filtered_pairs()
         filtered_markers = [m for _, m in filtered_pairs]
 
-        if self.timeline_widget and hasattr(self.timeline_widget, "set_markers"):
-            self.timeline_widget.set_markers(filtered_markers)
+        # === НОВОЕ: Передаём маппинг индексов для контекстного меню ===
+        if self.timeline_widget:
+            index_map = {m.id: idx for idx, m in filtered_pairs}
+            if hasattr(self.timeline_widget, "set_markers_with_indices"):
+                self.timeline_widget.set_markers_with_indices(filtered_markers, index_map)
+            elif hasattr(self.timeline_widget, "set_markers"):
+                self.timeline_widget.set_markers(filtered_markers)
 
         if self.segment_list_widget:
             if hasattr(self.segment_list_widget, "set_segments"):
@@ -610,20 +677,29 @@ class TimelineController(QObject):
                 item.set_selected(item.marker.id in selected_ids)
 
     def _sync_segment_list_selection(self) -> None:
-        if not self.segment_list_widget or not hasattr(self.segment_list_widget, "table"):
+        if not self.segment_list_widget:
             return
 
         table = self.segment_list_widget.table
+
+        # === FIX: QTableView не имеет rowCount() — берём из модели ===
+        model = table.model()
+        if model is None:
+            return
+
         table.blockSignals(True)
         try:
             table.clearSelection()
 
             selected_orig = set(self.selected_markers)
-            for row in range(table.rowCount()):
-                item = table.item(row, 0)
-                if not item:
-                    continue
-                orig_idx = item.data(Qt.ItemDataRole.UserRole)
+            selection_model = table.selectionModel()
+            if selection_model is None:
+                return
+
+            for row in range(model.rowCount()):
+                # === FIX: QTableView не имеет item() — берём через model.data() ===
+                index = model.index(row, 0)
+                orig_idx = model.data(index, Qt.ItemDataRole.UserRole)
                 if orig_idx in selected_orig:
                     table.selectRow(row)
         finally:
