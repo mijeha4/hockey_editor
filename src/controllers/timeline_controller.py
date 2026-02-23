@@ -16,11 +16,15 @@ from views.widgets.timeline_scene import TimelineWidget
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# History commands
+# History commands (FIXED)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class AddMarkerCommand(Command):
-    """Команда добавления маркера."""
+    """Команда добавления маркера.
+
+    Сохраняет индекс при execute, восстанавливает при undo.
+    Redo (повторный execute) вставляет в тот же индекс.
+    """
 
     def __init__(self, project: Project, marker: Marker):
         super().__init__(f"Add {marker.event_name} marker")
@@ -29,18 +33,24 @@ class AddMarkerCommand(Command):
         self.index = -1
 
     def execute(self) -> None:
-        self.index = len(self.project.markers)
+        if self.index < 0:
+            self.index = len(self.project.markers)
         self.project.add_marker(self.marker, self.index)
 
     def undo(self) -> None:
-        if self.index >= 0:
+        if 0 <= self.index < len(self.project.markers):
             self.project.remove_marker(self.index)
 
 
 class ModifyMarkerCommand(Command):
-    """Команда изменения маркера по индексу."""
+    """Команда изменения маркера по индексу.
 
-    def __init__(self, project: Project, marker_idx: int, old_marker: Marker, new_marker: Marker):
+    FIX: Использует project.update_marker() вместо прямой записи
+    в project.markers[idx], которая раньше писала в копию списка.
+    """
+
+    def __init__(self, project: Project, marker_idx: int,
+                 old_marker: Marker, new_marker: Marker):
         super().__init__(f"Modify {new_marker.event_name} marker")
         self.project = project
         self.marker_idx = marker_idx
@@ -49,34 +59,33 @@ class ModifyMarkerCommand(Command):
 
     def execute(self) -> None:
         if 0 <= self.marker_idx < len(self.project.markers):
-            # Если у Project есть метод update_marker() — лучше вызывать его.
-            # Но чтобы не ломать ваш проект, заменяем элемент напрямую:
-            self.project.markers[self.marker_idx] = self.new_marker
+            self.project.update_marker(self.marker_idx, self.new_marker)
 
     def undo(self) -> None:
         if 0 <= self.marker_idx < len(self.project.markers):
-            self.project.markers[self.marker_idx] = self.old_marker
+            self.project.update_marker(self.marker_idx, self.old_marker)
 
 
 class DeleteMarkerCommand(Command):
-    """Команда удаления маркера."""
+    """Команда удаления маркера.
 
-    def __init__(self, project: Project, marker: Marker):
+    FIX: Хранит marker_idx при создании, а не ищет через list.index().
+    Раньше list.index() мог найти другой маркер при дубликатах,
+    или бросить ValueError если маркер уже удалён.
+    """
+
+    def __init__(self, project: Project, marker_idx: int, marker: Marker):
         super().__init__(f"Delete {marker.event_name} marker")
         self.project = project
+        self.marker_idx = marker_idx
         self.marker = marker
-        self.index = -1
 
     def execute(self) -> None:
-        try:
-            self.index = self.project.markers.index(self.marker)
-            self.project.remove_marker(self.index)
-        except ValueError:
-            self.index = -1
+        if 0 <= self.marker_idx < len(self.project.markers):
+            self.project.remove_marker(self.marker_idx)
 
     def undo(self) -> None:
-        if self.index >= 0:
-            self.project.add_marker(self.marker, self.index)
+        self.project.add_marker(self.marker, self.marker_idx)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -89,12 +98,12 @@ class TimelineController(QObject):
     markers_changed = Signal()
     playback_time_changed = Signal(int)
     timeline_update = Signal()
-    marker_updated = Signal(int)  # marker original index
+    marker_updated = Signal(int)
     marker_selection_changed = Signal()
 
     project_modified = Signal()
 
-    recording_state_changed = Signal(bool, str, int)  # is_recording, event_name, start_frame
+    recording_state_changed = Signal(bool, str, int)
 
     def __init__(
         self,
@@ -117,23 +126,18 @@ class TimelineController(QObject):
         self._main_window = None
         self._main_controller = None
 
-        # Playback sync
         self.playback_controller = None
         self.current_frame = 0
         self.fps = 30.0
         self.total_frames = 0
 
-        # Dynamic mode recording
         self.recording_start_frame: Optional[int] = None
         self.is_recording: bool = False
 
-        # Selection (store ORIGINAL INDICES into project.markers)
         self.selected_markers: Set[int] = set()
 
-        # FilterController (single source of truth for filters)
         self.filter_controller = None
 
-        # Project signals
         self.project.marker_added.connect(self.on_marker_added)
         self.project.marker_removed.connect(self.on_marker_removed)
         self.project.markers_cleared.connect(self.on_markers_cleared)
@@ -143,7 +147,6 @@ class TimelineController(QObject):
 
         self.markers_changed.connect(self._on_markers_changed_internal)
 
-        # Custom events signals
         if self.custom_event_controller is not None:
             self.custom_event_controller.events_changed.connect(self._on_events_changed)
             self.custom_event_controller.event_added.connect(self._on_event_added)
@@ -170,7 +173,6 @@ class TimelineController(QObject):
             self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
 
     def set_filter_controller(self, filter_controller) -> None:
-        """Подключить FilterController."""
         self.filter_controller = filter_controller
         if self.filter_controller is not None:
             self.filter_controller.filters_changed.connect(self._on_filters_changed)
@@ -180,7 +182,6 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def on_marker_added(self, index: int, marker: Marker) -> None:
-        # Быстро обновим UI
         if self.timeline_widget:
             try:
                 if hasattr(self.timeline_widget, "rebuild"):
@@ -206,6 +207,22 @@ class TimelineController(QObject):
         return self.project.markers
 
     # ──────────────────────────────────────────────────────────────────────────
+    # Undo / Redo (convenience wrappers)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def undo(self) -> None:
+        """Отменить последнее действие."""
+        if self.history_manager.undo():
+            self.refresh_view()
+            self.project_modified.emit()
+
+    def redo(self) -> None:
+        """Повторить отменённое действие."""
+        if self.history_manager.redo():
+            self.refresh_view()
+            self.project_modified.emit()
+
+    # ──────────────────────────────────────────────────────────────────────────
     # Hotkeys / recording modes
     # ──────────────────────────────────────────────────────────────────────────
 
@@ -220,13 +237,11 @@ class TimelineController(QObject):
             self._handle_fixed_length_mode(event_name, current_frame, fps)
 
     def _find_event_by_hotkey(self, hotkey: str) -> Optional[str]:
-        # Custom events
         if self.custom_event_controller:
             for event in self.custom_event_controller.get_all_events():
                 if (event.shortcut or "").upper() == hotkey.upper():
                     return event.name
 
-        # Default events (если они у вас реально лежат в settings.default_events)
         for event in getattr(self.settings, "default_events", []):
             if (event.shortcut or "").upper() == hotkey.upper():
                 return event.name
@@ -240,7 +255,6 @@ class TimelineController(QObject):
             self.recording_state_changed.emit(True, event_name, current_frame)
             return
 
-        # Finish recording
         if self.recording_start_frame is None:
             self.is_recording = False
             self.recording_state_changed.emit(False, "", 0)
@@ -265,7 +279,7 @@ class TimelineController(QObject):
         self.add_marker(start_frame, end_frame, event_name)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # CRUD markers with history
+    # CRUD markers with history (FIXED)
     # ──────────────────────────────────────────────────────────────────────────
 
     def add_marker(self, start_frame: int, end_frame: int, event_name: str, note: str = "") -> None:
@@ -282,9 +296,16 @@ class TimelineController(QObject):
         self.project_modified.emit()
 
     def delete_marker(self, marker_idx: int) -> None:
+        """Удалить маркер по оригинальному индексу.
+
+        FIX: Передаём marker_idx в DeleteMarkerCommand вместо поиска
+        через list.index() — это надёжнее при дубликатах и undo/redo.
+        """
         if 0 <= marker_idx < len(self.project.markers):
             marker = self.project.markers[marker_idx]
-            self.history_manager.execute_command(DeleteMarkerCommand(self.project, marker))
+            self.history_manager.execute_command(
+                DeleteMarkerCommand(self.project, marker_idx, marker)
+            )
             self.project_modified.emit()
 
     def update_marker_optimized(
@@ -295,6 +316,10 @@ class TimelineController(QObject):
         new_event_name: Optional[str] = None,
         new_note: Optional[str] = None,
     ) -> None:
+        """Изменить маркер с записью в историю.
+
+        FIX: Использует project.update_marker() через ModifyMarkerCommand.
+        """
         if not (0 <= marker_idx < len(self.project.markers)):
             return
 
@@ -377,13 +402,11 @@ class TimelineController(QObject):
         self.seek_frame(frame)
 
     def _on_event_selected(self, marker: Marker) -> None:
-        # Selection sync: find original idx and highlight in segment list
         try:
             marker_idx = self.project.markers.index(marker)
         except ValueError:
             return
 
-        # Update selection set
         self.clear_selection()
         self.select_marker(marker_idx)
         self._update_selected_markers_filter()
@@ -397,7 +420,6 @@ class TimelineController(QObject):
         self.edit_marker_requested(marker_idx)
 
     def edit_marker_requested(self, marker_idx: int) -> None:
-        """Открыть редактор отрезка (через MainWindow)."""
         if self._main_window:
             self._main_window.open_segment_editor(marker_idx)
 
@@ -446,7 +468,6 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def refresh_view(self) -> None:
-        """Полная перерисовка (совместимость)."""
         self.markers_changed.emit()
 
         if self.timeline_widget and hasattr(self.timeline_widget, "rebuild"):
@@ -455,7 +476,6 @@ class TimelineController(QObject):
         self._update_markers_display()
 
     def _on_markers_changed_internal(self) -> None:
-        """marker list changed -> update widgets."""
         if self.timeline_widget and hasattr(self.timeline_widget, "set_markers"):
             self.timeline_widget.set_markers(self.project.markers)
 
@@ -469,32 +489,26 @@ class TimelineController(QObject):
         self._update_markers_display()
 
     def get_filtered_pairs(self) -> List[Tuple[int, Marker]]:
-        """Return [(orig_idx, marker), ...] based on FilterController (if present)."""
         if self.filter_controller is not None:
             return self.filter_controller.filter_markers(self.project.markers)
         return [(i, m) for i, m in enumerate(self.project.markers)]
 
     def get_filtered_markers(self) -> List[Marker]:
-        """Return [marker, ...] for timeline display."""
         return [m for _, m in self.get_filtered_pairs()]
 
     def _update_markers_display(self) -> None:
         filtered_pairs = self.get_filtered_pairs()
         filtered_markers = [m for _, m in filtered_pairs]
 
-        # Timeline
         if self.timeline_widget and hasattr(self.timeline_widget, "set_markers"):
             self.timeline_widget.set_markers(filtered_markers)
 
-        # Segment list
         if self.segment_list_widget:
             if hasattr(self.segment_list_widget, "set_segments"):
                 self.segment_list_widget.set_segments(filtered_pairs)
             else:
-                # fallback for old API
                 self.segment_list_widget.update_segments(filtered_markers)
 
-        # sync selection visuals
         self._sync_timeline_selection()
         self._sync_segment_list_selection()
 
@@ -578,7 +592,6 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _sync_timeline_selection(self) -> None:
-        """Синхронизировать выделение на таймлайне по marker.id."""
         if not self.timeline_widget or not hasattr(self.timeline_widget, "scene"):
             return
 
@@ -597,7 +610,6 @@ class TimelineController(QObject):
                 item.set_selected(item.marker.id in selected_ids)
 
     def _sync_segment_list_selection(self) -> None:
-        """Синхронизировать выделение в таблице через UserRole=orig_idx (если так сделано в SegmentListWidget)."""
         if not self.segment_list_widget or not hasattr(self.segment_list_widget, "table"):
             return
 
@@ -622,25 +634,33 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _on_events_changed(self) -> None:
-        # ничего специального не нужно, track names/горячие клавиши найдутся на лету
         pass
 
     def _on_event_added(self, event) -> None:
         pass
 
     def _on_event_deleted(self, event_name: str) -> None:
-        # удалить маркеры с этим event_name (через команды)
-        indices_to_remove = [i for i, m in enumerate(self.project.markers) if m.event_name == event_name]
+        """Удалить все маркеры с этим event_name.
+
+        FIX: Используем новый DeleteMarkerCommand с marker_idx.
+        Удаляем в обратном порядке, чтобы индексы не сдвигались.
+        """
+        indices_to_remove = [
+            i for i, m in enumerate(self.project.markers)
+            if m.event_name == event_name
+        ]
         if not indices_to_remove:
             return
 
         for idx in reversed(indices_to_remove):
             marker = self.project.markers[idx]
-            self.history_manager.execute_command(DeleteMarkerCommand(self.project, marker))
+            self.history_manager.execute_command(
+                DeleteMarkerCommand(self.project, idx, marker)
+            )
 
         self.project_modified.emit()
         self.refresh_view()
-    
+
     def get_total_frames(self) -> int:
         return self.total_frames
 
