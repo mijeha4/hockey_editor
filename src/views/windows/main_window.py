@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
             QSplitter::handle:hover { background-color: #444444; }
         """)
 
-        # Video container
+        # ── Video container ──
         video_container = QWidget()
         video_layout = QVBoxLayout(video_container)
         video_layout.setContentsMargins(0, 0, 0, 0)
@@ -159,12 +159,21 @@ class MainWindow(QMainWindow):
         self.video_label.setStyleSheet("background-color: black;")
         video_layout.addWidget(self.video_label, 1)
 
+        # Tracking overlay (поверх видео) — создаём только если модуль существует
+        self.tracking_overlay = None
+        try:
+            from views.widgets.tracking_overlay import TrackingOverlay
+            self.tracking_overlay = TrackingOverlay(self.video_label)
+            self.tracking_overlay.setGeometry(self.video_label.rect())
+        except ImportError:
+            pass  # Модуль трекинга не установлен — пропускаем
+
         self.player_controls = PlayerControls()
         video_layout.addWidget(self.player_controls, 0, Qt.AlignBottom)
 
         self.top_splitter.addWidget(video_container)
 
-        # Right panel: segment list + stats
+        # ── Right panel: segment list + stats ──
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -181,17 +190,26 @@ class MainWindow(QMainWindow):
 
         # Segment list
         self.segment_list_widget = SegmentListWidget()
-        right_layout.addWidget(self.segment_list_widget, 1)  # stretch=1
+        right_layout.addWidget(self.segment_list_widget, 1)
 
-        # === НОВОЕ: Статистика (сворачиваемая) ===
+        # Статистика (сворачиваемая)
         self._setup_stats_panel(right_layout)
+
+        # Tracking panel — создаём только если модуль существует
+        self._tracking_panel = None
+        try:
+            from views.widgets.tracking_panel import TrackingPanel
+            self._tracking_panel = TrackingPanel()
+            right_layout.addWidget(self._tracking_panel)
+        except ImportError:
+            pass  # Модуль трекинга не установлен — пропускаем
 
         self.top_splitter.addWidget(right_panel)
         self.top_splitter.setSizes([600, 400])
 
         self.main_splitter.addWidget(self.top_splitter)
 
-        # Timeline container
+        # ── Timeline container ──
         self.timeline_container = QWidget()
         tl_layout = QVBoxLayout(self.timeline_container)
         tl_layout.setContentsMargins(0, 0, 0, 0)
@@ -204,7 +222,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.main_splitter)
 
-        # Bottom row
+        # ── Bottom row ──
         bottom_layout = QHBoxLayout()
 
         self.event_shortcut_list_widget = EventShortcutListWidget()

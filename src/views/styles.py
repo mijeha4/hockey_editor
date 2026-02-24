@@ -21,6 +21,43 @@ class AppColors:
     DEFENSE = "#0000FF"
     CHANGE = "#00FF00"
 
+    # Base colors (old — keep for compatibility)
+    BACKGROUND = "#2a2a2a"
+    ELEMENT_BG = "#333333"
+    TEXT = "#ffffff"
+    ACCENT = "#1a4d7a"
+    BORDER = "#444444"
+
+    # Event colors
+    ATTACK = "#FF0000"
+    DEFENSE = "#0000FF"
+    CHANGE = "#00FF00"
+
+    # ── NEW: Extended palette for modern widgets ──
+    BG_PRIMARY = "#2a2a2a"
+    BG_SECONDARY = "#1e1e1e"
+    BG_SURFACE = "#333333"
+    BG_SURFACE_VARIANT = "#3a3a3a"
+    BG_ELEVATED = "#404040"
+    BG_HOVER = "#4a4a4a"
+
+    ACCENT_LIGHT = "#4488cc"
+    ACCENT_DARK = "#0d3a5c"
+    ACCENT_SECONDARY = "#06b6d4"
+    ACCENT_GLOW = "rgba(26, 77, 122, 0.25)"
+
+    SUCCESS = "#10b981"
+    WARNING = "#f59e0b"
+    ERROR = "#ef4444"
+    INFO = "#06b6d4"
+
+    TEXT_SECONDARY = "#aaaaaa"
+    TEXT_MUTED = "#888888"
+    TEXT_ON_ACCENT = "#ffffff"
+
+    BORDER_HOVER = "#666666"
+    BORDER_FOCUS = "#1a4d7a"
+
 
 def get_application_stylesheet() -> str:
     """Return the global application stylesheet.
