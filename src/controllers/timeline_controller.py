@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import List, Optional, Set, Tuple, Dict
 
-from PySide6.QtCore import Signal, QObject, Qt
+from PySide6.QtCore import Signal, QObject, Qt, QTimer
 from PySide6.QtWidgets import QGraphicsRectItem
 
 from models.domain.marker import Marker
@@ -16,12 +15,10 @@ from views.widgets.timeline_scene import TimelineWidget
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# History commands (FIXED)
+# History commands
 # ──────────────────────────────────────────────────────────────────────────────
 
 class AddMarkerCommand(Command):
-    """Команда добавления маркера."""
-
     def __init__(self, project: Project, marker: Marker):
         super().__init__(f"Add {marker.event_name} marker")
         self.project = project
@@ -39,8 +36,6 @@ class AddMarkerCommand(Command):
 
 
 class ModifyMarkerCommand(Command):
-    """Команда изменения маркера по индексу."""
-
     def __init__(self, project: Project, marker_idx: int,
                  old_marker: Marker, new_marker: Marker):
         super().__init__(f"Modify {new_marker.event_name} marker")
@@ -59,8 +54,6 @@ class ModifyMarkerCommand(Command):
 
 
 class DeleteMarkerCommand(Command):
-    """Команда удаления маркера."""
-
     def __init__(self, project: Project, marker_idx: int, marker: Marker):
         super().__init__(f"Delete {marker.event_name} marker")
         self.project = project
@@ -76,12 +69,6 @@ class DeleteMarkerCommand(Command):
 
 
 class BatchCommand(Command):
-    """Составная команда для групповых операций.
-
-    Выполняет список подкоманд как одну атомарную операцию.
-    Undo отменяет все подкоманды в обратном порядке.
-    """
-
     def __init__(self, description: str, commands: List[Command]):
         super().__init__(description)
         self.commands = list(commands)
@@ -100,7 +87,12 @@ class BatchCommand(Command):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class TimelineController(QObject):
-    """Контроллер управления маркерами + синхронизация с UI."""
+    """Контроллер управления маркерами + синхронизация с UI.
+
+    FIX: Все обновления UI проходят через debounce-таймер (_rebuild_timer),
+    который объединяет несколько изменений в ОДНО перестроение сцены.
+    Это предотвращает краш при быстром добавлении маркеров.
+    """
 
     markers_changed = Signal()
     playback_time_changed = Signal(int)
@@ -145,14 +137,27 @@ class TimelineController(QObject):
 
         self.filter_controller = None
 
-        self.project.marker_added.connect(self.on_marker_added)
-        self.project.marker_removed.connect(self.on_marker_removed)
-        self.project.markers_cleared.connect(self.on_markers_cleared)
+        # ══════════════════════════════════════════════════════════════════════
+        # FIX: Debounce timer — объединяет множественные rebuild в ОДИН
+        # ══════════════════════════════════════════════════════════════════════
+        self._rebuild_timer = QTimer(self)
+        self._rebuild_timer.setSingleShot(True)
+        self._rebuild_timer.setInterval(16)  # ~60fps — незаметная задержка
+        self._rebuild_timer.timeout.connect(self._do_full_ui_update)
+
+        # ── Connect project model signals ──
+        self.project.marker_added.connect(self._on_project_changed)
+        self.project.marker_removed.connect(self._on_project_changed_int)
+        self.project.markers_cleared.connect(self._on_project_changed)
+        if hasattr(self.project, "markers_replaced"):
+            self.project.markers_replaced.connect(self._on_project_changed)
+
+        # NOTE: Мы НЕ подключаем markers_changed → _on_markers_changed_internal.
+        # Это убирает каскад из 3-4 перестроений. Вместо этого все обновления
+        # проходят через _schedule_rebuild → _do_full_ui_update.
 
         if self.timeline_widget is not None:
             self._connect_timeline_signals()
-
-        self.markers_changed.connect(self._on_markers_changed_internal)
 
         if self.custom_event_controller is not None:
             self.custom_event_controller.events_changed.connect(self._on_events_changed)
@@ -160,7 +165,80 @@ class TimelineController(QObject):
             self.custom_event_controller.event_deleted.connect(self._on_event_deleted)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Dependency injection helpers
+    # FIX: Debounced rebuild
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _on_project_changed(self, *args) -> None:
+        """Слот для сигналов project: marker_added, markers_cleared, markers_replaced."""
+        self._schedule_rebuild()
+
+    def _on_project_changed_int(self, index: int) -> None:
+        """Слот для marker_removed(int)."""
+        self._schedule_rebuild()
+
+    def _schedule_rebuild(self) -> None:
+        """Запланировать перестроение UI.
+
+        Если вызвано несколько раз подряд (быстрые хоткеи),
+        таймер НЕ перезапускается — первое перестроение произойдёт
+        через 16мс после ПЕРВОГО вызова, а следующее — после следующего.
+        """
+        if not self._rebuild_timer.isActive():
+            self._rebuild_timer.start()
+
+    def _do_full_ui_update(self) -> None:
+        """Единственная точка обновления всего UI.
+
+        Вызывается либо по таймеру (deferred), либо напрямую из refresh_view().
+        Гарантирует ОДНО перестроение сцены за вызов.
+        """
+        self._rebuild_timer.stop()  # Отменить pending, если вызван напрямую
+
+        filtered_pairs = self.get_filtered_pairs()
+        filtered_markers = [m for _, m in filtered_pairs]
+
+        # 1. Обновить timeline scene (ОДНО перестроение)
+        if self.timeline_widget:
+            index_map = {m.id: idx for idx, m in filtered_pairs}
+            if hasattr(self.timeline_widget, "set_markers_with_indices"):
+                self.timeline_widget.set_markers_with_indices(filtered_markers, index_map)
+            elif hasattr(self.timeline_widget, "set_markers"):
+                self.timeline_widget.set_markers(filtered_markers)
+
+        # 2. Обновить segment list
+        if self.segment_list_widget:
+            if hasattr(self.segment_list_widget, "set_segments"):
+                self.segment_list_widget.set_segments(filtered_pairs)
+            else:
+                self.segment_list_widget.update_segments(filtered_markers)
+
+        # 3. Синхронизировать выделение (после rebuild — items валидны)
+        self._sync_timeline_selection()
+        self._sync_segment_list_selection()
+
+        # 4. Уведомить внешних слушателей (stats widget, tab title, и т.д.)
+        self.markers_changed.emit()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Toast helper
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _notify(self, message: str, level: str = "success", **kwargs) -> None:
+        try:
+            mc = self._main_controller
+            if mc is None:
+                return
+            mw = getattr(mc, "main_window", None)
+            if mw is None:
+                return
+            method = getattr(mw, f"show_toast_{level}", None)
+            if method:
+                method(message, **kwargs)
+        except Exception:
+            pass
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Dependency injection
     # ──────────────────────────────────────────────────────────────────────────
 
     def set_main_window(self, window) -> None:
@@ -185,29 +263,8 @@ class TimelineController(QObject):
             self.filter_controller.filters_changed.connect(self._on_filters_changed)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Project marker signals
+    # Markers property
     # ──────────────────────────────────────────────────────────────────────────
-
-    def on_marker_added(self, index: int, marker: Marker) -> None:
-        if self.timeline_widget:
-            try:
-                if hasattr(self.timeline_widget, "rebuild"):
-                    self.timeline_widget.rebuild(animate_new=True)
-                elif hasattr(self.timeline_widget, "set_markers"):
-                    self.timeline_widget.set_markers(self.project.markers)
-            except Exception as e:
-                print(f"Timeline rebuild failed: {e}")
-
-        self._update_markers_display()
-
-    def on_marker_removed(self, index: int) -> None:
-        self.markers_changed.emit()
-
-    def on_marker_changed(self, index: int, marker: Marker) -> None:
-        self.markers_changed.emit()
-
-    def on_markers_cleared(self) -> None:
-        self.markers_changed.emit()
 
     @property
     def markers(self) -> List[Marker]:
@@ -218,12 +275,14 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def undo(self) -> None:
-        if self.history_manager.undo():
+        desc = self.history_manager.undo()
+        if desc:
             self.refresh_view()
             self.project_modified.emit()
 
     def redo(self) -> None:
-        if self.history_manager.redo():
+        desc = self.history_manager.redo()
+        if desc:
             self.refresh_view()
             self.project_modified.emit()
 
@@ -258,6 +317,7 @@ class TimelineController(QObject):
             self.recording_start_frame = current_frame
             self.is_recording = True
             self.recording_state_changed.emit(True, event_name, current_frame)
+            self._notify(f"⏺ Запись: {event_name}", "info", duration_ms=1500)
             return
 
         if self.recording_start_frame is None:
@@ -279,7 +339,8 @@ class TimelineController(QObject):
 
     def _handle_fixed_length_mode(self, event_name: str, current_frame: int, fps: float) -> None:
         start_frame = current_frame - int(self.settings.pre_roll_sec * fps)
-        end_frame = start_frame + int(self.settings.fixed_duration_sec * fps) + int(self.settings.post_roll_sec * fps)
+        end_frame = start_frame + int(self.settings.fixed_duration_sec * fps) + int(
+            self.settings.post_roll_sec * fps)
         start_frame = max(0, start_frame)
         self.add_marker(start_frame, end_frame, event_name)
 
@@ -299,17 +360,27 @@ class TimelineController(QObject):
 
         self.history_manager.execute_command(AddMarkerCommand(self.project, marker))
         self.project_modified.emit()
+        self._notify(f"✅ {event_name}", "success", duration_ms=2000)
 
     def delete_marker(self, marker_idx: int) -> None:
         if 0 <= marker_idx < len(self.project.markers):
             marker = self.project.markers[marker_idx]
+            event_name = marker.event_name
+
             self.history_manager.execute_command(
                 DeleteMarkerCommand(self.project, marker_idx, marker)
             )
             self.project_modified.emit()
 
+            self._notify(
+                f"Удалён: {event_name}",
+                "warning",
+                duration_ms=4000,
+                action_text="Отмена",
+                action_callback=lambda: self.undo(),
+            )
+
     def duplicate_marker(self, marker_idx: int) -> None:
-        """Дублировать маркер — создать копию с новым ID."""
         if not (0 <= marker_idx < len(self.project.markers)):
             return
 
@@ -326,6 +397,7 @@ class TimelineController(QObject):
 
         self.history_manager.execute_command(AddMarkerCommand(self.project, duplicate))
         self.project_modified.emit()
+        self._notify(f"Дублирован: {original.event_name}", "success", duration_ms=2000)
 
     def update_marker_optimized(
         self,
@@ -350,20 +422,14 @@ class TimelineController(QObject):
         self.history_manager.execute_command(
             ModifyMarkerCommand(self.project, marker_idx, old_marker, new_marker)
         )
-
         self.marker_updated.emit(marker_idx)
         self.project_modified.emit()
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Batch operations (NEW)
+    # Batch operations
     # ──────────────────────────────────────────────────────────────────────────
 
     def batch_delete_markers(self, marker_indices: List[int]) -> None:
-        """Удалить несколько маркеров одной операцией (undo отменяет все).
-
-        ВАЖНО: Индексы обрабатываются в обратном порядке (от большего к меньшему),
-        чтобы удаление не сдвигало индексы оставшихся маркеров.
-        """
         sorted_indices = sorted(marker_indices, reverse=True)
 
         commands: List[Command] = []
@@ -375,15 +441,17 @@ class TimelineController(QObject):
         if not commands:
             return
 
-        batch = BatchCommand(
-            f"Delete {len(commands)} markers",
-            commands
-        )
+        batch = BatchCommand(f"Delete {len(commands)} markers", commands)
         self.history_manager.execute_command(batch)
         self.project_modified.emit()
 
+        count = len(commands)
+        self._notify(
+            f"Удалено: {count} маркеров", "warning", duration_ms=5000,
+            action_text="Отмена", action_callback=lambda: self.undo(),
+        )
+
     def batch_change_event_type(self, marker_indices: List[int], new_event_name: str) -> None:
-        """Изменить тип события для нескольких маркеров одной операцией."""
         commands: List[Command] = []
 
         for idx in sorted(marker_indices):
@@ -392,7 +460,7 @@ class TimelineController(QObject):
 
             old_marker = self.project.markers[idx]
             if old_marker.event_name == new_event_name:
-                continue  # Уже этот тип — пропускаем
+                continue
 
             new_marker = Marker(
                 id=old_marker.id,
@@ -406,15 +474,12 @@ class TimelineController(QObject):
         if not commands:
             return
 
-        batch = BatchCommand(
-            f"Change {len(commands)} markers to '{new_event_name}'",
-            commands
-        )
+        batch = BatchCommand(f"Change {len(commands)} markers to '{new_event_name}'", commands)
         self.history_manager.execute_command(batch)
         self.project_modified.emit()
+        self._notify(f"Изменён тип: {len(commands)} → {new_event_name}", "success", duration_ms=2500)
 
     def batch_duplicate_markers(self, marker_indices: List[int]) -> None:
-        """Дублировать несколько маркеров одной операцией."""
         commands: List[Command] = []
 
         for idx in sorted(marker_indices):
@@ -436,12 +501,10 @@ class TimelineController(QObject):
         if not commands:
             return
 
-        batch = BatchCommand(
-            f"Duplicate {len(commands)} markers",
-            commands
-        )
+        batch = BatchCommand(f"Duplicate {len(commands)} markers", commands)
         self.history_manager.execute_command(batch)
         self.project_modified.emit()
+        self._notify(f"Дублировано: {len(commands)} маркеров", "success", duration_ms=2500)
 
     def _generate_marker_id(self) -> int:
         if not self.project.markers:
@@ -502,7 +565,6 @@ class TimelineController(QObject):
             if hasattr(self.timeline_widget, "segment_edit_requested"):
                 self.timeline_widget.segment_edit_requested.connect(self._on_event_double_clicked)
 
-        # Сигналы контекстного меню
         if hasattr(self.timeline_widget, "context_edit_requested"):
             self.timeline_widget.context_edit_requested.connect(self._on_context_edit)
         if hasattr(self.timeline_widget, "context_delete_requested"):
@@ -513,8 +575,6 @@ class TimelineController(QObject):
             self.timeline_widget.context_jump_requested.connect(self._on_context_jump)
         if hasattr(self.timeline_widget, "context_export_requested"):
             self.timeline_widget.context_export_requested.connect(self._on_context_export)
-
-    # Context menu handlers
 
     def _on_context_edit(self, marker_idx: int) -> None:
         self.edit_marker_requested(marker_idx)
@@ -602,29 +662,19 @@ class TimelineController(QObject):
         return default_tracks
 
     # ──────────────────────────────────────────────────────────────────────────
-    # UI refresh
+    # UI refresh — FIX: единственная точка входа
     # ──────────────────────────────────────────────────────────────────────────
 
     def refresh_view(self) -> None:
-        self.markers_changed.emit()
-
-        if self.timeline_widget and hasattr(self.timeline_widget, "rebuild"):
-            self.timeline_widget.rebuild(animate_new=False)
-
-        self._update_markers_display()
-
-    def _on_markers_changed_internal(self) -> None:
-        if self.timeline_widget and hasattr(self.timeline_widget, "set_markers"):
-            self.timeline_widget.set_markers(self.project.markers)
-
-        self._update_markers_display()
+        """Немедленное обновление UI (для undo/redo, load project и т.д.)."""
+        self._do_full_ui_update()
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Filtering integration
+    # Filtering
     # ──────────────────────────────────────────────────────────────────────────
 
     def _on_filters_changed(self) -> None:
-        self._update_markers_display()
+        self._do_full_ui_update()
 
     def get_filtered_pairs(self) -> List[Tuple[int, Marker]]:
         if self.filter_controller is not None:
@@ -633,26 +683,6 @@ class TimelineController(QObject):
 
     def get_filtered_markers(self) -> List[Marker]:
         return [m for _, m in self.get_filtered_pairs()]
-
-    def _update_markers_display(self) -> None:
-        filtered_pairs = self.get_filtered_pairs()
-        filtered_markers = [m for _, m in filtered_pairs]
-
-        if self.timeline_widget:
-            index_map = {m.id: idx for idx, m in filtered_pairs}
-            if hasattr(self.timeline_widget, "set_markers_with_indices"):
-                self.timeline_widget.set_markers_with_indices(filtered_markers, index_map)
-            elif hasattr(self.timeline_widget, "set_markers"):
-                self.timeline_widget.set_markers(filtered_markers)
-
-        if self.segment_list_widget:
-            if hasattr(self.segment_list_widget, "set_segments"):
-                self.segment_list_widget.set_segments(filtered_pairs)
-            else:
-                self.segment_list_widget.update_segments(filtered_markers)
-
-        self._sync_timeline_selection()
-        self._sync_segment_list_selection()
 
     # ──────────────────────────────────────────────────────────────────────────
     # Selection
@@ -680,31 +710,28 @@ class TimelineController(QObject):
     def handle_marker_selection(self, marker_idx: int, toggle_mode: bool = True) -> None:
         if not (0 <= marker_idx < len(self.project.markers)):
             return
-
         if toggle_mode:
             self.toggle_marker_selection(marker_idx)
         else:
             self.clear_selection()
             self.select_marker(marker_idx)
-
         self._update_selected_markers_filter()
         self.marker_selection_changed.emit()
 
     def select_single_marker(self, marker_idx: int) -> None:
         if not (0 <= marker_idx < len(self.project.markers)):
             return
-
         self.clear_selection()
         self.select_marker(marker_idx)
         self._update_selected_markers_filter()
-        self._update_markers_display()
+        self._do_full_ui_update()
 
     def clear_selected_markers_filter_mode(self) -> None:
         if self.filter_controller is None:
             return
         self.filter_controller.set_selected_marker_ids(set())
         self.clear_selection()
-        self._update_markers_display()
+        self._do_full_ui_update()
 
     def toggle_selected_markers_filter_mode(self) -> None:
         if self.filter_controller is None:
@@ -716,12 +743,11 @@ class TimelineController(QObject):
                 self.select_single_marker(0)
             else:
                 self._update_selected_markers_filter()
-                self._update_markers_display()
+                self._do_full_ui_update()
 
     def _update_selected_markers_filter(self) -> None:
         if self.filter_controller is None:
             return
-
         selected_ids = {
             self.project.markers[idx].id
             for idx in self.selected_markers
@@ -730,7 +756,7 @@ class TimelineController(QObject):
         self.filter_controller.set_selected_marker_ids(selected_ids)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Selection sync to widgets
+    # Selection sync — FIX: проверяем _is_rebuilding
     # ──────────────────────────────────────────────────────────────────────────
 
     def _sync_timeline_selection(self) -> None:
@@ -741,22 +767,31 @@ class TimelineController(QObject):
         if not hasattr(scene, "items"):
             return
 
+        # FIX: не итерировать items во время rebuild
+        if getattr(scene, '_is_rebuilding', False):
+            return
+
         selected_ids = {
             self.project.markers[idx].id
             for idx in self.selected_markers
             if 0 <= idx < len(self.project.markers)
         }
 
-        for item in scene.items():
-            if isinstance(item, QGraphicsRectItem) and hasattr(item, "marker") and hasattr(item, "set_selected"):
-                item.set_selected(item.marker.id in selected_ids)
+        try:
+            for item in scene.items():
+                if (isinstance(item, QGraphicsRectItem)
+                        and hasattr(item, "marker")
+                        and hasattr(item, "set_selected")):
+                    item.set_selected(item.marker.id in selected_ids)
+        except RuntimeError:
+            # Scene items могли быть удалены между итерациями
+            pass
 
     def _sync_segment_list_selection(self) -> None:
         if not self.segment_list_widget:
             return
 
         table = self.segment_list_widget.table
-
         model = table.model()
         if model is None:
             return
@@ -775,6 +810,8 @@ class TimelineController(QObject):
                 orig_idx = model.data(index, Qt.ItemDataRole.UserRole)
                 if orig_idx in selected_orig:
                     table.selectRow(row)
+        except RuntimeError:
+            pass
         finally:
             table.blockSignals(False)
 
@@ -796,14 +833,26 @@ class TimelineController(QObject):
         if not indices_to_remove:
             return
 
+        commands: List[Command] = []
         for idx in reversed(indices_to_remove):
             marker = self.project.markers[idx]
-            self.history_manager.execute_command(
-                DeleteMarkerCommand(self.project, idx, marker)
-            )
+            commands.append(DeleteMarkerCommand(self.project, idx, marker))
+
+        batch = BatchCommand(
+            f"Delete all '{event_name}' markers ({len(commands)})",
+            commands,
+        )
+        self.history_manager.execute_command(batch)
 
         self.project_modified.emit()
         self.refresh_view()
+
+        self._notify(
+            f"Удалены маркеры: {event_name} ({len(commands)} шт.)",
+            "warning", duration_ms=4000,
+            action_text="Отмена",
+            action_callback=lambda: self.undo(),
+        )
 
     def get_total_frames(self) -> int:
         return self.total_frames

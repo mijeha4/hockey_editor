@@ -85,7 +85,7 @@
         "SHIFT": "S"
     },
     "recording_mode": "fixed_length",
-    "fixed_duration_sec": 13,
+    "fixed_duration_sec": 10,
     "pre_roll_sec": 3.0,
     "post_roll_sec": 0.0,
     "track_colors": {
@@ -100,109 +100,12 @@
     "autosave_enabled": true,
     "autosave_interval_minutes": 5,
     "recent_projects": [],
-    "custom_events": [
-        {
-            "name": "Гол",
-            "color": "G",
-            "shortcut": "#FF0000",
-            "description": ""
-        },
-        {
-            "name": "Перехват",
-            "color": "P",
-            "shortcut": "#00FF00",
-            "description": ""
-        },
-        {
-            "name": "Удаление",
-            "color": "U",
-            "shortcut": "#0000FF",
-            "description": ""
-        },
-        {
-            "name": "Blocked Shot",
-            "color": "#795548",
-            "shortcut": "B",
-            "description": "Shot blocked"
-        },
-        {
-            "name": "Defensive Block",
-            "color": "#3F51B5",
-            "shortcut": "K",
-            "description": "Shot blocked in defense"
-        },
-        {
-            "name": "Dump In",
-            "color": "#00BCD4",
-            "shortcut": "D",
-            "description": "Dump puck into zone"
-        },
-        {
-            "name": "Faceoff Loss",
-            "color": "#558B2F",
-            "shortcut": "L",
-            "description": "Faceoff lost"
-        },
-        {
-            "name": "Faceoff Win",
-            "color": "#8BC34A",
-            "shortcut": "F",
-            "description": "Faceoff won"
-        },
-        {
-            "name": "Goal",
-            "color": "#FF0000",
-            "shortcut": "Y",
-            "description": "Goal scored"
-        },
-        {
-            "name": "Missed Shot",
-            "color": "#FF9800",
-            "shortcut": "M",
-            "description": "Shot missed the net"
-        },
-        {
-            "name": "Penalty",
-            "color": "#9C27B0",
-            "shortcut": "P",
-            "description": "Penalty called"
-        },
-        {
-            "name": "Shot on Goal",
-            "color": "#FF5722",
-            "shortcut": "H",
-            "description": "Shot on goal"
-        },
-        {
-            "name": "Takeaway",
-            "color": "#4CAF50",
-            "shortcut": "A",
-            "description": "Puck possession gained"
-        },
-        {
-            "name": "Turnover",
-            "color": "#607D8B",
-            "shortcut": "T",
-            "description": "Loss of puck possession"
-        },
-        {
-            "name": "Zone Entry",
-            "color": "#2196F3",
-            "shortcut": "Z",
-            "description": "Entry into offensive zone"
-        },
-        {
-            "name": "Zone Exit",
-            "color": "#03A9F4",
-            "shortcut": "X",
-            "description": "Exit from defensive zone"
-        }
-    ],
+    "custom_events": [],
     "language": "ru",
     "playback_speed": 1.0,
     "theme": "dark",
-    "export_default_dir": "C:/Users/User/Desktop/hockey_editor/Экспортированные события",
-    "export_codec": "copy",
+    "export_default_dir": "",
+    "export_codec": "libx264",
     "export_quality_crf": 23,
     "export_resolution": "source",
     "export_include_audio": true,
@@ -210,5 +113,20 @@
     "export_file_template": "{event}_{index}_{time}",
     "export_padding_before": 0.0,
     "export_padding_after": 0.0,
-    "export_auto_open": true
+    "export_auto_open": true,
+    "window_geometry": {
+        "x": 0,
+        "y": 23,
+        "width": 2560,
+        "height": 1369,
+        "maximized": true,
+        "main_splitter": [
+            764,
+            327
+        ],
+        "top_splitter": [
+            1479,
+            1055
+        ]
+    }
 }

@@ -1,9 +1,11 @@
 """
 Instance Edit Controller - manages segment editing operations.
+CHANGED: добавлена поддержка undo/redo для сессии редактирования.
 """
 
 from __future__ import annotations
 
+import copy
 from typing import Optional, List, Tuple
 
 from PySide6.QtCore import QObject, Signal, QTimer
@@ -12,7 +14,40 @@ from PySide6.QtGui import QPixmap
 from models.domain.marker import Marker
 from utils.time_utils import frames_to_time
 from services.events.custom_event_manager import get_custom_event_manager, CustomEventManager
+from services.history.command_interface import Command
+from services.history import get_history_manager
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Команда для undo сессии редактирования
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _InstanceEditCommand(Command):
+    """Команда для undo/redo целой сессии редактирования маркера.
+
+    Вся сессия (nudge in/out, смена типа, заметки) —
+    одна атомарная операция с точки зрения undo.
+    """
+
+    def __init__(self, project, marker_idx: int,
+                 old_marker: Marker, new_marker: Marker):
+        event_name = new_marker.event_name or "маркер"
+        super().__init__(f"Редактирование: {event_name}")
+        self._project = project
+        self._idx = marker_idx
+        self._old = old_marker
+        self._new = new_marker
+
+    def execute(self) -> None:
+        if 0 <= self._idx < len(self._project.markers):
+            self._project.update_marker(self._idx, self._new)
+
+    def undo(self) -> None:
+        if 0 <= self._idx < len(self._project.markers):
+            self._project.update_marker(self._idx, self._old)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 class InstanceEditController(QObject):
     """Controller for managing instance (segment) editing operations."""
@@ -49,8 +84,10 @@ class InstanceEditController(QObject):
 
         self.active_point: str = "in"
 
-        # Keep reference to edit window to prevent garbage collection
         self._edit_window = None
+
+        # CHANGED: для undo-отслеживания сессии редактирования
+        self._edit_original: Optional[Marker] = None
 
         if hasattr(self.playback_controller, "pixmap_changed"):
             self.playback_controller.pixmap_changed.connect(self._on_pixmap_changed)
@@ -65,20 +102,16 @@ class InstanceEditController(QObject):
 
         marker = markers[marker_idx]
 
-        # Build navigation list: all markers as (orig_idx, marker) pairs
         all_pairs = [(i, m) for i, m in enumerate(markers)]
 
-        # Find position in navigation list
         current_filtered_idx = 0
         for i, (orig_idx, m) in enumerate(all_pairs):
             if orig_idx == marker_idx:
                 current_filtered_idx = i
                 break
 
-        # Set marker for editing
         self.set_marker(marker, all_pairs, current_filtered_idx)
 
-        # Create and show edit window
         try:
             from views.windows.instance_edit import InstanceEditWindow
             self._edit_window = InstanceEditWindow(
@@ -93,9 +126,7 @@ class InstanceEditController(QObject):
             traceback.print_exc()
 
     def _on_external_marker_update(self) -> None:
-        """Handle marker update from edit window."""
         self.marker_updated.emit()
-        # Refresh timeline
         if hasattr(self.main_controller, 'timeline_controller'):
             self.main_controller.timeline_controller.refresh_view()
 
@@ -107,14 +138,84 @@ class InstanceEditController(QObject):
         filtered_markers: Optional[List[Tuple[int, Marker]]] = None,
         current_idx: int = 0
     ) -> None:
+        # CHANGED: зафиксировать предыдущую правку в истории
+        self._commit_edit_to_history()
+
         self.marker = marker
         self.filtered_markers = filtered_markers or []
         self.current_marker_idx = current_idx
+
+        # CHANGED: сохранить оригинальное состояние для undo
+        self._edit_original = copy.deepcopy(marker)
+
         self.seek_to_frame(marker.start_frame)
         self.timeline_range_changed.emit(marker.start_frame, marker.end_frame)
 
     def get_marker(self) -> Optional[Marker]:
         return self.marker
+
+    # ─── CHANGED: Undo-интеграция ───
+
+    def _find_marker_index(self) -> int:
+        """Найти текущий индекс редактируемого маркера в проекте."""
+        if self.marker is None:
+            return -1
+        markers = self.main_controller.project.markers
+        # Быстрая проверка по ссылке
+        try:
+            return markers.index(self.marker)
+        except ValueError:
+            pass
+        # Fallback: по id
+        for i, m in enumerate(markers):
+            if m.id == self.marker.id:
+                return i
+        return -1
+
+    def _has_marker_changed(self) -> bool:
+        """Проверить, изменился ли маркер с начала сессии."""
+        if self._edit_original is None or self.marker is None:
+            return False
+        return (
+            self.marker.start_frame != self._edit_original.start_frame
+            or self.marker.end_frame != self._edit_original.end_frame
+            or self.marker.event_name != self._edit_original.event_name
+            or self.marker.note != self._edit_original.note
+        )
+
+    def _commit_edit_to_history(self) -> None:
+        """Зафиксировать текущую сессию редактирования в истории undo.
+
+        Вызывается при:
+          - навигации к другому маркеру (navigate_previous/next)
+          - закрытии редактора (cleanup)
+          - явном сохранении (save_changes)
+        """
+        if not self._has_marker_changed():
+            self._edit_original = None
+            return
+
+        marker_idx = self._find_marker_index()
+        if marker_idx < 0:
+            self._edit_original = None
+            return
+
+        # Копия текущего (уже изменённого) состояния
+        new_marker_copy = copy.deepcopy(self.marker)
+
+        cmd = _InstanceEditCommand(
+            self.main_controller.project,
+            marker_idx,
+            self._edit_original,      # состояние ДО редактирования
+            new_marker_copy,           # состояние ПОСЛЕ
+        )
+
+        # push_done_command: добавить в стек БЕЗ вызова execute(),
+        # т.к. изменение уже применено напрямую
+        history = get_history_manager()
+        history.push_done_command(cmd)
+
+        self._edit_original = None
 
     # ─── Video info ───
 
@@ -255,6 +356,8 @@ class InstanceEditController(QObject):
     def navigate_previous(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx <= 0:
             return False
+        # CHANGED: commit перед навигацией
+        self._commit_edit_to_history()
         self.request_save_marker.emit()
         prev_idx = self.current_marker_idx - 1
         _, prev_marker = self.filtered_markers[prev_idx]
@@ -264,6 +367,8 @@ class InstanceEditController(QObject):
     def navigate_next(self) -> bool:
         if not self.filtered_markers or self.current_marker_idx >= len(self.filtered_markers) - 1:
             return False
+        # CHANGED: commit перед навигацией
+        self._commit_edit_to_history()
         self.request_save_marker.emit()
         next_idx = self.current_marker_idx + 1
         _, next_marker = self.filtered_markers[next_idx]
@@ -287,6 +392,8 @@ class InstanceEditController(QObject):
             self.marker_updated.emit()
 
     def save_changes(self) -> None:
+        # CHANGED: commit перед сохранением
+        self._commit_edit_to_history()
         self.request_save_marker.emit()
         self.marker_saved.emit()
         self.navigate_next()
@@ -318,6 +425,8 @@ class InstanceEditController(QObject):
     # ─── Cleanup ───
 
     def cleanup(self) -> None:
+        # CHANGED: commit при закрытии редактора
+        self._commit_edit_to_history()
         self._pause_playback()
         if self._edit_window:
             try:
@@ -326,4 +435,5 @@ class InstanceEditController(QObject):
                 pass
             self._edit_window = None
         self.marker = None
+        self._edit_original = None
         self.filtered_markers.clear()

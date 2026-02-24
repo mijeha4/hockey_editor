@@ -1,6 +1,3 @@
-"""History System - паттерн Command для Undo/Redo."""
+from services.history.history_manager import HistoryManager, get_history_manager
 
-from .command_interface import Command
-from .history_manager import HistoryManager
-
-__all__ = ['Command', 'HistoryManager']
+__all__ = ["HistoryManager", "get_history_manager"]

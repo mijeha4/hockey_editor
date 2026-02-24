@@ -1,3 +1,4 @@
+# src/views/windows/main_window.py
 from __future__ import annotations
 
 from pathlib import Path
@@ -5,7 +6,7 @@ from typing import Optional, Set, TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSplitter,
-    QComboBox, QCheckBox, QPushButton, QMessageBox, QFrame
+    QComboBox, QCheckBox, QPushButton, QMessageBox, QFrame, QTabWidget
 )
 from PySide6.QtGui import QPixmap, QKeyEvent, QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtCore import Qt, Signal
@@ -16,9 +17,13 @@ from views.widgets.stats_widget import StatsWidget
 from views.widgets.timeline import TimelineWidget
 from views.styles import get_application_stylesheet
 from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
+from views.widgets.toast_notification import get_toast_manager, ToastManager
+from views.widgets.history_panel import HistoryPanel
 
 from services.serialization.settings_manager import get_settings_manager
 from services.events.custom_event_manager import get_custom_event_manager
+from services.history.history_manager import get_history_manager, HistoryManager
+from services.autosave.autosave_service import AutoSaveService
 
 if TYPE_CHECKING:
     from controllers.filter_controller import FilterController
@@ -51,6 +56,10 @@ class MainWindow(QMainWindow):
         self.event_manager = get_custom_event_manager()
         self.event_manager.setParent(self)
 
+        self.history_manager: HistoryManager = get_history_manager()
+        self._toast: Optional[ToastManager] = None
+        self._autosave: Optional[AutoSaveService] = None
+
         self.main_controller = None
         self.filter_controller: Optional["FilterController"] = None
         self._timeline_controller: Optional["TimelineController"] = None
@@ -62,7 +71,8 @@ class MainWindow(QMainWindow):
         self._filter_reset_btn: Optional[QPushButton] = None
         self._segments_header_label: Optional[QLabel] = None
         self._stats_widget: Optional[StatsWidget] = None
-        self._stats_toggle_btn: Optional[QPushButton] = None
+        self._history_panel: Optional[HistoryPanel] = None
+        self._right_tabs: Optional[QTabWidget] = None
 
         self.setWindowTitle("Хоккейный Редактор")
         self.setGeometry(0, 0, 1800, 1000)
@@ -79,6 +89,123 @@ class MainWindow(QMainWindow):
         self._populate_event_filter_combo()
         self.event_manager.events_changed.connect(self._populate_event_filter_combo)
 
+        # Toast-уведомления для undo/redo
+        self.history_manager.command_undone.connect(
+            lambda desc: self.toast.info(f"↩ Отмена: {desc}", duration_ms=2000)
+        )
+        self.history_manager.command_redone.connect(
+            lambda desc: self.toast.info(f"↪ Повтор: {desc}", duration_ms=2000)
+        )
+
+        # Dirty tracking
+        self.history_manager.state_changed.connect(self._on_history_changed)
+
+        # Авто-сохранение
+        self._init_autosave()
+
+        # Восстановить геометрию окна
+        self._restore_window_geometry()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Toast manager (lazy property)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @property
+    def toast(self) -> ToastManager:
+        if self._toast is None:
+            self._toast = get_toast_manager(self)
+        return self._toast
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Auto-save
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _init_autosave(self) -> None:
+        settings = self.settings_manager.load_autosave_settings()
+
+        self._autosave = AutoSaveService(
+            interval_ms=settings["interval_minutes"] * 60 * 1000,
+            max_backups=settings["max_backups"],
+            parent=self,
+        )
+        self._autosave.enabled = settings["enabled"]
+
+        self._autosave.auto_saved.connect(
+            lambda path: self.toast.success(
+                "Авто-сохранение выполнено", duration_ms=2000
+            )
+        )
+        self._autosave.auto_save_failed.connect(
+            lambda err: self.toast.error(f"Ошибка авто-сохранения: {err}")
+        )
+
+        if settings["enabled"]:
+            self._autosave.start()
+
+    def set_autosave_callback(self, callback) -> None:
+        if self._autosave:
+            self._autosave.set_save_callback(callback)
+
+    def set_autosave_project_dir(self, directory: str) -> None:
+        if self._autosave:
+            self._autosave.project_dir = directory
+
+    def _on_history_changed(self) -> None:
+        if self._autosave:
+            self._autosave.mark_dirty()
+        self._update_title_modified_indicator()
+
+    def _update_title_modified_indicator(self) -> None:
+        title = self.windowTitle()
+        has_star = title.startswith("* ")
+        if self.history_manager.is_modified and not has_star:
+            self.setWindowTitle(f"* {title}")
+        elif not self.history_manager.is_modified and has_star:
+            self.setWindowTitle(title[2:])
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Window geometry persistence
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _save_window_geometry(self) -> None:
+        geo = self.geometry()
+        data = {
+            "x": geo.x(),
+            "y": geo.y(),
+            "width": geo.width(),
+            "height": geo.height(),
+            "maximized": self.isMaximized(),
+            "main_splitter": self.main_splitter.sizes(),
+            "top_splitter": self.top_splitter.sizes(),
+            "active_tab": self._right_tabs.currentIndex() if self._right_tabs else 0,
+        }
+        self.settings_manager.save_window_geometry(data)
+
+    def _restore_window_geometry(self) -> None:
+        data = self.settings_manager.load_window_geometry()
+        if not data:
+            return
+        try:
+            if data.get("maximized"):
+                self.showMaximized()
+            else:
+                self.setGeometry(
+                    data.get("x", 0),
+                    data.get("y", 0),
+                    data.get("width", 1800),
+                    data.get("height", 1000),
+                )
+            if "main_splitter" in data:
+                self.main_splitter.setSizes(data["main_splitter"])
+            if "top_splitter" in data:
+                self.top_splitter.setSizes(data["top_splitter"])
+            if "active_tab" in data and self._right_tabs:
+                tab_idx = data["active_tab"]
+                if 0 <= tab_idx < self._right_tabs.count():
+                    self._right_tabs.setCurrentIndex(tab_idx)
+        except Exception as e:
+            print(f"Error restoring window geometry: {e}")
+
     # ──────────────────────────────────────────────────────────────────────────
     # UI building
     # ──────────────────────────────────────────────────────────────────────────
@@ -87,6 +214,7 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         menubar.clear()
 
+        # ── Файл ──
         file_menu = menubar.addMenu("Файл")
 
         action_new = file_menu.addAction("Новый проект")
@@ -109,6 +237,27 @@ class MainWindow(QMainWindow):
         action_exit = file_menu.addAction("Выход")
         action_exit.triggered.connect(self.close)
 
+        # ── Редактирование (Undo/Redo) ──
+        edit_menu = menubar.addMenu("Редактирование")
+
+        self._action_undo = edit_menu.addAction("↩ Отменить")
+        self._action_undo.setShortcut("Ctrl+Z")
+        self._action_undo.triggered.connect(self._on_undo)
+        self._action_undo.setEnabled(False)
+
+        self._action_redo = edit_menu.addAction("↪ Повторить")
+        self._action_redo.setShortcut("Ctrl+Y")
+        self._action_redo.triggered.connect(self._on_redo)
+        self._action_redo.setEnabled(False)
+
+        edit_menu.addSeparator()
+
+        action_clear_history = edit_menu.addAction("Очистить историю")
+        action_clear_history.triggered.connect(self._on_clear_history)
+
+        self.history_manager.state_changed.connect(self._update_undo_redo_menu)
+
+        # ── Остальное ──
         action_preview = menubar.addAction("Предпросмотр")
         action_preview.setShortcut("Ctrl+P")
         action_preview.triggered.connect(self.open_preview_triggered.emit)
@@ -159,52 +308,106 @@ class MainWindow(QMainWindow):
         self.video_label.setStyleSheet("background-color: black;")
         video_layout.addWidget(self.video_label, 1)
 
-        # Tracking overlay (поверх видео) — создаём только если модуль существует
         self.tracking_overlay = None
         try:
             from views.widgets.tracking_overlay import TrackingOverlay
             self.tracking_overlay = TrackingOverlay(self.video_label)
             self.tracking_overlay.setGeometry(self.video_label.rect())
         except ImportError:
-            pass  # Модуль трекинга не установлен — пропускаем
+            pass
 
         self.player_controls = PlayerControls()
         video_layout.addWidget(self.player_controls, 0, Qt.AlignBottom)
 
         self.top_splitter.addWidget(video_container)
 
-        # ── Right panel: segment list + stats ──
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(2)
+        # ══════════════════════════════════════════════════════════════════════
+        # CHANGED: Правая панель — QTabWidget вместо вертикального стека
+        # ══════════════════════════════════════════════════════════════════════
 
-        # Заголовок с счётчиком сегментов
+        self._right_tabs = QTabWidget()
+        self._right_tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #444444;
+                background-color: #2a2a2a;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #1e1e1e;
+                color: #aaaaaa;
+                border: 1px solid #444444;
+                border-bottom: none;
+                padding: 6px 14px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                background-color: #2a2a2a;
+                color: #ffffff;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #333333;
+                color: #ffffff;
+            }
+            QTabBar::tab:!selected {
+                margin-top: 2px;
+            }
+        """)
+
+        # ── Tab 0: Маркеры ──
+        markers_tab = QWidget()
+        markers_layout = QVBoxLayout(markers_tab)
+        markers_layout.setContentsMargins(4, 4, 4, 4)
+        markers_layout.setSpacing(2)
+
         self._segments_header_label = QLabel("Отрезки:")
         self._segments_header_label.setStyleSheet(
             "color: #ffffff; font-weight: bold; font-size: 12px;"
         )
-        right_layout.addWidget(self._segments_header_label)
+        markers_layout.addWidget(self._segments_header_label)
 
-        self._setup_filters(right_layout)
+        self._setup_filters(markers_layout)
 
-        # Segment list
         self.segment_list_widget = SegmentListWidget()
-        right_layout.addWidget(self.segment_list_widget, 1)
+        markers_layout.addWidget(self.segment_list_widget, 1)
 
-        # Статистика (сворачиваемая)
-        self._setup_stats_panel(right_layout)
+        self._right_tabs.addTab(markers_tab, "📋 Маркеры")
 
-        # Tracking panel — создаём только если модуль существует
+        # ── Tab 1: Статистика ──
+        stats_tab = QWidget()
+        stats_layout = QVBoxLayout(stats_tab)
+        stats_layout.setContentsMargins(4, 4, 4, 4)
+        stats_layout.setSpacing(0)
+
+        self._stats_widget = StatsWidget()
+        stats_layout.addWidget(self._stats_widget, 1)
+
+        self._right_tabs.addTab(stats_tab, "📊 Статистика")
+
+        # ── Tab 2: История ──
+        history_tab = QWidget()
+        history_layout = QVBoxLayout(history_tab)
+        history_layout.setContentsMargins(4, 4, 4, 4)
+        history_layout.setSpacing(0)
+
+        self._history_panel = HistoryPanel(self.history_manager)
+        history_layout.addWidget(self._history_panel, 1)
+
+        self._right_tabs.addTab(history_tab, "📜 История")
+
+        # ── Tab 3: Трекинг (optional) ──
         self._tracking_panel = None
         try:
             from views.widgets.tracking_panel import TrackingPanel
             self._tracking_panel = TrackingPanel()
-            right_layout.addWidget(self._tracking_panel)
+            self._right_tabs.addTab(self._tracking_panel, "🎯 Трекинг")
         except ImportError:
-            pass  # Модуль трекинга не установлен — пропускаем
+            pass
 
-        self.top_splitter.addWidget(right_panel)
+        self.top_splitter.addWidget(self._right_tabs)
         self.top_splitter.setSizes([600, 400])
 
         self.main_splitter.addWidget(self.top_splitter)
@@ -244,68 +447,69 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(bottom_layout)
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Stats panel
+    # Undo / Redo / Clear actions
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _setup_stats_panel(self, parent_layout: QVBoxLayout) -> None:
-        """Создать сворачиваемую панель статистики."""
-        # Кнопка-заголовок для сворачивания
-        toggle_layout = QHBoxLayout()
-        toggle_layout.setContentsMargins(0, 4, 0, 0)
-        toggle_layout.setSpacing(4)
-
-        self._stats_toggle_btn = QPushButton("▼ Statistics")
-        self._stats_toggle_btn.setFixedHeight(22)
-        self._stats_toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1e1e1e;
-                color: #aaaaaa;
-                border: 1px solid #444444;
-                border-radius: 3px;
-                text-align: left;
-                padding: 2px 8px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #333333;
-                color: #ffffff;
-            }
-        """)
-        self._stats_toggle_btn.clicked.connect(self._toggle_stats)
-        toggle_layout.addWidget(self._stats_toggle_btn)
-
-        parent_layout.addLayout(toggle_layout)
-
-        # Виджет статистики
-        self._stats_widget = StatsWidget()
-        self._stats_widget.setVisible(True)
-        parent_layout.addWidget(self._stats_widget, 0)  # stretch=0
-
-    def _toggle_stats(self) -> None:
-        """Свернуть/развернуть панель статистики."""
-        if not self._stats_widget or not self._stats_toggle_btn:
-            return
-
-        is_visible = self._stats_widget.isVisible()
-        self._stats_widget.setVisible(not is_visible)
-
-        if is_visible:
-            self._stats_toggle_btn.setText("▶ Statistics")
+    def _on_undo(self) -> None:
+        if self._timeline_controller:
+            self._timeline_controller.undo()
+        elif self.history_manager.can_undo:
+            self.history_manager.undo()
         else:
-            self._stats_toggle_btn.setText("▼ Statistics")
+            self.toast.warning("Нечего отменять")
+
+    def _on_redo(self) -> None:
+        if self._timeline_controller:
+            self._timeline_controller.redo()
+        elif self.history_manager.can_redo:
+            self.history_manager.redo()
+        else:
+            self.toast.warning("Нечего повторять")
+
+    def _on_clear_history(self) -> None:
+        self.history_manager.clear()
+        self.toast.info("История очищена")
+
+    def _update_undo_redo_menu(self) -> None:
+        self._action_undo.setEnabled(self.history_manager.can_undo)
+        self._action_redo.setEnabled(self.history_manager.can_redo)
+
+        if self.history_manager.can_undo:
+            self._action_undo.setText(f"↩ Отменить: {self.history_manager.undo_text}")
+        else:
+            self._action_undo.setText("↩ Отменить")
+
+        if self.history_manager.can_redo:
+            self._action_redo.setText(f"↪ Повторить: {self.history_manager.redo_text}")
+        else:
+            self._action_redo.setText("↪ Повторить")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Stats
+    # ──────────────────────────────────────────────────────────────────────────
 
     def _update_stats(self) -> None:
-        """Обновить данные статистики из текущих маркеров."""
         if not self._stats_widget:
             return
-
         if not self._timeline_controller:
             self._stats_widget.clear()
             return
-
         all_markers = self._timeline_controller.markers
         self._stats_widget.set_markers(all_markers)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Markers tab title badge
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _update_markers_tab_title(self) -> None:
+        """Обновить заголовок вкладки маркеров с количеством."""
+        if not self._right_tabs or not self._timeline_controller:
+            return
+        total = len(self._timeline_controller.markers)
+        if total > 0:
+            self._right_tabs.setTabText(0, f"📋 Маркеры ({total})")
+        else:
+            self._right_tabs.setTabText(0, "📋 Маркеры")
 
     # ──────────────────────────────────────────────────────────────────────────
     # MVC integration
@@ -322,10 +526,17 @@ class MainWindow(QMainWindow):
 
         self._on_filters_changed()
 
+        if hasattr(controller, "save_project_silent"):
+            self.set_autosave_callback(controller.save_project_silent)
+
     def set_timeline_controller(self, controller) -> None:
         self._timeline_controller = controller
 
-        self.timeline_widget = TimelineWidget(controller) if self._ctor_accepts_controller() else TimelineWidget()
+        self.timeline_widget = (
+            TimelineWidget(controller)
+            if self._ctor_accepts_controller()
+            else TimelineWidget()
+        )
         if hasattr(self.timeline_widget, "set_controller"):
             self.timeline_widget.set_controller(controller)
 
@@ -335,16 +546,15 @@ class MainWindow(QMainWindow):
         if hasattr(controller, "set_main_window"):
             controller.set_main_window(self)
 
-        # === НОВОЕ: Подключить обновление статистики к сигналу маркеров ===
         if hasattr(controller, "markers_changed"):
             controller.markers_changed.connect(self._update_stats)
+            controller.markers_changed.connect(self._update_markers_tab_title)
 
-        # Установить FPS для статистики
         if self._stats_widget and hasattr(controller, "fps"):
             self._stats_widget.set_fps(controller.fps)
 
-        # Начальное обновление
         self._update_stats()
+        self._update_markers_tab_title()
 
     def _ctor_accepts_controller(self) -> bool:
         try:
@@ -371,7 +581,9 @@ class MainWindow(QMainWindow):
         self.event_filter_combo = QComboBox()
         self.event_filter_combo.setToolTip("Фильтр по типу события")
         self.event_filter_combo.setMaximumWidth(140)
-        self.event_filter_combo.currentIndexChanged.connect(self._on_event_filter_changed)
+        self.event_filter_combo.currentIndexChanged.connect(
+            self._on_event_filter_changed
+        )
         row.addWidget(self.event_filter_combo)
 
         self.notes_filter_checkbox = QCheckBox("Заметки")
@@ -396,14 +608,11 @@ class MainWindow(QMainWindow):
     def _populate_event_filter_combo(self) -> None:
         if not self.event_filter_combo:
             return
-
         self.event_filter_combo.blockSignals(True)
         self.event_filter_combo.clear()
         self.event_filter_combo.addItem("Все", None)
-
         for event in self.event_manager.get_all_events():
             self.event_filter_combo.addItem(event.get_localized_name(), event.name)
-
         self.event_filter_combo.blockSignals(False)
 
     def _on_event_filter_changed(self, index: int = 0) -> None:
@@ -425,7 +634,8 @@ class MainWindow(QMainWindow):
         self._sync_filter_ui_with_controller()
         self._update_segment_list_with_filters()
         self._update_filter_indicator()
-        self._update_stats()  # === НОВОЕ: обновить статистику при изменении фильтров ===
+        self._update_stats()
+        self._update_markers_tab_title()
 
     def _sync_filter_ui_with_controller(self) -> None:
         if not self.filter_controller:
@@ -454,7 +664,6 @@ class MainWindow(QMainWindow):
     def _update_segment_list_with_filters(self) -> None:
         if not self.filter_controller or not self._timeline_controller:
             return
-
         all_markers = self._timeline_controller.markers
         segments_with_idx = self.filter_controller.filter_markers(all_markers)
         self.segment_list_widget.set_segments(segments_with_idx)
@@ -464,7 +673,6 @@ class MainWindow(QMainWindow):
             return
 
         is_filtered = self.filter_controller.has_active_filters
-
         total = 0
         filtered = 0
 
@@ -478,9 +686,7 @@ class MainWindow(QMainWindow):
 
         if self._segments_header_label:
             if is_filtered:
-                self._segments_header_label.setText(
-                    f"Отрезки: {filtered} из {total}"
-                )
+                self._segments_header_label.setText(f"Отрезки: {filtered} из {total}")
                 self._segments_header_label.setStyleSheet(
                     "color: #ff9900; font-weight: bold; font-size: 12px;"
                 )
@@ -553,6 +759,16 @@ class MainWindow(QMainWindow):
             return
 
         key = event.key()
+        modifiers = event.modifiers()
+
+        if modifiers == Qt.ControlModifier:
+            if key == Qt.Key.Key_Z:
+                self._on_undo()
+                return
+            elif key == Qt.Key.Key_Y:
+                self._on_redo()
+                return
+
         if Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
             self.key_pressed.emit(chr(key).upper())
             return
@@ -590,27 +806,80 @@ class MainWindow(QMainWindow):
     def get_stats_widget(self) -> Optional[StatsWidget]:
         return self._stats_widget
 
+    def get_history_panel(self) -> Optional[HistoryPanel]:
+        return self._history_panel
+
     def set_window_title(self, title: str) -> None:
         self.setWindowTitle(f"Hockey Editor - {title}" if title else "Hockey Editor")
 
-    def update_mode_indicator(self, recording_mode: str, fixed_duration: int, pre_roll: float, post_roll: float) -> None:
+    def update_mode_indicator(
+        self,
+        recording_mode: str,
+        fixed_duration: int,
+        pre_roll: float,
+        post_roll: float,
+    ) -> None:
         if recording_mode == "fixed_length":
             mode_text = "Режим: Фиксированная длина"
-            params_text = f"Длительность: {fixed_duration}с | Pre-roll: {pre_roll}с | Post-roll: {post_roll}с"
+            params_text = (
+                f"Длительность: {fixed_duration}с | "
+                f"Pre-roll: {pre_roll}с | Post-roll: {post_roll}с"
+            )
         else:
             mode_text = "Режим: Динамический"
             params_text = f"Pre-roll: {pre_roll}с | Post-roll: {post_roll}с"
         self.mode_indicator.setText(f"{mode_text} | {params_text}")
 
     def open_segment_editor(self, marker_idx: int) -> None:
-        if self.main_controller and hasattr(self.main_controller, 'open_segment_editor'):
+        if self.main_controller and hasattr(self.main_controller, "open_segment_editor"):
             self.main_controller.open_segment_editor(marker_idx)
 
+    # ── Convenience toast methods ──
+
+    def show_toast_success(self, message: str, **kw) -> None:
+        self.toast.success(message, **kw)
+
+    def show_toast_error(self, message: str, **kw) -> None:
+        self.toast.error(message, **kw)
+
+    def show_toast_warning(self, message: str, **kw) -> None:
+        self.toast.warning(message, **kw)
+
+    def show_toast_info(self, message: str, **kw) -> None:
+        self.toast.info(message, **kw)
+
+    # ── Переключение на вкладку ──
+
+    def switch_to_tab(self, tab_name: str) -> None:
+        """Программно переключиться на вкладку по ключевому слову."""
+        if not self._right_tabs:
+            return
+        tab_map = {
+            "markers": 0, "маркеры": 0,
+            "stats": 1, "статистика": 1,
+            "history": 2, "история": 2,
+            "tracking": 3, "трекинг": 3,
+        }
+        idx = tab_map.get(tab_name.lower())
+        if idx is not None and idx < self._right_tabs.count():
+            self._right_tabs.setCurrentIndex(idx)
+
     # ──────────────────────────────────────────────────────────────────────────
-    # Close event
+    # Close event — FIX: убрана дублирующая проверка несохранённых изменений.
+    # Проверка остаётся ТОЛЬКО в MainController._on_window_closing()
     # ──────────────────────────────────────────────────────────────────────────
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        # Остановить авто-сохранение
+        if self._autosave:
+            self._autosave.stop()
+
+        # Сохранить геометрию окна
+        self._save_window_geometry()
+
+        # Делегировать проверку несохранённых изменений контроллеру
+        # (MainController._on_window_closing покажет диалог, если нужно)
         self.window_closing.emit(event)
+
         if event.isAccepted():
             super().closeEvent(event)

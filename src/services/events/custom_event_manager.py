@@ -85,9 +85,29 @@ class CustomEventManager(QObject):
 
     def get_all_events(self) -> List[CustomEventType]:
         merged: Dict[str, CustomEventType] = {e.name: e for e in self.DEFAULT_EVENTS}
-        # FIX: Apply overrides for default events (e.g. rebound shortcuts)
+        # Apply overrides for default events
         merged.update(self._default_overrides)
         merged.update(self._custom_events)
+
+        # ── Plugin integration: добавить события из плагинов ──
+        try:
+            from plugins.registry import get_plugin_registry
+            registry = get_plugin_registry()
+            for plugin in registry.get_event_plugins():
+                for event_data in plugin.get_event_types():
+                    name = event_data.get("name", "")
+                    if name and name not in merged:
+                        merged[name] = CustomEventType(
+                            name=name,
+                            color=event_data.get("color", "#CCCCCC"),
+                            shortcut=event_data.get("shortcut", ""),
+                            description=event_data.get("description", ""),
+                        )
+        except ImportError:
+            pass  # Plugin system not available
+        except Exception as e:
+            print(f"Plugin event integration error: {e}")
+
         return sorted(merged.values(), key=lambda e: e.name)
 
     def get_event(self, name: str) -> Optional[CustomEventType]:

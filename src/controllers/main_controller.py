@@ -12,7 +12,7 @@ from PySide6.QtGui import QPixmap
 from models.domain.project import Project
 from models.config.app_settings import AppSettings
 from services.video_engine import VideoService
-from services.history import HistoryManager
+from services.history import HistoryManager, get_history_manager
 from services.serialization import ProjectIO
 
 from views.windows.main_window import MainWindow
@@ -39,6 +39,7 @@ except ImportError:
 
 from controllers.tracking_controller import TrackingController
 
+
 class MainController(QObject):
     markers_changed = Signal()
     playback_time_changed = Signal(int)
@@ -53,7 +54,9 @@ class MainController(QObject):
 
         # ─── Services ───
         self.video_service = VideoService()
-        self.history_manager = HistoryManager()
+        # CHANGED: используем singleton, чтобы main_window и контроллеры
+        # разделяли один и тот же экземпляр (сигналы будут работать)
+        self.history_manager = get_history_manager()
         self.project_io = ProjectIO()
 
         # ─── View ───
@@ -121,6 +124,10 @@ class MainController(QObject):
         if hasattr(self.main_window, "window_closing"):
             self.main_window.window_closing.connect(self._on_window_closing)
 
+        # CHANGED: передать callback авто-сохранения
+        if hasattr(self.main_window, "set_autosave_callback"):
+            self.main_window.set_autosave_callback(self.save_project_silent)
+
         if self.autosave_manager:
             self.autosave_manager.start()
 
@@ -182,11 +189,15 @@ class MainController(QObject):
             segment_list.segment_edit_requested.connect(self._on_segment_edit)
             segment_list.segment_delete_requested.connect(self._on_segment_delete)
 
-            # === НОВОЕ: Групповые действия из segment_list ===
-            segment_list.batch_delete_requested.connect(self._on_batch_delete)
-            segment_list.batch_change_type_requested.connect(self._on_batch_change_type)
-            segment_list.batch_export_requested.connect(self._on_batch_export)
-            segment_list.batch_duplicate_requested.connect(self._on_batch_duplicate)
+            # Групповые действия
+            if hasattr(segment_list, "batch_delete_requested"):
+                segment_list.batch_delete_requested.connect(self._on_batch_delete)
+            if hasattr(segment_list, "batch_change_type_requested"):
+                segment_list.batch_change_type_requested.connect(self._on_batch_change_type)
+            if hasattr(segment_list, "batch_export_requested"):
+                segment_list.batch_export_requested.connect(self._on_batch_export)
+            if hasattr(segment_list, "batch_duplicate_requested"):
+                segment_list.batch_duplicate_requested.connect(self._on_batch_duplicate)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Window lifecycle
@@ -238,13 +249,19 @@ class MainController(QObject):
 
     def _on_segment_delete(self, marker_idx: int) -> None:
         self.delete_marker(marker_idx)
+        # CHANGED: toast с кнопкой Undo
+        if hasattr(self.main_window, "toast"):
+            self.main_window.toast.warning(
+                "Маркер удалён",
+                action_text="Отмена",
+                action_callback=lambda: self.timeline_controller.undo(),
+            )
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Segment list actions — ГРУППОВЫЕ (NEW)
+    # Segment list actions — ГРУППОВЫЕ
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_batch_delete(self, marker_indices: List[int]) -> None:
-        """Удалить несколько маркеров одной операцией."""
         if not marker_indices:
             return
 
@@ -262,16 +279,21 @@ class MainController(QObject):
         if reply == QMessageBox.StandardButton.Yes:
             self.timeline_controller.batch_delete_markers(marker_indices)
             self.project_controller.mark_as_modified()
+            # CHANGED: toast
+            if hasattr(self.main_window, "toast"):
+                self.main_window.toast.warning(
+                    f"Удалено {count} маркеров",
+                    action_text="Отмена",
+                    action_callback=lambda: self.timeline_controller.undo(),
+                )
 
     def _on_batch_change_type(self, marker_indices: List[int], new_event_name: str) -> None:
-        """Изменить тип события для нескольких маркеров."""
         if not marker_indices or not new_event_name:
             return
         self.timeline_controller.batch_change_event_type(marker_indices, new_event_name)
         self.project_controller.mark_as_modified()
 
     def _on_batch_export(self, marker_indices: List[int]) -> None:
-        """Экспортировать выбранные клипы с пресетом выделения."""
         if not marker_indices:
             return
         video_path = getattr(self.project, "video_path", "")
@@ -287,7 +309,6 @@ class MainController(QObject):
         self.export_controller.show_dialog(preselected_ids=preselected_ids)
 
     def _on_batch_duplicate(self, marker_indices: List[int]) -> None:
-        """Дублировать несколько маркеров."""
         if not marker_indices:
             return
         self.timeline_controller.batch_duplicate_markers(marker_indices)
@@ -342,6 +363,7 @@ class MainController(QObject):
         elif key == "CANCEL":
             self.playback_controller.cancel_recording()
         elif key == "UNDO":
+            # CHANGED: через timeline_controller для refresh_view
             self.timeline_controller.undo()
         elif key == "REDO":
             self.timeline_controller.redo()
@@ -395,6 +417,16 @@ class MainController(QObject):
             self.timeline_controller.init_tracks(total_frames)
 
             self.main_window.set_window_title(path.split("/")[-1])
+
+            # CHANGED: toast
+            if hasattr(self.main_window, "show_toast_success"):
+                self.main_window.show_toast_success(
+                    f"Видео загружено: {path.split('/')[-1]}", duration_ms=2000
+                )
+        else:
+            if hasattr(self.main_window, "show_toast_error"):
+                self.main_window.show_toast_error("Не удалось загрузить видео")
+
         return success
 
     def _on_open_video(self) -> None:
@@ -413,19 +445,30 @@ class MainController(QObject):
 
     def _on_save_project(self) -> None:
         from PySide6.QtWidgets import QFileDialog
+
+        success = False
+
         if getattr(self.project, "file_path", None):
-            self.project_controller.save_project(self.project.file_path)
-            return
-        file_path, _ = QFileDialog.getSaveFileName(
-            self.main_window, "Save Project", "project.hep",
-            "Project Files (*.hep);;All Files (*)"
-        )
-        if file_path:
-            if not file_path.endswith(".hep"):
-                file_path += ".hep"
-            success = self.project_controller.save_project(file_path)
-            if success:
-                self.project.file_path = file_path
+            success = self.project_controller.save_project(self.project.file_path)
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self.main_window, "Save Project", "project.hep",
+                "Project Files (*.hep);;All Files (*)"
+            )
+            if file_path:
+                if not file_path.endswith(".hep"):
+                    file_path += ".hep"
+                success = self.project_controller.save_project(file_path)
+                if success:
+                    self.project.file_path = file_path
+
+        # CHANGED: toast + mark_saved после сохранения
+        if success:
+            self.history_manager.mark_saved()
+            if hasattr(self.main_window, "show_toast_success"):
+                self.main_window.show_toast_success("Проект сохранён")
+        elif hasattr(self.main_window, "show_toast_error"):
+            self.main_window.show_toast_error("Не удалось сохранить проект")
 
     def _on_load_project(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -437,15 +480,25 @@ class MainController(QObject):
             return
         loaded_project = self.project_controller.load_project(file_path)
         if not loaded_project:
+            if hasattr(self.main_window, "show_toast_error"):
+                self.main_window.show_toast_error("Не удалось загрузить проект")
             return
+
         self.project = loaded_project
         self.project.file_path = file_path
         self.project_controller.current_project = self.project
         self.timeline_controller.project = self.project
         self.timeline_controller.refresh_view()
+
+        # CHANGED: очистить историю при загрузке нового проекта
+        self.history_manager.clear()
+
         if getattr(self.project, "video_path", None):
             self.load_video(self.project.video_path)
         self.main_window.set_window_title(f"{self.project.name} - {file_path.split('/')[-1]}")
+
+        if hasattr(self.main_window, "show_toast_success"):
+            self.main_window.show_toast_success("Проект загружен")
 
     def _on_new_project(self) -> None:
         if self.project_controller.has_unsaved_changes():
@@ -474,7 +527,8 @@ class MainController(QObject):
         self.playback_controller.playing = False
         self.main_window.set_video_image(QPixmap())
         self.main_window.set_window_title("Untitled")
-        self.history_manager.clear_history()
+        # CHANGED: clear() вместо clear_history()
+        self.history_manager.clear()
         self.filter_controller.reset_all_filters()
 
     def _create_new_project_in_new_window(self) -> None:
@@ -555,6 +609,28 @@ class MainController(QObject):
         if self._custom_event_controller is None:
             self._custom_event_controller = CustomEventController()
         return self._custom_event_controller
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Silent save (для auto-save)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def save_project_silent(self) -> bool:
+        """Тихое сохранение для авто-сохранения (без диалогов).
+
+        Возвращает:
+            True  — если сохранение прошло успешно ИЛИ нечего сохранять
+            False — если произошла ошибка при сохранении
+        """
+        try:
+            file_path = getattr(self.project, "file_path", None)
+            if not file_path:
+                # Проект ещё ни разу не сохранён — это не ошибка,
+                # просто пропускаем (нет куда сохранять)
+                return True
+            return self.project_controller.save_project(file_path)
+        except Exception as e:
+            print(f"Auto-save error: {e}")
+            return False
 
     # ─────────────────────────────────────────────────────────────────────────
     # App lifecycle
