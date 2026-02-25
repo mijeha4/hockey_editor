@@ -19,6 +19,7 @@ from views.styles import get_application_stylesheet
 from views.widgets.event_shortcut_list_widget import EventShortcutListWidget
 from views.widgets.toast_notification import get_toast_manager, ToastManager
 from views.widgets.history_panel import HistoryPanel
+from views.widgets.video_progress_bar import VideoProgressBar
 
 from services.serialization.settings_manager import get_settings_manager
 from services.events.custom_event_manager import get_custom_event_manager
@@ -315,6 +316,10 @@ class MainWindow(QMainWindow):
             self.tracking_overlay.setGeometry(self.video_label.rect())
         except ImportError:
             pass
+
+        # ── YouTube-style progress bar ──
+        self.video_progress_bar = VideoProgressBar()
+        video_layout.addWidget(self.video_progress_bar, 0)
 
         self.player_controls = PlayerControls()
         video_layout.addWidget(self.player_controls, 0, Qt.AlignBottom)
@@ -778,8 +783,21 @@ class MainWindow(QMainWindow):
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
+            # ── Подсветить заглушку при drag ──
+            if hasattr(self, 'video_label') and hasattr(self.video_label, 'set_drag_hovering'):
+                self.video_label.set_drag_hovering(True)
+    
+    def dragLeaveEvent(self, event) -> None:
+        # ── Снять подсветку заглушки ──
+        if hasattr(self, 'video_label') and hasattr(self.video_label, 'set_drag_hovering'):
+            self.video_label.set_drag_hovering(False)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
+        # ── Снять подсветку заглушки ──
+        if hasattr(self, 'video_label') and hasattr(self.video_label, 'set_drag_hovering'):
+            self.video_label.set_drag_hovering(False)
+
         urls = event.mimeData().urls()
         if not urls:
             return
@@ -796,6 +814,9 @@ class MainWindow(QMainWindow):
 
     def get_player_controls(self) -> PlayerControls:
         return self.player_controls
+
+    def get_progress_bar(self) -> Optional[VideoProgressBar]:    # ← ДОБАВИТЬ
+        return getattr(self, 'video_progress_bar', None)
 
     def get_segment_list_widget(self) -> SegmentListWidget:
         return self.segment_list_widget

@@ -131,6 +131,8 @@ class MainController(QObject):
         if self.autosave_manager:
             self.autosave_manager.start()
 
+        self._connect_progress_bar()
+
         self.tracking_controller = TrackingController(self)
         self.tracking_controller.set_overlay(self.main_window.tracking_overlay)
         self.tracking_controller.set_panel(self.main_window._tracking_panel)
@@ -198,6 +200,52 @@ class MainController(QObject):
                 segment_list.batch_export_requested.connect(self._on_batch_export)
             if hasattr(segment_list, "batch_duplicate_requested"):
                 segment_list.batch_duplicate_requested.connect(self._on_batch_duplicate)
+
+        
+    def _connect_progress_bar(self) -> None:
+        """Подключить VideoProgressBar к PlaybackController."""
+        progress_bar = self.main_window.get_progress_bar()
+        if not progress_bar:
+            return
+
+        # Позиция → прогресс-бар
+        self.playback_controller.frame_changed.connect(progress_bar.set_current_frame)
+
+        # Клик/drag на прогресс-баре → seek
+        progress_bar.seek_requested.connect(self.playback_controller.seek_to_frame)
+
+        # Пауза при drag, возобновление при отпускании
+        self._was_playing_before_drag = False
+
+        def on_drag_start():
+            self._was_playing_before_drag = self.playback_controller.playing
+            if self.playback_controller.playing:
+                self.playback_controller.pause()
+                self.main_window.get_player_controls().set_playing_state(False)
+
+        def on_drag_end():
+            if self._was_playing_before_drag:
+                self.playback_controller.play()
+                self.main_window.get_player_controls().set_playing_state(True)
+
+        progress_bar.drag_started.connect(on_drag_start)
+        progress_bar.drag_ended.connect(on_drag_end)
+
+        # Пауза при drag, возобновление при отпускании
+        self._was_playing_before_drag = False
+
+        def on_drag_start():
+            self._was_playing_before_drag = self.playback_controller.playing
+            if self.playback_controller.playing:
+                self.playback_controller.pause()
+                self.player_controls.set_playing_state(False)
+
+        def on_drag_end():
+            if self._was_playing_before_drag:
+                self.playback_controller.play()
+                self.player_controls.set_playing_state(True)
+
+
 
     # ─────────────────────────────────────────────────────────────────────────
     # Window lifecycle
@@ -416,6 +464,12 @@ class MainController(QObject):
             self.timeline_controller.set_fps(fps)
             self.timeline_controller.init_tracks(total_frames)
 
+            # ── Обновить progress bar ──                          # ← ДОБАВИТЬ
+            progress_bar = self.main_window.get_progress_bar()     # ← ДОБАВИТЬ
+            if progress_bar:                                       # ← ДОБАВИТЬ
+                progress_bar.set_total_frames(total_frames)        # ← ДОБАВИТЬ
+                progress_bar.set_fps(fps)
+
             self.main_window.set_window_title(path.split("/")[-1])
 
             # CHANGED: toast
@@ -526,6 +580,11 @@ class MainController(QObject):
         self.playback_controller.current_frame = 0
         self.playback_controller.playing = False
         self.main_window.set_video_image(QPixmap())
+        # ── Сбросить progress bar ──                             # ← ДОБАВИТЬ
+        progress_bar = self.main_window.get_progress_bar()        # ← ДОБАВИТЬ
+        if progress_bar:                                          # ← ДОБАВИТЬ
+            progress_bar.set_total_frames(0)                      # ← ДОБАВИТЬ
+            progress_bar.set_current_frame(0)
         self.main_window.set_window_title("Untitled")
         # CHANGED: clear() вместо clear_history()
         self.history_manager.clear()

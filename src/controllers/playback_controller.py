@@ -69,6 +69,7 @@ class PlaybackController(QObject):
             self._display_current_frame()
 
             self.pause()
+            self._update_time_display()  # ← ДОБАВИТЬ
             return True
         except Exception as e:
             print(f"Error loading video: {e}")
@@ -99,6 +100,7 @@ class PlaybackController(QObject):
             self.seek_update_timer.stop()
         self.seek_update_timer.start(30)
 
+        self._update_time_display()  # ← ДОБАВИТЬ
         self.frame_changed.emit(self.current_frame)
 
     def seek_to_frame_immediate(self, frame_idx: int) -> None:
@@ -166,6 +168,7 @@ class PlaybackController(QObject):
 
         self.player_controls.set_current_frame(self.current_frame)
         self._display_current_frame()
+        self._update_time_display()  # ← ДОБАВИТЬ
         self.frame_changed.emit(self.current_frame)
 
     def _display_current_frame(self) -> None:
@@ -184,6 +187,8 @@ class PlaybackController(QObject):
             self._last_pixmap = pixmap
             self._last_pixmap_frame = frame_idx
             self.pixmap_changed.emit(pixmap, frame_idx)
+
+            self._update_time_display()  # ← ДОБАВИТЬ
 
         except Exception as e:
             print(f"Error displaying frame: {e}")
@@ -228,3 +233,12 @@ class PlaybackController(QObject):
         self.frame_cache.clear()
         self._last_pixmap = None
         self._last_pixmap_frame = None
+
+    def _update_time_display(self) -> None:
+        """Обновить отображение времени в PlayerControls."""
+        fps = self.video_service.get_fps()
+        total = self.video_service.get_total_frames()
+        if fps > 0 and total > 0:
+            current_sec = self.current_frame / fps
+            total_sec = total / fps
+            self.player_controls.update_time_label(current_sec, total_sec)
