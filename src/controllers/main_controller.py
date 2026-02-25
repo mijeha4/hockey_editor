@@ -432,8 +432,8 @@ class MainController(QObject):
     def _on_open_video(self) -> None:
         from PySide6.QtWidgets import QFileDialog
         file_path, _ = QFileDialog.getOpenFileName(
-            self.main_window, "Open Video File", "",
-            "Video Files (*.mp4 *.avi *.mov *.mkv *.wmv);;All Files (*)"
+            self.main_window, "Открыть видеофайл", "",
+            "Видеофайлы (*.mp4 *.avi *.mov *.mkv *.wmv);;Все файлы (*)"
         )
         if file_path:
             self.load_video(file_path)
@@ -452,8 +452,8 @@ class MainController(QObject):
             success = self.project_controller.save_project(self.project.file_path)
         else:
             file_path, _ = QFileDialog.getSaveFileName(
-                self.main_window, "Save Project", "project.hep",
-                "Project Files (*.hep);;All Files (*)"
+                self.main_window, "Сохранить проект", "project.hep",
+                "Файлы проекта (*.hep);;Все файлы (*)"
             )
             if file_path:
                 if not file_path.endswith(".hep"):
@@ -473,8 +473,8 @@ class MainController(QObject):
     def _on_load_project(self) -> None:
         from PySide6.QtWidgets import QFileDialog
         file_path, _ = QFileDialog.getOpenFileName(
-            self.main_window, "Open Project", "",
-            "Project Files (*.hep);;All Files (*)"
+            self.main_window, "Открыть проект", "",
+            "Файлы проекта (*.hep);;Все файлы (*)"
         )
         if not file_path:
             return

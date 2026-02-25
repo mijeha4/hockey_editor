@@ -65,13 +65,13 @@ class HistoryPanel(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(4)
 
-        self._undo_btn = QPushButton("↩ Undo")
+        self._undo_btn = QPushButton("↩ Отменить")
         self._undo_btn.setToolTip("Отменить (Ctrl+Z)")
         self._undo_btn.clicked.connect(self._on_undo)
         self._style_button(self._undo_btn)
         btn_layout.addWidget(self._undo_btn)
 
-        self._redo_btn = QPushButton("↪ Redo")
+        self._redo_btn = QPushButton("↪ Повторить")
         self._redo_btn.setToolTip("Повторить (Ctrl+Y)")
         self._redo_btn.clicked.connect(self._on_redo)
         self._style_button(self._redo_btn)

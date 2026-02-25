@@ -14,22 +14,22 @@ class CustomEventManager(QObject):
     events_changed = Signal()
 
     DEFAULT_EVENTS: List[CustomEventType] = [
-        CustomEventType(name="Goal", color="#FF0000", shortcut="G", description="Goal scored"),
-        CustomEventType(name="Shot on Goal", color="#FF5722", shortcut="H", description="Shot on goal"),
-        CustomEventType(name="Missed Shot", color="#FF9800", shortcut="M", description="Shot missed the net"),
-        CustomEventType(name="Blocked Shot", color="#795548", shortcut="B", description="Shot blocked"),
+        CustomEventType(name="Goal", color="#FF0000", shortcut="G", description="Забитый гол"),
+        CustomEventType(name="Shot on Goal", color="#FF5722", shortcut="H", description="Бросок в створ ворот"),
+        CustomEventType(name="Missed Shot", color="#FF9800", shortcut="M", description="Бросок мимо ворот"),
+        CustomEventType(name="Blocked Shot", color="#795548", shortcut="B", description="Заблокированный бросок"),
 
-        CustomEventType(name="Zone Entry", color="#2196F3", shortcut="Z", description="Entry into offensive zone"),
-        CustomEventType(name="Zone Exit", color="#03A9F4", shortcut="X", description="Exit from defensive zone"),
-        CustomEventType(name="Dump In", color="#00BCD4", shortcut="D", description="Dump puck into zone"),
+        CustomEventType(name="Zone Entry", color="#2196F3", shortcut="Z", description="Вход в зону атаки"),
+        CustomEventType(name="Zone Exit", color="#03A9F4", shortcut="X", description="Выход из зоны защиты"),
+        CustomEventType(name="Dump In", color="#00BCD4", shortcut="D", description="Вброс шайбы в зону"),
 
-        CustomEventType(name="Turnover", color="#607D8B", shortcut="T", description="Loss of puck possession"),
-        CustomEventType(name="Takeaway", color="#4CAF50", shortcut="A", description="Puck possession gained"),
-        CustomEventType(name="Faceoff Win", color="#8BC34A", shortcut="F", description="Faceoff won"),
-        CustomEventType(name="Faceoff Loss", color="#558B2F", shortcut="L", description="Faceoff lost"),
+        CustomEventType(name="Turnover", color="#607D8B", shortcut="T", description="Потеря шайбы"),
+        CustomEventType(name="Takeaway", color="#4CAF50", shortcut="A", description="Перехват шайбы"),
+        CustomEventType(name="Faceoff Win", color="#8BC34A", shortcut="F", description="Выигранное вбрасывание"),
+        CustomEventType(name="Faceoff Loss", color="#558B2F", shortcut="L", description="Проигранное вбрасывание"),
 
-        CustomEventType(name="Defensive Block", color="#3F51B5", shortcut="K", description="Shot blocked in defense"),
-        CustomEventType(name="Penalty", color="#9C27B0", shortcut="P", description="Penalty called"),
+        CustomEventType(name="Defensive Block", color="#3F51B5", shortcut="K", description="Блокшот в обороне"),
+        CustomEventType(name="Penalty", color="#9C27B0", shortcut="P", description="Удаление"),
     ]
 
     def __init__(self):

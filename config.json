@@ -4,79 +4,79 @@
             "name": "Goal",
             "color": "#FF0000",
             "shortcut": "G",
-            "description": "Goal scored"
+            "description": "Забитый гол"
         },
         {
             "name": "Shot on Goal",
             "color": "#FF5722",
             "shortcut": "H",
-            "description": "Shot on goal"
+            "description": "Бросок в створ ворот"
         },
         {
             "name": "Missed Shot",
             "color": "#FF9800",
             "shortcut": "M",
-            "description": "Shot missed the net"
+            "description": "Бросок мимо ворот"
         },
         {
             "name": "Blocked Shot",
             "color": "#795548",
             "shortcut": "B",
-            "description": "Shot blocked"
+            "description": "Заблокированный бросок"
         },
         {
             "name": "Zone Entry",
             "color": "#2196F3",
             "shortcut": "Z",
-            "description": "Entry into offensive zone"
+            "description": "Вход в зону атаки"
         },
         {
             "name": "Zone Exit",
             "color": "#03A9F4",
             "shortcut": "X",
-            "description": "Exit from defensive zone"
+            "description": "Выход из зоны защиты"
         },
         {
             "name": "Dump In",
             "color": "#00BCD4",
             "shortcut": "D",
-            "description": "Dump puck into zone"
+            "description": "Вброс шайбы в зону"
         },
         {
             "name": "Turnover",
             "color": "#607D8B",
             "shortcut": "T",
-            "description": "Loss of puck possession"
+            "description": "Потеря шайбы"
         },
         {
             "name": "Takeaway",
             "color": "#4CAF50",
             "shortcut": "A",
-            "description": "Puck possession gained"
+            "description": "Перехват шайбы"
         },
         {
             "name": "Faceoff Win",
             "color": "#8BC34A",
             "shortcut": "F",
-            "description": "Faceoff won"
+            "description": "Выигранное вбрасывание"
         },
         {
             "name": "Faceoff Loss",
             "color": "#558B2F",
             "shortcut": "L",
-            "description": "Faceoff lost"
+            "description": "Проигранное вбрасывание"
         },
         {
             "name": "Defensive Block",
             "color": "#3F51B5",
             "shortcut": "K",
-            "description": "Shot blocked in defense"
+            "description": "Блокшот в обороне"
         },
         {
             "name": "Penalty",
             "color": "#9C27B0",
             "shortcut": "P",
-            "description": "Penalty called"
+            "description": "Удаление"
         }
     ],
     "hotkeys": {
@@ -113,20 +113,5 @@
     "export_file_template": "{event}_{index}_{time}",
     "export_padding_before": 0.0,
     "export_padding_after": 0.0,
-    "export_auto_open": true,
-    "window_geometry": {
-        "x": 0,
-        "y": 23,
-        "width": 2560,
-        "height": 1369,
-        "maximized": true,
-        "main_splitter": [
-            764,
-            327
-        ],
-        "top_splitter": [
-            1479,
-            1055
-        ]
-    }
+    "export_auto_open": true
 }

@@ -280,7 +280,7 @@ class PreviewWindow(QMainWindow):
         row.addSpacing(8)
 
         # Speed
-        row.addWidget(QLabel("Speed:"))
+        row.addWidget(QLabel("Скорость:"))
         self.speed_combo = QComboBox()
         self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
         self.speed_combo.setCurrentText("1.0x")
@@ -580,7 +580,7 @@ class PreviewWindow(QMainWindow):
         suggested = self.ctrl.get_screenshot_filename()
         path, _ = QFileDialog.getSaveFileName(
             self, "Сохранить скриншот", suggested,
-            "PNG Files (*.png);;All Files (*)"
+            "Изображения PNG (*.png);;Все файлы (*)"
         )
         if not path:
             return
