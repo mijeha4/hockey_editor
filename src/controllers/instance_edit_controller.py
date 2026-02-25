@@ -213,7 +213,7 @@ class InstanceEditController(QObject):
         # push_done_command: добавить в стек БЕЗ вызова execute(),
         # т.к. изменение уже применено напрямую
         history = get_history_manager()
-        history.push_done_command(cmd)
+        history.push_command(cmd)
 
         self._edit_original = None
 

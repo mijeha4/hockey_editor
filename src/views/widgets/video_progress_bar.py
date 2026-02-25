@@ -29,7 +29,7 @@ class VideoProgressBar(QWidget):
     drag_ended = Signal()
 
     # ── Размеры ──
-    WIDGET_HEIGHT = 22
+    WIDGET_HEIGHT = 55
     BAR_HEIGHT_NORMAL = 3
     BAR_HEIGHT_HOVER = 5
     HANDLE_RADIUS_NORMAL = 0     # скрыт

@@ -403,15 +403,6 @@ class MainWindow(QMainWindow):
 
         self._right_tabs.addTab(history_tab, "📜 История")
 
-        # ── Tab 3: Трекинг (optional) ──
-        self._tracking_panel = None
-        try:
-            from views.widgets.tracking_panel import TrackingPanel
-            self._tracking_panel = TrackingPanel()
-            self._right_tabs.addTab(self._tracking_panel, "🎯 Трекинг")
-        except ImportError:
-            pass
-
         self.top_splitter.addWidget(self._right_tabs)
         self.top_splitter.setSizes([600, 400])
 

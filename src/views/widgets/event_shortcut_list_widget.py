@@ -49,7 +49,7 @@ class EventShortcutListWidget(QWidget):
         header_layout.addStretch()
 
         self.toggle_button = QPushButton("▼")
-        self.toggle_button.setFixedSize(20, 20)
+        self.toggle_button.setFixedSize(50, 25)
         self.toggle_button.setStyleSheet("""
             QPushButton {
                 background-color: #444444;

@@ -34,14 +34,14 @@ class PlayerControls(QWidget):
         self.speed_down_btn = QPushButton("⏪")
         self.speed_down_btn.setProperty("class", "speed-control")
         self.speed_down_btn.setToolTip("Замедлить")
-        self.speed_down_btn.setFixedSize(36, 28)
+        self.speed_down_btn.setFixedSize(64, 30)
         self.speed_down_btn.clicked.connect(lambda: self.speedStepChanged.emit(-1))
         layout.addWidget(self.speed_down_btn)
 
         # Воспроизведение / Пауза
         self.play_pause_btn = QPushButton("▶")
         self.play_pause_btn.setProperty("class", "play-pause")
-        self.play_pause_btn.setFixedSize(44, 28)
+        self.play_pause_btn.setFixedSize(64, 32)
         self.play_pause_btn.setToolTip("Воспроизведение / Пауза (Пробел)")
         self.play_pause_btn.clicked.connect(self.playClicked.emit)
         layout.addWidget(self.play_pause_btn)
@@ -50,7 +50,7 @@ class PlayerControls(QWidget):
         self.speed_up_btn = QPushButton("⏩")
         self.speed_up_btn.setProperty("class", "speed-control")
         self.speed_up_btn.setToolTip("Ускорить")
-        self.speed_up_btn.setFixedSize(36, 28)
+        self.speed_up_btn.setFixedSize(64, 30)
         self.speed_up_btn.clicked.connect(lambda: self.speedStepChanged.emit(1))
         layout.addWidget(self.speed_up_btn)
 

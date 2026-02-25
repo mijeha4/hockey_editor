@@ -37,7 +37,6 @@ except ImportError:
     from ..views.dialogs.new_project_dialog import NewProjectDialog
     from ..views.dialogs.save_changes_dialog import SaveChangesDialog
 
-from controllers.tracking_controller import TrackingController
 
 
 class MainController(QObject):
@@ -132,11 +131,6 @@ class MainController(QObject):
             self.autosave_manager.start()
 
         self._connect_progress_bar()
-
-        self.tracking_controller = TrackingController(self)
-        self.tracking_controller.set_overlay(self.main_window.tracking_overlay)
-        self.tracking_controller.set_panel(self.main_window._tracking_panel)
-        self.tracking_controller.connect_to_playback()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Settings

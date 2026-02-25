@@ -1,6 +1,7 @@
 """
 Preview Window — просмотр и анализ отрезков.
 Делегирует логику PreviewController.
+Использует VideoProgressBar вместо QSlider.
 """
 
 import os
@@ -10,7 +11,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QListView, QCheckBox, QComboBox, QGroupBox,
+    QPushButton, QListView, QCheckBox, QComboBox, QGroupBox,
     QLineEdit, QTextEdit, QSplitter, QSizePolicy, QFileDialog, QMessageBox,
     QButtonGroup
 )
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
 from models.ui.event_list_model import MarkersListModel
 from views.widgets.event_card_delegate import EventCardDelegate
 from views.widgets.drawing_overlay import DrawingOverlay, DrawingTool
+from views.widgets.video_progress_bar import VideoProgressBar
 from controllers.preview_controller import PreviewController
 from services.events.custom_event_manager import get_custom_event_manager
 
@@ -44,6 +46,9 @@ class PreviewWindow(QMainWindow):
 
         self.event_manager = get_custom_event_manager()
 
+        # Флаг для паузы при drag прогресс-бара
+        self._was_playing_before_drag: bool = False
+
         # ── Build UI ──
         self._setup_ui()
         self._connect_signals()
@@ -54,6 +59,7 @@ class PreviewWindow(QMainWindow):
         self._refresh_marker_list()
         self._update_counter()
         self._update_nav_buttons()
+        self._sync_progress_bar()
         self._adjust_window_size()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -88,8 +94,19 @@ class PreviewWindow(QMainWindow):
         # Drawing toolbar
         left.addWidget(self._create_drawing_toolbar())
 
-        # Slider row
-        left.addLayout(self._create_slider_row())
+        # YouTube-style progress bar
+        self.progress_bar = VideoProgressBar()
+        self.progress_bar.seek_requested.connect(self._on_progress_seek)
+        self.progress_bar.drag_started.connect(self._on_progress_drag_start)
+        self.progress_bar.drag_ended.connect(self._on_progress_drag_end)
+        left.addWidget(self.progress_bar)
+
+        # Time label
+        self.time_label = QLabel("0:00 / 0:00")
+        self.time_label.setMinimumWidth(100)
+        self.time_label.setStyleSheet(
+            "font-family: Consolas, monospace; font-size: 11px; color: #aaaaaa;"
+        )
 
         # Playback controls row
         left.addLayout(self._create_controls_row())
@@ -190,7 +207,6 @@ class PreviewWindow(QMainWindow):
 
         layout.addStretch()
 
-        # Screenshot button
         screenshot_btn = QPushButton("📷")
         screenshot_btn.setMaximumWidth(60)
         screenshot_btn.setToolTip("Сохранить скриншот (Ctrl+Shift+S)")
@@ -205,24 +221,6 @@ class PreviewWindow(QMainWindow):
         return toolbar
 
     # ──────────────────────────────────────────────────────────────────────
-    # Slider row
-    # ──────────────────────────────────────────────────────────────────────
-
-    def _create_slider_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
-        self.progress_slider.sliderMoved.connect(self._on_slider_moved)
-        row.addWidget(self.progress_slider)
-
-        self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setMinimumWidth(100)
-        self.time_label.setStyleSheet("font-family: monospace;")
-        row.addWidget(self.time_label)
-
-        return row
-
-    # ──────────────────────────────────────────────────────────────────────
     # Controls row
     # ──────────────────────────────────────────────────────────────────────
 
@@ -230,7 +228,7 @@ class PreviewWindow(QMainWindow):
         row = QHBoxLayout()
         row.setSpacing(3)
 
-        # ◀ Prev segment
+        # ◀◀ Prev segment
         self.prev_btn = QPushButton("◀◀")
         self.prev_btn.setFixedWidth(60)
         self.prev_btn.setToolTip("Предыдущий сегмент ( [ )")
@@ -245,7 +243,7 @@ class PreviewWindow(QMainWindow):
         row.addWidget(self.frame_back_btn)
 
         # ▶ Play/Pause
-        self.play_btn = QPushButton("▶ Play")
+        self.play_btn = QPushButton("▶ Воспр.")
         self.play_btn.setFixedWidth(100)
         self.play_btn.setToolTip("Воспроизведение/Пауза (Space)")
         self.play_btn.clicked.connect(lambda: self.ctrl.toggle_play_pause())
@@ -279,10 +277,18 @@ class PreviewWindow(QMainWindow):
 
         row.addSpacing(8)
 
+        # Time label
+        row.addWidget(self.time_label)
+
+        row.addSpacing(8)
+
         # Speed
         row.addWidget(QLabel("Скорость:"))
         self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"])
+        self.speed_combo.addItems([
+            "0.25x", "0.5x", "0.75x", "1.0x",
+            "1.25x", "1.5x", "2.0x", "3.0x", "4.0x"
+        ])
         self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.setMaximumWidth(70)
         self.speed_combo.currentTextChanged.connect(self._on_speed_changed)
@@ -292,7 +298,9 @@ class PreviewWindow(QMainWindow):
 
         # Counter label
         self.counter_label = QLabel("0 / 0")
-        self.counter_label.setStyleSheet("color: #88ccff; font-weight: bold; font-size: 12px;")
+        self.counter_label.setStyleSheet(
+            "color: #88ccff; font-weight: bold; font-size: 12px;"
+        )
         self.counter_label.setMinimumWidth(120)
         row.addWidget(self.counter_label)
 
@@ -356,7 +364,6 @@ class PreviewWindow(QMainWindow):
     def _connect_signals(self):
         c = self.ctrl
 
-        # Controller → Window
         c.playback_state_changed.connect(self._on_playback_state)
         c.playback_position_changed.connect(self._on_position_changed)
         c.active_segment_changed.connect(self._on_segment_changed)
@@ -364,7 +371,6 @@ class PreviewWindow(QMainWindow):
         c.loop_state_changed.connect(self._on_loop_state)
         c.filters_changed.connect(self._refresh_marker_list)
 
-        # Main playback → display
         try:
             self.main_controller.playback_controller.pixmap_changed.connect(
                 self._on_pixmap_changed
@@ -372,7 +378,6 @@ class PreviewWindow(QMainWindow):
         except Exception:
             pass
 
-        # Marker list updates from main
         try:
             self.main_controller.timeline_controller.markers_changed.connect(
                 self._refresh_marker_list
@@ -380,7 +385,6 @@ class PreviewWindow(QMainWindow):
         except Exception:
             pass
 
-        # Event manager updates
         self.event_manager.events_changed.connect(self._populate_event_filter)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -413,26 +417,25 @@ class PreviewWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════════════
 
     def _on_playback_state(self, playing: bool):
-        self.play_btn.setText("⏸ Pause" if playing else "▶ Play")
+        self.play_btn.setText("⏸ Пауза" if playing else "▶ Воспр.")
 
     def _on_position_changed(self, frame: int):
-        self._update_slider()
+        self._update_progress_bar_position()
         self._update_time()
 
     def _on_segment_changed(self, marker_idx: int):
-        # Highlight in list
         row = self.markers_model.find_row_by_marker_idx(marker_idx)
         if row >= 0:
             index = self.markers_model.index(row, 0)
             self.markers_list.setCurrentIndex(index)
             self.markers_list.scrollTo(index)
 
-        # Update note field
         marker = self.ctrl.get_current_marker()
         self.note_edit.blockSignals(True)
         self.note_edit.setText(marker.note if marker else "")
         self.note_edit.blockSignals(False)
 
+        self._sync_progress_bar()
         self._update_nav_buttons()
 
     def _on_counter_changed(self, text: str):
@@ -453,16 +456,54 @@ class PreviewWindow(QMainWindow):
             )
 
     # ══════════════════════════════════════════════════════════════════════
-    #  UI Update Helpers
+    #  Progress Bar (YouTube-style)
     # ══════════════════════════════════════════════════════════════════════
 
-    def _update_slider(self):
-        start, end, current = self.ctrl.get_slider_range()
-        self.progress_slider.blockSignals(True)
-        self.progress_slider.setMinimum(start)
-        self.progress_slider.setMaximum(max(start, end - 1))
-        self.progress_slider.setValue(current)
-        self.progress_slider.blockSignals(False)
+    def _sync_progress_bar(self) -> None:
+        """Синхронизировать прогресс-бар с текущим сегментом."""
+        marker = self.ctrl.get_current_marker()
+        if not marker:
+            self.progress_bar.set_total_frames(0)
+            return
+
+        segment_length = marker.end_frame - marker.start_frame
+        self.progress_bar.set_total_frames(segment_length)
+        self.progress_bar.set_fps(self.ctrl.fps)
+
+        current_in_segment = self.ctrl.current_frame - marker.start_frame
+        self.progress_bar.set_current_frame(max(0, current_in_segment))
+
+    def _update_progress_bar_position(self) -> None:
+        """Обновить позицию прогресс-бара при воспроизведении."""
+        marker = self.ctrl.get_current_marker()
+        if not marker:
+            return
+        current_in_segment = self.ctrl.current_frame - marker.start_frame
+        self.progress_bar.set_current_frame(max(0, current_in_segment))
+
+    def _on_progress_seek(self, frame_in_segment: int) -> None:
+        """Клик/drag на прогресс-баре → seek внутри сегмента."""
+        marker = self.ctrl.get_current_marker()
+        if not marker:
+            return
+        absolute_frame = marker.start_frame + frame_in_segment
+        absolute_frame = max(marker.start_frame, min(absolute_frame, marker.end_frame - 1))
+        self.ctrl.seek_to_frame_in_segment(absolute_frame)
+
+    def _on_progress_drag_start(self) -> None:
+        """Пауза при начале перетаскивания."""
+        self._was_playing_before_drag = self.ctrl.is_playing
+        if self.ctrl.is_playing:
+            self.ctrl.pause()
+
+    def _on_progress_drag_end(self) -> None:
+        """Возобновление после перетаскивания."""
+        if self._was_playing_before_drag:
+            self.ctrl.play()
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  UI Update Helpers
+    # ══════════════════════════════════════════════════════════════════════
 
     def _update_time(self):
         self.time_label.setText(self.ctrl.get_time_text())
@@ -488,20 +529,17 @@ class PreviewWindow(QMainWindow):
         self.markers_model.set_fps(self.ctrl.fps)
         self.markers_model.set_filtered_segments(filtered)
 
-        # Re-highlight current
         row = self.markers_model.find_row_by_marker_idx(self.ctrl.current_marker_idx)
         if row >= 0:
             self.markers_list.setCurrentIndex(self.markers_model.index(row, 0))
 
         self._update_counter()
         self._update_nav_buttons()
+        self._sync_progress_bar()
 
     # ══════════════════════════════════════════════════════════════════════
     #  User Action Handlers
     # ══════════════════════════════════════════════════════════════════════
-
-    def _on_slider_moved(self, value: int):
-        self.ctrl.seek_to_frame_in_segment(value)
 
     def _on_speed_changed(self, text: str):
         try:
@@ -557,7 +595,6 @@ class PreviewWindow(QMainWindow):
         tool = tool_map.get(tid, "none")
         self.drawing_overlay.set_tool(tool)
 
-        # Auto-pause при рисовании
         if tid > 0 and self.ctrl.is_playing:
             self.ctrl.pause()
 
