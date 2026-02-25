@@ -70,6 +70,10 @@ class SegmentGraphicsItem(QGraphicsRectItem):
 
     def paint(self, painter, option, widget):
         rect = self.rect()
+
+        painter.save()
+        painter.setClipRect(rect)
+
         fill = QColor(self.event_color)
         if self.is_hovered:
             fill = fill.lighter(120)
@@ -85,19 +89,22 @@ class SegmentGraphicsItem(QGraphicsRectItem):
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 3, 3)
 
-        painter.setPen(QPen(Qt.white))
-        font = QFont("Segoe UI", 9)
-        painter.setFont(font)
-
-        text = self._display_text()
-        fm = QFontMetrics(font)
         avail = rect.width() - 8
-        if fm.horizontalAdvance(text) > avail:
-            text = fm.elidedText(text, Qt.ElideRight, int(avail))
+        if avail >= 12:
+            painter.setPen(QPen(Qt.white))
+            font = QFont("Segoe UI", 9)
+            painter.setFont(font)
 
-        x = rect.left() + 4
-        y = rect.center().y() + fm.ascent() / 2
-        painter.drawText(int(x), int(y), text)
+            text = self._display_text()
+            fm = QFontMetrics(font)
+            if fm.horizontalAdvance(text) > avail:
+                text = fm.elidedText(text, Qt.ElideRight, int(avail))
+
+            x = rect.left() + 4
+            y = rect.center().y() + fm.ascent() / 2
+            painter.drawText(int(x), int(y), text)
+
+        painter.restore()
 
     def hoverEnterEvent(self, event):
         self.is_hovered = True
@@ -475,6 +482,15 @@ class TimelineGraphicsScene(QGraphicsScene):
             sec += step_seconds
 
     def rebuild(self, animate_new: bool = False) -> None:
+        if getattr(self, '_is_rebuilding', False):
+            return
+        self._is_rebuilding = True
+        try:
+            self._rebuild_internal(animate_new)
+        finally:
+            self._is_rebuilding = False
+
+    def _rebuild_internal(self, animate_new: bool = False) -> None:
         total_frames = self.get_total_frames()
         events = get_custom_event_manager().get_all_events()
         if not events:
@@ -498,6 +514,10 @@ class TimelineGraphicsScene(QGraphicsScene):
 
         track_index: Dict[str, int] = {e.name: i for i, e in enumerate(events)}
 
+        header_font = QFont("Segoe UI", 10, QFont.Bold)
+        header_fm = QFontMetrics(header_font)
+        max_header_text_w = self.header_width - 20
+
         for e in events:
             i = track_index[e.name]
             y = i * self.track_height + self.ruler_height
@@ -509,9 +529,12 @@ class TimelineGraphicsScene(QGraphicsScene):
             bg.setZValue(10)
             self.addItem(bg)
 
-            text_item = QGraphicsTextItem(e.get_localized_name())
+            elided_name = header_fm.elidedText(
+                e.get_localized_name(), Qt.ElideRight, max_header_text_w
+            )
+            text_item = QGraphicsTextItem(elided_name)
             text_item.setDefaultTextColor(QColor(Qt.white))
-            text_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            text_item.setFont(header_font)
             text_item.setPos(10, y + 10)
             text_item.setZValue(11)
             self.addItem(text_item)
@@ -525,7 +548,6 @@ class TimelineGraphicsScene(QGraphicsScene):
             w = max(10.0, (marker.end_frame - marker.start_frame) * self.pixels_per_frame)
 
             seg = SegmentGraphicsItem(marker)
-            # Сохраняем оригинальный индекс в элементе
             seg.original_idx = self._marker_to_original_idx.get(marker.id, -1)
             seg.setRect(x, y + 8, w, self.track_height - 16)
             seg.setZValue(100)
@@ -598,14 +620,19 @@ class TimelineWidget(QWidget):
     def _connect_controller_signals(self, controller) -> None:
         if not controller:
             return
-        try:
-            controller.markers_changed.disconnect(self._on_controller_markers_changed)
-        except (TypeError, RuntimeError):
-            pass
-        try:
-            controller.playback_time_changed.disconnect(self.scene.update_playhead)
-        except (TypeError, RuntimeError):
-            pass
+
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                controller.markers_changed.disconnect(self._on_controller_markers_changed)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                controller.playback_time_changed.disconnect(self.scene.update_playhead)
+            except (TypeError, RuntimeError):
+                pass
+
         controller.markers_changed.connect(self._on_controller_markers_changed)
         controller.playback_time_changed.connect(self.scene.update_playhead)
 
@@ -651,6 +678,9 @@ class TimelineWidget(QWidget):
         self.rebuild(False)
 
     def _on_controller_markers_changed(self) -> None:
+        if self.controller and getattr(self.controller, '_updating', False):
+            return
+
         if self.controller:
             if hasattr(self.controller, "get_filtered_pairs"):
                 pairs = self.controller.get_filtered_pairs()

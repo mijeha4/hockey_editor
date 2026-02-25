@@ -224,6 +224,13 @@ class ToastWidget(QWidget):
     def fade_out(self) -> None:
         self._auto_close_timer.stop()
         self._fade_anim.stop()
+
+        # === FIX: Отключить предыдущее подключение, чтобы не вызвать дважды ===
+        try:
+            self._fade_anim.finished.disconnect(self._on_fade_finished)
+        except (TypeError, RuntimeError):
+            pass
+
         self._fade_anim.setStartValue(self._opacity_effect.opacity())
         self._fade_anim.setEndValue(0.0)
         self._fade_anim.setDuration(300)
@@ -231,6 +238,11 @@ class ToastWidget(QWidget):
         self._fade_anim.start()
 
     def _on_fade_finished(self) -> None:
+        # === FIX: Отключить сигнал, чтобы не вызвался повторно ===
+        try:
+            self._fade_anim.finished.disconnect(self._on_fade_finished)
+        except (TypeError, RuntimeError):
+            pass
         self.closed.emit()
         self.deleteLater()
 
@@ -290,10 +302,13 @@ class ToastManager(QObject):
         action_text: Optional[str] = None,
         action_callback: Optional[Callable] = None,
     ) -> ToastWidget:
-        # Ограничиваем число видимых
+        # === FIX: pop() вместо fade_out() — разрывает бесконечный цикл ===
         while len(self._active_toasts) >= self.MAX_VISIBLE:
-            oldest = self._active_toasts[0]
-            oldest.fade_out()
+            oldest = self._active_toasts.pop(0)
+            try:
+                oldest.fade_out()
+            except RuntimeError:
+                pass  # Widget already deleted
 
         toast = ToastWidget(
             message=message,

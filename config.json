@@ -113,5 +113,21 @@
     "export_file_template": "{event}_{index}_{time}",
     "export_padding_before": 0.0,
     "export_padding_after": 0.0,
-    "export_auto_open": true
+    "export_auto_open": true,
+    "window_geometry": {
+        "x": 0,
+        "y": 23,
+        "width": 2560,
+        "height": 1369,
+        "maximized": true,
+        "main_splitter": [
+            764,
+            327
+        ],
+        "top_splitter": [
+            1459,
+            1075
+        ],
+        "active_tab": 2
+    }
 }

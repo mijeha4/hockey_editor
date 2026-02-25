@@ -136,6 +136,7 @@ class TimelineController(QObject):
         self.selected_markers: Set[int] = set()
 
         self.filter_controller = None
+        self._updating = False
 
         # ══════════════════════════════════════════════════════════════════════
         # FIX: Debounce timer — объединяет множественные rebuild в ОДИН
@@ -189,35 +190,57 @@ class TimelineController(QObject):
     def _do_full_ui_update(self) -> None:
         """Единственная точка обновления всего UI.
 
-        Вызывается либо по таймеру (deferred), либо напрямую из refresh_view().
-        Гарантирует ОДНО перестроение сцены за вызов.
+        Guard _updating предотвращает реентрантный вызов:
+        markers_changed → _on_controller_markers_changed → rebuild (дубль).
+        try/except ловит RuntimeError от удалённых Qt-объектов.
         """
-        self._rebuild_timer.stop()  # Отменить pending, если вызван напрямую
+        if self._updating:
+            return
+        self._updating = True
+        try:
+            self._rebuild_timer.stop()
 
-        filtered_pairs = self.get_filtered_pairs()
-        filtered_markers = [m for _, m in filtered_pairs]
+            filtered_pairs = self.get_filtered_pairs()
+            filtered_markers = [m for _, m in filtered_pairs]
 
-        # 1. Обновить timeline scene (ОДНО перестроение)
-        if self.timeline_widget:
-            index_map = {m.id: idx for idx, m in filtered_pairs}
-            if hasattr(self.timeline_widget, "set_markers_with_indices"):
-                self.timeline_widget.set_markers_with_indices(filtered_markers, index_map)
-            elif hasattr(self.timeline_widget, "set_markers"):
-                self.timeline_widget.set_markers(filtered_markers)
+            # 1. Обновить timeline scene
+            if self.timeline_widget:
+                try:
+                    index_map = {m.id: idx for idx, m in filtered_pairs}
+                    if hasattr(self.timeline_widget, "set_markers_with_indices"):
+                        self.timeline_widget.set_markers_with_indices(filtered_markers, index_map)
+                    elif hasattr(self.timeline_widget, "set_markers"):
+                        self.timeline_widget.set_markers(filtered_markers)
+                except RuntimeError:
+                    pass
 
-        # 2. Обновить segment list
-        if self.segment_list_widget:
-            if hasattr(self.segment_list_widget, "set_segments"):
-                self.segment_list_widget.set_segments(filtered_pairs)
-            else:
-                self.segment_list_widget.update_segments(filtered_markers)
+            # 2. Обновить segment list
+            if self.segment_list_widget:
+                try:
+                    if hasattr(self.segment_list_widget, "set_segments"):
+                        self.segment_list_widget.set_segments(filtered_pairs)
+                    else:
+                        self.segment_list_widget.update_segments(filtered_markers)
+                except RuntimeError:
+                    pass
 
-        # 3. Синхронизировать выделение (после rebuild — items валидны)
-        self._sync_timeline_selection()
-        self._sync_segment_list_selection()
+            # 3. Синхронизировать выделение
+            try:
+                self._sync_timeline_selection()
+            except RuntimeError:
+                pass
 
-        # 4. Уведомить внешних слушателей (stats widget, tab title, и т.д.)
-        self.markers_changed.emit()
+            try:
+                self._sync_segment_list_selection()
+            except RuntimeError:
+                pass
+
+            # 4. Уведомить внешних слушателей
+            self.markers_changed.emit()
+        except Exception as e:
+            print(f"[TimelineController] Error in _do_full_ui_update: {e}")
+        finally:
+            self._updating = False
 
     # ──────────────────────────────────────────────────────────────────────────
     # Toast helper
@@ -820,10 +843,10 @@ class TimelineController(QObject):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _on_events_changed(self) -> None:
-        pass
-
+        self._schedule_rebuild()
+        
     def _on_event_added(self, event) -> None:
-        pass
+        self._schedule_rebuild()
 
     def _on_event_deleted(self, event_name: str) -> None:
         indices_to_remove = [

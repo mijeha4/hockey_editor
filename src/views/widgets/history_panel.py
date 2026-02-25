@@ -212,7 +212,15 @@ class HistoryPanel(QWidget):
         self._history.clear()
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
-        """Клик по элементу — множественный undo/redo до этой позиции."""
+        """Клик по элементу — множественный undo/redo до этой позиции.
+
+        FIX: blockSignals на history_manager во время batch-операции.
+        Это предотвращает:
+        - Создание N тостов (command_undone → MainWindow.toast)
+        - N обновлений меню (state_changed → _update_undo_redo_menu)
+        - N перестроений списка (state_changed → _refresh)
+        - Бесконечный цикл в ToastManager._show
+        """
         role = item.data(Qt.ItemDataRole.UserRole)
         if role is None:
             return
@@ -220,17 +228,26 @@ class HistoryPanel(QWidget):
         row = self._list.row(item)
         redo_count = len(self._history.redo_history)
 
-        if role == "redo":
-            steps = redo_count - row
-            for _ in range(steps):
-                if not self._history.can_redo:
-                    break
-                self._history.redo()
+        # === FIX: Блокировать ВСЕ сигналы history_manager на время batch ===
+        self._history.blockSignals(True)
+        try:
+            if role == "redo":
+                steps = redo_count - row
+                for _ in range(steps):
+                    if not self._history.can_redo:
+                        break
+                    self._history.redo()
 
-        elif role == "undo":
-            undo_row = row - redo_count - 1  # -1 за separator
-            steps = undo_row + 1
-            for _ in range(steps):
-                if not self._history.can_undo:
-                    break
-                self._history.undo()
+            elif role == "undo":
+                undo_row = row - redo_count - 1  # -1 за separator
+                steps = max(0, undo_row + 1)
+                for _ in range(steps):
+                    if not self._history.can_undo:
+                        break
+                    self._history.undo()
+        finally:
+            self._history.blockSignals(False)
+
+            # Один раз оповестить всех слушателей о финальном состоянии
+            self._history.state_changed.emit()
+            self._refresh()
