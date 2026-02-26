@@ -12,8 +12,6 @@
 [![License](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/mijeha4/hockey_editor/releases)
 
-[🇷🇺 Русский](#-описание) • [🇬🇧 English](#-description)
-
 ---
 
 <img src="docs/screenshots/main_window.png" alt="Hockey Editor Pro" width="800">
