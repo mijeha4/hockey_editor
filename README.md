@@ -9,9 +9,9 @@
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![PySide6](https://img.shields.io/badge/PySide6-6.6+-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython/)
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.8+-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org)
-[![License](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/mijeha4/hockey_editor/releases)
 
+</div>
 ## 📖 Описание
 
 **Hockey Editor Pro** — десктопное приложение для покадрового анализа хоккейных матчей. Позволяет размечать видеозаписи игр, отмечая ключевые игровые события (голы, броски, вбрасывания, входы в зону и др.) с точностью до кадра.
