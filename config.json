@@ -115,19 +115,19 @@
     "export_padding_after": 0.0,
     "export_auto_open": true,
     "window_geometry": {
-        "x": 108,
-        "y": 215,
-        "width": 1800,
-        "height": 1000,
-        "maximized": false,
+        "x": 0,
+        "y": 23,
+        "width": 2560,
+        "height": 1369,
+        "maximized": true,
         "main_splitter": [
-            441,
-            276
+            786,
+            492
         ],
         "top_splitter": [
-            937,
-            837
+            1338,
+            1196
         ],
-        "active_tab": 0
+        "active_tab": 1
     }
 }
