@@ -247,7 +247,7 @@ hockey_editor/
 
 ### 📸 Скриншоты
 
-<summary>🖼️ Главное окно</summary> <img src="docs/screenshots/main_window.png" width="800"> </details> <details> <summary>📊 Статистика</summary> <img src="docs/screenshots/stats.png" width="400"> </details> <details> <summary>✏️ Редактор сегмента</summary> <img src="docs/screenshots/segment_editor.png" width="600"> </details> <details> <summary>📤 Экспорт</summary> <img src="docs/screenshots/export.png" width="500">
+<summary>🖼️ Главное окно</summary> <img src="docs/screenshots/main_window.png" width="800"> <summary>📊 Статистика</summary> <img src="docs/screenshots/stats.png" width="400"> <summary>✏️ Редактор сегмента</summary> <img src="docs/screenshots/segment_editor.png" width="600"> <summary>📤 Экспорт</summary> <img src="docs/screenshots/export.png" width="500">
     
 ### 🛠️ Сборка
 
