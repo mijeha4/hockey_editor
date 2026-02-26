@@ -12,16 +12,6 @@
 [![License](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/mijeha4/hockey_editor/releases)
 
----
-
-<img src="docs/screenshots/main_window.png" alt="Hockey Editor Pro" width="800">
-
-</div>
-
----
-
-# 🇷🇺 Русский
-
 ## 📖 Описание
 
 **Hockey Editor Pro** — десктопное приложение для покадрового анализа хоккейных матчей. Позволяет размечать видеозаписи игр, отмечая ключевые игровые события (голы, броски, вбрасывания, входы в зону и др.) с точностью до кадра.
