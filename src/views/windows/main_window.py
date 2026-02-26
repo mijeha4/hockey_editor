@@ -84,6 +84,9 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(get_application_stylesheet())
 
+        # ── Иконка окна ──
+        self._set_window_icon()
+
         self._create_menu()
         self._setup_ui()
 
@@ -210,6 +213,28 @@ class MainWindow(QMainWindow):
     # ──────────────────────────────────────────────────────────────────────────
     # UI building
     # ──────────────────────────────────────────────────────────────────────────
+
+    def _set_window_icon(self) -> None:
+        """Установить иконку окна из ассетов."""
+        import os
+        from PySide6.QtGui import QIcon
+
+        # Попробовать загрузить из файла
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base, '..', '..', '..', 'assets', 'icons', 'app_icon.png'),
+            os.path.join(base, '..', '..', '..', 'assets', 'icons', 'app_icon.ico'),
+        ]
+        for path in candidates:
+            abs_path = os.path.normpath(path)
+            if os.path.exists(abs_path):
+                self.setWindowIcon(QIcon(abs_path))
+                return
+
+        # Fallback: из QApplication (установлена в main.py)
+        app = QApplication.instance()
+        if app and not app.windowIcon().isNull():
+            self.setWindowIcon(app.windowIcon())
 
     def _create_menu(self) -> None:
         menubar = self.menuBar()
