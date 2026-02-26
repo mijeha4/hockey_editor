@@ -49,6 +49,47 @@ class ProjectController:
         self.current_project.is_modified = False
         return self.current_project
 
+    def save_project_auto(self, parent_widget=None) -> bool:
+        """Сохранить проект автоматически.
+
+        Если файл уже задан — сохраняет туда.
+        Если нет — показывает диалог выбора файла.
+
+        Args:
+            parent_widget: родительский виджет для диалога (QWidget или None).
+
+        Returns:
+            True если сохранение прошло успешно, False если отменено или ошибка.
+        """
+        if not self.current_project:
+            return False
+
+        # Если путь уже есть — сохраняем без диалога
+        if self.current_project.file_path:
+            return self.save_project(self.current_project.file_path)
+
+        # Нет пути — показываем диалог
+        try:
+            from PySide6.QtWidgets import QFileDialog
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                parent_widget,
+                "Сохранить проект",
+                "project.hep",
+                "Файлы проекта (*.hep);;Все файлы (*)"
+            )
+            if not file_path:
+                return False  # Пользователь отменил
+
+            if not file_path.endswith(".hep"):
+                file_path += ".hep"
+
+            return self.save_project(file_path)
+
+        except Exception as e:
+            print(f"Ошибка авто-сохранения: {e}")
+            return False
+
     def has_unsaved_changes(self) -> bool:
         return bool(self.current_project and self.current_project.is_modified)
 

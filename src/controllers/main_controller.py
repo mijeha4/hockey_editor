@@ -90,6 +90,7 @@ class MainController(QObject):
         self.export_controller: Optional[ExportController] = None
         self.autosave_manager = None
 
+        self._was_playing_before_dialog: bool = False
         self.markers = self.project.markers
         self.processor = self.video_service
 
@@ -338,6 +339,7 @@ class MainController(QObject):
     def _on_batch_export(self, marker_indices: List[int]) -> None:
         if not marker_indices:
             return
+        self._pause_for_dialog()
         video_path = getattr(self.project, "video_path", "")
         fps = self.video_service.get_fps() if self.video_service.cap else 30.0
         settings_ctrl = self.get_settings_controller()
@@ -349,6 +351,7 @@ class MainController(QObject):
             if 0 <= idx < len(self.project.markers):
                 preselected_ids.append(self.project.markers[idx].id)
         self.export_controller.show_dialog(preselected_ids=preselected_ids)
+        self._resume_after_dialog()
 
     def _on_batch_duplicate(self, marker_indices: List[int]) -> None:
         if not marker_indices:
@@ -363,6 +366,7 @@ class MainController(QObject):
     def open_segment_editor(self, marker_idx: int) -> None:
         if not (0 <= marker_idx < len(self.project.markers)):
             return
+        self._pause_for_dialog()
         controller = self.get_instance_edit_controller()
         if hasattr(controller, 'open_editor'):
             controller.open_editor(marker_idx)
@@ -370,6 +374,21 @@ class MainController(QObject):
             controller.edit_marker(marker_idx)
         else:
             print(f"WARNING: InstanceEditController has no open_editor/edit_marker method")
+            self._resume_after_dialog()
+            return
+
+        # Окно открывается немодально (.show()), поэтому
+        # возобновляем воспроизведение при его закрытии
+        edit_window = getattr(controller, '_edit_window', None)
+        if edit_window is not None:
+            try:
+                edit_window.destroyed.disconnect(self._resume_after_dialog)
+            except (TypeError, RuntimeError):
+                pass
+            edit_window.destroyed.connect(self._resume_after_dialog)
+        else:
+            # Если окно не создалось — сразу возобновить
+            self._resume_after_dialog()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Playback speed
@@ -535,20 +554,25 @@ class MainController(QObject):
         self.project = loaded_project
         self.project.file_path = file_path
         self.project_controller.current_project = self.project
-        self.timeline_controller.project = self.project
-        self.timeline_controller.refresh_view()
+        self.timeline_controller.set_project(self.project)
 
-        # CHANGED: очистить историю при загрузке нового проекта
+        # Очистить историю при загрузке нового проекта
         self.history_manager.clear()
 
+        # Сначала загрузить видео (init_tracks создаст треки)
         if getattr(self.project, "video_path", None):
             self.load_video(self.project.video_path)
+
+        # Затем обновить UI (маркеры лягут на готовые треки)
+        self.timeline_controller.refresh_view()
+
         self.main_window.set_window_title(f"{self.project.name} - {file_path.split('/')[-1]}")
 
         if hasattr(self.main_window, "show_toast_success"):
             self.main_window.show_toast_success("Проект загружен")
 
     def _on_new_project(self) -> None:
+        self._pause_for_dialog()
         if self.project_controller.has_unsaved_changes():
             result = SaveChangesDialog.ask_save_changes(self.project.name, self.main_window)
             if result == SaveChangesDialog.CANCEL:
@@ -563,24 +587,24 @@ class MainController(QObject):
             self._create_new_project_in_current_window()
         elif mode == NewProjectDialog.MODE_NEW_WINDOW:
             self._create_new_project_in_new_window()
+            self._resume_after_dialog()
 
     def _create_new_project_in_current_window(self) -> None:
         self.project = Project(name="Untitled")
         self.project_controller.current_project = self.project
-        self.timeline_controller.project = self.project
-        self.timeline_controller.refresh_view()
+        self.timeline_controller.set_project(self.project)
         self.playback_controller.pause()
         self.video_service.cleanup()
         self.playback_controller.current_frame = 0
         self.playback_controller.playing = False
         self.main_window.set_video_image(QPixmap())
-        # ── Сбросить progress bar ──                             # ← ДОБАВИТЬ
-        progress_bar = self.main_window.get_progress_bar()        # ← ДОБАВИТЬ
-        if progress_bar:                                          # ← ДОБАВИТЬ
-            progress_bar.set_total_frames(0)                      # ← ДОБАВИТЬ
+        # Сбросить progress bar
+        progress_bar = self.main_window.get_progress_bar()
+        if progress_bar:
+            progress_bar.set_total_frames(0)
             progress_bar.set_current_frame(0)
+        self.timeline_controller.refresh_view()
         self.main_window.set_window_title("Untitled")
-        # CHANGED: clear() вместо clear_history()
         self.history_manager.clear()
         self.filter_controller.reset_all_filters()
 
@@ -589,15 +613,35 @@ class MainController(QObject):
         app_controller.create_new_window()
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Пауза при открытии окон
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _pause_for_dialog(self) -> None:
+        """Запомнить состояние воспроизведения и поставить на паузу."""
+        self._was_playing_before_dialog = self.playback_controller.playing
+        if self.playback_controller.playing:
+            self.playback_controller.pause()
+            self.main_window.get_player_controls().set_playing_state(False)
+
+    def _resume_after_dialog(self) -> None:
+        """Возобновить воспроизведение если оно шло до открытия диалога."""
+        if self._was_playing_before_dialog:
+            self._was_playing_before_dialog = False
+            self.playback_controller.play()
+            self.main_window.get_player_controls().set_playing_state(True)
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Settings / export / preview
     # ─────────────────────────────────────────────────────────────────────────
 
     def _on_open_settings(self) -> None:
+        self._pause_for_dialog()
         settings_controller = self.get_settings_controller()
         custom_event_controller = self.get_custom_event_controller()
         dialog = SettingsDialog(settings_controller, custom_event_controller, self.main_window)
         dialog.accepted.connect(lambda: self._on_settings_saved(settings_controller.settings))
         dialog.exec()
+        self._resume_after_dialog()
 
     def _on_settings_saved(self, new_settings: AppSettings) -> None:
         self.settings = new_settings
@@ -606,6 +650,7 @@ class MainController(QObject):
         self._update_mode_indicator()
 
     def _on_export(self) -> None:
+        self._pause_for_dialog()
         video_path = getattr(self.project, "video_path", "")
         fps = self.video_service.get_fps() if self.video_service.cap else 30.0
         settings_ctrl = self.get_settings_controller()
@@ -613,13 +658,16 @@ class MainController(QObject):
             self.project, video_path, fps, settings_ctrl
         )
         self.export_controller.show_dialog()
+        self._resume_after_dialog()
 
     def _on_open_preview(self) -> None:
         self.open_preview_window()
 
     def open_preview_window(self) -> None:
+        self._pause_for_dialog()
         from views.windows.preview_window import PreviewWindow
         preview_window = PreviewWindow(self, self.main_window)
+        preview_window.destroyed.connect(self._resume_after_dialog)
         preview_window.show()
 
     # ─────────────────────────────────────────────────────────────────────────

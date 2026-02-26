@@ -1,5 +1,5 @@
 """
-Timeline Widget - professional timeline graphics.
+Timeline Widget - professional timeline graphics with zoom controls.
 """
 
 from __future__ import annotations
@@ -7,15 +7,28 @@ from __future__ import annotations
 from typing import List, Optional, Dict
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsLineItem,
-    QGraphicsRectItem, QGraphicsTextItem, QScrollArea, QGraphicsItem,
-    QGraphicsSceneMouseEvent, QMenu
+    QWidget, QVBoxLayout, QHBoxLayout, QGraphicsView, QGraphicsScene,
+    QGraphicsLineItem, QGraphicsRectItem, QGraphicsTextItem, QScrollArea,
+    QGraphicsItem, QGraphicsSceneMouseEvent, QMenu, QPushButton, QLabel,
 )
-from PySide6.QtCore import Qt, QRectF, Signal, QPointF
-from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QFontMetrics, QAction
+from PySide6.QtCore import Qt, QRectF, Signal, QPointF, QTimer
+from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter, QFontMetrics
 
 from services.events.custom_event_manager import get_custom_event_manager
 from models.domain.marker import Marker
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Zoom constants
+# ──────────────────────────────────────────────────────────────────────────────
+
+ZOOM_MIN = 0.001      # px/frame — 2h видео ≈ 650px
+ZOOM_MAX = 20.0       # px/frame — максимальная детализация
+ZOOM_DEFAULT = 0.8    # px/frame — значение по умолчанию
+ZOOM_FACTOR = 1.3     # множитель при одном шаге колёсика
+
+# Варианты шага времени (в секундах) для ruler/grid
+TIME_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -46,7 +59,7 @@ class SegmentGraphicsItem(QGraphicsRectItem):
     def __init__(self, marker: Marker):
         super().__init__()
         self.marker = marker
-        self.original_idx: int = -1  # Оригинальный индекс в project.markers
+        self.original_idx: int = -1
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
 
@@ -126,18 +139,17 @@ class TimelineGraphicsScene(QGraphicsScene):
     event_selected = Signal(Marker)
     event_double_clicked = Signal(Marker)
 
-    # === НОВЫЕ СИГНАЛЫ для контекстного меню ===
-    context_edit_requested = Signal(int)       # original_idx
-    context_delete_requested = Signal(int)     # original_idx
-    context_duplicate_requested = Signal(int)  # original_idx
-    context_jump_requested = Signal(int)       # original_idx
-    context_export_requested = Signal(int)     # original_idx
+    context_edit_requested = Signal(int)
+    context_delete_requested = Signal(int)
+    context_duplicate_requested = Signal(int)
+    context_jump_requested = Signal(int)
+    context_export_requested = Signal(int)
 
     def __init__(self, controller=None):
         super().__init__()
         self.controller = controller
 
-        self.pixels_per_frame = 0.8
+        self.pixels_per_frame = ZOOM_DEFAULT
         self.track_height = 45
         self.header_width = 150
         self.ruler_height = 30
@@ -146,8 +158,7 @@ class TimelineGraphicsScene(QGraphicsScene):
         self._total_frames: int = 0
         self._fps: float = 30.0
 
-        # Маппинг marker → original_idx для контекстного меню
-        self._marker_to_original_idx: Dict[int, int] = {}  # marker.id → original_idx
+        self._marker_to_original_idx: Dict[int, int] = {}
 
         self.playhead = QGraphicsLineItem()
         self.playhead.setPen(QPen(QColor("#FFFF00"), 3, Qt.SolidLine, Qt.RoundCap))
@@ -169,19 +180,9 @@ class TimelineGraphicsScene(QGraphicsScene):
         self._markers = list(markers)
 
     def set_marker_index_map(self, index_map: Dict[int, int]) -> None:
-        """Установить маппинг marker.id → original_idx в project.markers.
-
-        Используется для контекстного меню, чтобы знать оригинальный
-        индекс маркера даже после фильтрации.
-        """
         self._marker_to_original_idx = dict(index_map)
 
     def get_original_idx_for_marker(self, marker: Marker) -> int:
-        """Получить оригинальный индекс маркера в project.markers.
-
-        Returns:
-            Оригинальный индекс или -1 если не найден.
-        """
         return self._marker_to_original_idx.get(marker.id, -1)
 
     def get_total_frames(self) -> int:
@@ -196,19 +197,52 @@ class TimelineGraphicsScene(QGraphicsScene):
                 return fps
         return self._fps if self._fps > 0 else 30.0
 
-    # ──────────────────────────────────────────────────────────────────
-    # Mouse event handling
-    # ──────────────────────────────────────────────────────────────────
+    # ─── Zoom helpers ────────────────────────────────────────────────
+
+    def _calc_time_step(self, min_spacing_px: float) -> int:
+        """Вычислить оптимальный шаг времени (в секундах) для текущего масштаба.
+
+        Подбирает из TIME_STEPS первый интервал, при котором расстояние
+        между метками >= min_spacing_px пикселей.
+        """
+        fps = self.get_fps()
+        pps = self.pixels_per_frame * fps  # пикселей на секунду
+
+        if pps <= 0:
+            return 3600
+
+        for step in TIME_STEPS:
+            if step * pps >= min_spacing_px:
+                return step
+        return 3600  # fallback: 1 час
+
+    def _format_ruler_time(self, seconds: int) -> str:
+        """Форматировать секунды для линейки.
+
+        Автоматически выбирает формат:
+        - MM:SS  для видео < 1 часа
+        - H:MM:SS для видео >= 1 часа
+        """
+        total_sec = self.get_total_frames() / self.get_fps()
+        show_hours = total_sec >= 3600
+
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+
+        if show_hours or h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    # ─── Mouse events ───────────────────────────────────────────────
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Клик по ruler → seek, клик по сегменту → select."""
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
             return
 
         scene_pos = event.scenePos()
 
-        # Клик на ruler (верхняя полоса) → перемотка
         if scene_pos.y() <= self.ruler_height:
             frame = int((scene_pos.x() - self.header_width) / self.pixels_per_frame)
             frame = max(0, frame)
@@ -216,7 +250,6 @@ class TimelineGraphicsScene(QGraphicsScene):
             event.accept()
             return
 
-        # Клик на сегмент → выделение
         clicked_items = self.items(scene_pos)
         for item in clicked_items:
             if isinstance(item, SegmentGraphicsItem):
@@ -224,7 +257,6 @@ class TimelineGraphicsScene(QGraphicsScene):
                 event.accept()
                 return
 
-        # Клик на пустое место трека → перемотка
         if scene_pos.x() > self.header_width:
             frame = int((scene_pos.x() - self.header_width) / self.pixels_per_frame)
             frame = max(0, frame)
@@ -235,7 +267,6 @@ class TimelineGraphicsScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:
-        """Двойной клик по сегменту → открыть редактор."""
         if event.button() != Qt.MouseButton.LeftButton:
             super().mouseDoubleClickEvent(event)
             return
@@ -250,13 +281,10 @@ class TimelineGraphicsScene(QGraphicsScene):
 
         super().mouseDoubleClickEvent(event)
 
-    # === НОВОЕ: Контекстное меню по правому клику ===
     def contextMenuEvent(self, event) -> None:
-        """Контекстное меню при правом клике на сегменте таймлайна."""
         scene_pos = event.scenePos()
         clicked_items = self.items(scene_pos)
 
-        # Найти SegmentGraphicsItem под курсором
         segment_item: Optional[SegmentGraphicsItem] = None
         for item in clicked_items:
             if isinstance(item, SegmentGraphicsItem):
@@ -264,7 +292,6 @@ class TimelineGraphicsScene(QGraphicsScene):
                 break
 
         if segment_item is None:
-            # Правый клик не на сегменте — ничего не делаем
             super().contextMenuEvent(event)
             return
 
@@ -272,29 +299,24 @@ class TimelineGraphicsScene(QGraphicsScene):
         original_idx = self.get_original_idx_for_marker(marker)
 
         if original_idx < 0:
-            # Не удалось определить оригинальный индекс — пробуем через original_idx атрибут
             original_idx = getattr(segment_item, 'original_idx', -1)
 
         if original_idx < 0:
             super().contextMenuEvent(event)
             return
 
-        # Получить локализованное имя события
         event_mgr = get_custom_event_manager()
         evt = event_mgr.get_event(marker.event_name)
         event_display_name = evt.get_localized_name() if evt else marker.event_name
 
-        # Форматировать время
         fps = self.get_fps()
         start_time = self._format_time(marker.start_frame / fps) if fps > 0 else "??:??"
         end_time = self._format_time(marker.end_frame / fps) if fps > 0 else "??:??"
         duration = self._format_time((marker.end_frame - marker.start_frame) / fps) if fps > 0 else "??:??"
 
-        # Создать меню
         menu = QMenu()
         menu.setStyleSheet(self._get_context_menu_style())
 
-        # Заголовок (информационный, неактивный)
         header_action = menu.addAction(f"📌 {event_display_name}")
         header_action.setEnabled(False)
         time_action = menu.addAction(f"⏱ {start_time} → {end_time} ({duration})")
@@ -302,7 +324,6 @@ class TimelineGraphicsScene(QGraphicsScene):
 
         menu.addSeparator()
 
-        # Действия
         jump_action = menu.addAction("▶ Перейти к началу")
         edit_action = menu.addAction("✏️ Редактировать")
         duplicate_action = menu.addAction("📋 Дублировать")
@@ -316,7 +337,6 @@ class TimelineGraphicsScene(QGraphicsScene):
         delete_action = menu.addAction("🗑️ Удалить")
         delete_action.setObjectName("delete_action")
 
-        # Показать меню и обработать выбор
         chosen = menu.exec(event.screenPos())
 
         if chosen == jump_action:
@@ -334,16 +354,18 @@ class TimelineGraphicsScene(QGraphicsScene):
 
     @staticmethod
     def _format_time(seconds: float) -> str:
-        """Форматировать секунды в MM:SS."""
         if seconds < 0:
             seconds = 0
-        minutes = int(seconds) // 60
-        secs = int(seconds) % 60
-        return f"{minutes:02d}:{secs:02d}"
+        total = int(seconds)
+        h = total // 3600
+        m = (total % 3600) // 60
+        s = total % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
 
     @staticmethod
     def _get_context_menu_style() -> str:
-        """Стиль контекстного меню в тёмной теме."""
         return """
             QMenu {
                 background-color: #2a2a2a;
@@ -374,7 +396,7 @@ class TimelineGraphicsScene(QGraphicsScene):
             }
         """
 
-    # ──────────────────────────────────────────────────────────────────
+    # ─── Drawing ─────────────────────────────────────────────────────
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
@@ -392,6 +414,7 @@ class TimelineGraphicsScene(QGraphicsScene):
             if track_rect.intersects(rect):
                 painter.fillRect(track_rect, even if i % 2 == 0 else odd)
 
+        # ── Grid lines ──
         fps = self.get_fps()
         if fps <= 0:
             return
@@ -402,33 +425,24 @@ class TimelineGraphicsScene(QGraphicsScene):
         start_frame = max(0, int((rect.left() - self.header_width) / self.pixels_per_frame))
         end_frame = int((rect.right() - self.header_width) / self.pixels_per_frame) + 1
 
-        min_spacing_px = 60
-        cur_spacing_px = self.pixels_per_frame * fps * 5
+        step_seconds = self._calc_time_step(60)
 
-        if cur_spacing_px < min_spacing_px:
-            step_seconds = max(5, int(min_spacing_px / (self.pixels_per_frame * fps)))
-            if step_seconds <= 7: step_seconds = 5
-            elif step_seconds <= 12: step_seconds = 10
-            elif step_seconds <= 20: step_seconds = 15
-            elif step_seconds <= 40: step_seconds = 30
-            else: step_seconds = 60
-        else:
-            step_seconds = 5
+        start_sec = start_frame / fps
+        end_sec = end_frame / fps
+        first_sec = int(start_sec // step_seconds) * step_seconds
 
-        first_seconds = (start_frame // int(step_seconds * fps)) * step_seconds
-        sec = first_seconds
-        while True:
+        sec = first_sec
+        while sec <= end_sec:
             frame = int(sec * fps)
-            if frame > end_frame:
-                break
             x = frame * self.pixels_per_frame + self.header_width
             if rect.left() <= x <= rect.right():
-                painter.drawLine(x, rect.top(), x, rect.bottom())
+                painter.drawLine(int(x), int(rect.top()), int(x), int(rect.bottom()))
             sec += step_seconds
 
     def drawForeground(self, painter, rect):
         super().drawForeground(painter, rect)
 
+        # ── Ruler background ──
         ruler_rect = QRectF(rect.left(), 0, rect.width(), self.ruler_height)
         painter.fillRect(ruler_rect, QColor("#1a1a1a"))
 
@@ -439,39 +453,30 @@ class TimelineGraphicsScene(QGraphicsScene):
         start_frame = max(0, int((rect.left() - self.header_width) / self.pixels_per_frame))
         end_frame = int((rect.right() - self.header_width) / self.pixels_per_frame) + 1
 
-        min_spacing_px = 80
-        cur_spacing_px = self.pixels_per_frame * fps * 5
+        step_seconds = self._calc_time_step(80)
 
-        if cur_spacing_px < min_spacing_px:
-            step_seconds = max(5, int(min_spacing_px / (self.pixels_per_frame * fps)))
-            if step_seconds <= 7: step_seconds = 5
-            elif step_seconds <= 12: step_seconds = 10
-            elif step_seconds <= 20: step_seconds = 15
-            elif step_seconds <= 40: step_seconds = 30
-            else: step_seconds = 60
-        else:
-            step_seconds = 5
-
-        first_seconds = (start_frame // int(step_seconds * fps)) * step_seconds
-        sec = first_seconds
-        last_text_x = float("-inf")
+        start_sec = start_frame / fps
+        end_sec = end_frame / fps
+        first_sec = int(start_sec // step_seconds) * step_seconds
 
         font = QFont("Segoe UI", 8)
         fm = QFontMetrics(font)
         painter.setFont(font)
 
-        while True:
-            frame = int(sec * fps)
-            if frame > end_frame:
-                break
-            x = frame * self.pixels_per_frame + self.header_width
-            if rect.left() <= x <= rect.right():
-                painter.setPen(QPen(QColor("#666666"), 1))
-                painter.drawLine(x, self.ruler_height - 5, x, self.ruler_height)
+        last_text_x = float("-inf")
+        sec = first_sec
 
-                minutes = sec // 60
-                seconds = sec % 60
-                text = f"{minutes:02d}:{seconds:02d}"
+        while sec <= end_sec:
+            frame = int(sec * fps)
+            x = frame * self.pixels_per_frame + self.header_width
+
+            if rect.left() <= x <= rect.right():
+                # Tick
+                painter.setPen(QPen(QColor("#666666"), 1))
+                painter.drawLine(int(x), self.ruler_height - 5, int(x), self.ruler_height)
+
+                # Label
+                text = self._format_ruler_time(int(sec))
                 text_w = fm.horizontalAdvance(text)
                 text_x = x - text_w // 2
 
@@ -479,7 +484,10 @@ class TimelineGraphicsScene(QGraphicsScene):
                     painter.setPen(QPen(Qt.white))
                     painter.drawText(int(text_x), 20, text)
                     last_text_x = text_x + text_w
+
             sec += step_seconds
+
+    # ─── Rebuild ─────────────────────────────────────────────────────
 
     def rebuild(self, animate_new: bool = False) -> None:
         if getattr(self, '_is_rebuilding', False):
@@ -504,7 +512,16 @@ class TimelineGraphicsScene(QGraphicsScene):
             if isinstance(item, QGraphicsRectItem) and getattr(item, "_is_header_bg", False):
                 self.removeItem(item)
 
-        scene_w = total_frames * self.pixels_per_frame + self.header_width + 150
+        content_w = total_frames * self.pixels_per_frame + self.header_width + 150
+
+        # Сцена не уже viewport (чтобы фон заполнял всё)
+        view_width = 0
+        for v in self.views():
+            vw = v.viewport().width()
+            if vw > view_width:
+                view_width = vw
+        scene_w = max(content_w, view_width)
+
         scene_h = len(events) * self.track_height + self.ruler_height + 50
         self.setSceneRect(0, 0, scene_w, scene_h)
 
@@ -545,7 +562,7 @@ class TimelineGraphicsScene(QGraphicsScene):
                 continue
             y = i * self.track_height + self.ruler_height
             x = marker.start_frame * self.pixels_per_frame + self.header_width
-            w = max(10.0, (marker.end_frame - marker.start_frame) * self.pixels_per_frame)
+            w = max(4.0, (marker.end_frame - marker.start_frame) * self.pixels_per_frame)
 
             seg = SegmentGraphicsItem(marker)
             seg.original_idx = self._marker_to_original_idx.get(marker.id, -1)
@@ -572,7 +589,6 @@ class TimelineWidget(QWidget):
     event_selected = Signal(Marker)
     event_double_clicked = Signal(Marker)
 
-    # === НОВЫЕ СИГНАЛЫ: проброс из scene ===
     context_edit_requested = Signal(int)
     context_delete_requested = Signal(int)
     context_duplicate_requested = Signal(int)
@@ -585,7 +601,59 @@ class TimelineWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
+        # ══════════════════════════════════════════════════════════════
+        # Панель масштабирования
+        # ══════════════════════════════════════════════════════════════
+        zoom_bar = QWidget()
+        zoom_bar.setFixedHeight(28)
+        zoom_bar.setStyleSheet("background-color: #1e1e1e; border-bottom: 1px solid #333;")
+        zoom_layout = QHBoxLayout(zoom_bar)
+        zoom_layout.setContentsMargins(6, 2, 6, 2)
+        zoom_layout.setSpacing(4)
+
+        btn_style = """
+            QPushButton {
+                background-color: #2a2a2a; color: #ccc;
+                border: 1px solid #444; border-radius: 3px;
+                padding: 1px 8px; font-size: 13px;
+                min-width: 26px; max-height: 22px;
+            }
+            QPushButton:hover { background-color: #3a3a3a; color: #fff; }
+            QPushButton:pressed { background-color: #1a1a1a; }
+        """
+
+        self._zoom_out_btn = QPushButton("−")
+        self._zoom_out_btn.setToolTip("Уменьшить масштаб (Ctrl+Колесо)")
+        self._zoom_out_btn.setStyleSheet(btn_style)
+        self._zoom_out_btn.clicked.connect(self._zoom_out)
+        zoom_layout.addWidget(self._zoom_out_btn)
+
+        self._zoom_in_btn = QPushButton("+")
+        self._zoom_in_btn.setToolTip("Увеличить масштаб (Ctrl+Колесо)")
+        self._zoom_in_btn.setStyleSheet(btn_style)
+        self._zoom_in_btn.clicked.connect(self._zoom_in)
+        zoom_layout.addWidget(self._zoom_in_btn)
+
+        self._fit_btn = QPushButton("⊞ Вместить всё")
+        self._fit_btn.setToolTip("Уместить всю длину видео в ширину экрана")
+        self._fit_btn.setStyleSheet(btn_style.replace("min-width: 26px", "min-width: 80px"))
+        self._fit_btn.clicked.connect(self.fit_to_view)
+        zoom_layout.addWidget(self._fit_btn)
+
+        zoom_layout.addSpacing(12)
+
+        self._zoom_label = QLabel("")
+        self._zoom_label.setStyleSheet("color: #888; font-size: 10px;")
+        zoom_layout.addWidget(self._zoom_label)
+
+        zoom_layout.addStretch()
+        layout.addWidget(zoom_bar)
+
+        # ══════════════════════════════════════════════════════════════
+        # Таймлайн
+        # ══════════════════════════════════════════════════════════════
         self.view = TimelineGraphicsView()
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -599,14 +667,12 @@ class TimelineWidget(QWidget):
         scroll = TimelineScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.view)
-        layout.addWidget(scroll)
+        layout.addWidget(scroll, 1)
 
-        # Проброс существующих сигналов
+        # Проброс сигналов
         self.scene.seek_requested.connect(self.seek_requested)
         self.scene.event_selected.connect(self.event_selected)
         self.scene.event_double_clicked.connect(self.event_double_clicked)
-
-        # === НОВОЕ: Проброс сигналов контекстного меню ===
         self.scene.context_edit_requested.connect(self.context_edit_requested)
         self.scene.context_delete_requested.connect(self.context_delete_requested)
         self.scene.context_duplicate_requested.connect(self.context_duplicate_requested)
@@ -617,10 +683,14 @@ class TimelineWidget(QWidget):
         self._connect_controller_signals(controller)
         get_custom_event_manager().events_changed.connect(lambda: self.rebuild(False))
 
+        # Обновить label после первого показа
+        QTimer.singleShot(100, self._update_zoom_label)
+
+    # ─── Controller ──────────────────────────────────────────────────
+
     def _connect_controller_signals(self, controller) -> None:
         if not controller:
             return
-
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
@@ -642,18 +712,14 @@ class TimelineWidget(QWidget):
         self._connect_controller_signals(controller)
         self.rebuild(False)
 
+    # ─── Markers ─────────────────────────────────────────────────────
+
     def set_markers(self, markers: List[Marker]) -> None:
         self._markers = list(markers)
         self.scene.set_markers(self._markers)
         self.rebuild(False)
 
     def set_markers_with_indices(self, markers: List[Marker], index_map: Dict[int, int]) -> None:
-        """Установить маркеры вместе с маппингом оригинальных индексов.
-
-        Args:
-            markers: Список маркеров для отображения.
-            index_map: Маппинг marker.id → original_idx в project.markers.
-        """
         self._markers = list(markers)
         self.scene.set_markers(self._markers)
         self.scene.set_marker_index_map(index_map)
@@ -670,6 +736,7 @@ class TimelineWidget(QWidget):
     def rebuild(self, animate_new: bool = False) -> None:
         if self.scene:
             self.scene.rebuild(animate_new)
+            self._update_zoom_label()
 
     def set_current_frame(self, frame: int, fps: float) -> None:
         self.scene.update_playhead(frame)
@@ -680,7 +747,6 @@ class TimelineWidget(QWidget):
     def _on_controller_markers_changed(self) -> None:
         if self.controller and getattr(self.controller, '_updating', False):
             return
-
         if self.controller:
             if hasattr(self.controller, "get_filtered_pairs"):
                 pairs = self.controller.get_filtered_pairs()
@@ -694,14 +760,99 @@ class TimelineWidget(QWidget):
             else:
                 self.set_markers(self.controller.markers)
 
+    # ─── Zoom ────────────────────────────────────────────────────────
+
+    def fit_to_view(self) -> None:
+        """Уместить всю длину видео в видимую ширину."""
+        total_frames = self.scene.get_total_frames()
+        if total_frames <= 1:
+            return
+
+        available = self.view.viewport().width() - self.scene.header_width - 50
+        if available <= 100:
+            available = 800
+
+        optimal_ppf = available / total_frames
+        self.scene.pixels_per_frame = max(ZOOM_MIN, min(ZOOM_MAX, optimal_ppf))
+        self.rebuild(False)
+        self.view.horizontalScrollBar().setValue(0)
+
+    def _zoom_in(self) -> None:
+        self._apply_zoom(ZOOM_FACTOR)
+
+    def _zoom_out(self) -> None:
+        self._apply_zoom(1.0 / ZOOM_FACTOR)
+
+    def _apply_zoom(self, factor: float, center_frame: Optional[int] = None) -> None:
+        old_ppf = self.scene.pixels_per_frame
+        new_ppf = max(ZOOM_MIN, min(ZOOM_MAX, old_ppf * factor))
+
+        if new_ppf == old_ppf:
+            return
+
+        self.scene.pixels_per_frame = new_ppf
+        self.rebuild(False)
+
+        # Центрировать на текущем кадре или на центре видимой области
+        if center_frame is None and self.controller:
+            center_frame = self.controller.get_current_frame_idx()
+        if center_frame is not None and center_frame >= 0:
+            x = center_frame * new_ppf + self.scene.header_width
+            self.view.horizontalScrollBar().setValue(
+                int(x - self.view.viewport().width() // 2)
+            )
+
+    def _update_zoom_label(self) -> None:
+        """Обновить метку с информацией о масштабе."""
+        fps = self.scene.get_fps()
+        total_frames = self.scene.get_total_frames()
+        ppf = self.scene.pixels_per_frame
+
+        if fps <= 0 or total_frames <= 1:
+            self._zoom_label.setText("")
+            return
+
+        # Сколько секунд помещается в видимую область
+        viewport_w = self.view.viewport().width() - self.scene.header_width
+        if viewport_w <= 0:
+            viewport_w = 100
+        visible_frames = viewport_w / ppf
+        visible_sec = visible_frames / fps
+
+        total_sec = total_frames / fps
+
+        # Процент масштаба (100% = вся длина видео помещается точно)
+        ideal_ppf = viewport_w / total_frames
+        zoom_pct = int((ppf / ideal_ppf) * 100) if ideal_ppf > 0 else 100
+
+        self._zoom_label.setText(
+            f"Масштаб: {zoom_pct}%  |  "
+            f"Видимо: {self._format_duration(visible_sec)} "
+            f"из {self._format_duration(total_sec)}"
+        )
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        seconds = max(0, int(seconds))
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    # ─── Events ──────────────────────────────────────────────────────
+
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
-            factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-            self.scene.pixels_per_frame = max(0.1, min(10.0, self.scene.pixels_per_frame * factor))
-            self.rebuild(False)
-            if self.controller:
-                x = self.controller.get_current_frame_idx() * self.scene.pixels_per_frame + self.scene.header_width
-                self.view.horizontalScrollBar().setValue(int(x - self.view.width() // 2))
+            factor = ZOOM_FACTOR if event.angleDelta().y() > 0 else (1.0 / ZOOM_FACTOR)
+
+            # Определить кадр под курсором для центрирования
+            scene_pos = self.view.mapToScene(self.view.mapFromGlobal(event.globalPosition().toPoint()))
+            center_frame = int((scene_pos.x() - self.scene.header_width) / self.scene.pixels_per_frame)
+            center_frame = max(0, center_frame)
+
+            self._apply_zoom(factor, center_frame)
             event.accept()
         else:
             super().wheelEvent(event)
@@ -710,5 +861,8 @@ class TimelineWidget(QWidget):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):
-        # Делегируем scene — она сама обрабатывает контекстное меню
         super().contextMenuEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_zoom_label()

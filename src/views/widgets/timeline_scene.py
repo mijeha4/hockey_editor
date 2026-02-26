@@ -322,7 +322,7 @@ class TimelineScene(QGraphicsScene):
         return self.pixels_per_second
 
     def set_zoom(self, pixels_per_second: float):
-        self.pixels_per_second = max(5.0, min(20.0, pixels_per_second))
+        self.pixels_per_second = max(0.1, min(200.0, pixels_per_second))
         self._safe_rebuild()
 
 
@@ -369,7 +369,7 @@ class TimelineWidget(QGraphicsView):
 
     def wheelEvent(self, event) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            zoom_factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+            zoom_factor = 1.3 if event.angleDelta().y() > 0 else 1.0 / 1.3
             old_zoom = self.scene.pixels_per_second
             self.set_zoom(old_zoom * zoom_factor)
             mouse_pos = self.mapToScene(event.pos())

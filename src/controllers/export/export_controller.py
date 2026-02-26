@@ -128,7 +128,7 @@ class ExportController(QObject):
                 defaults = self.settings_controller.get_export_defaults()
                 self.view.set_export_defaults(defaults)
             except Exception as e:
-                print(f"Warning: export defaults: {e}")
+                print(f"Предупреждение: настройки экспорта: {e}")
 
         if preselected_ids is not None:
             preselected_set = set(preselected_ids)
@@ -139,17 +139,34 @@ class ExportController(QObject):
 
     def _prepare_segments_data(self) -> List[Dict[str, Any]]:
         fps = self.fps if self.fps > 0 else 1.0
+
+        # Получить маппинг локализованных имён
+        display_map = self._build_display_name_map()
+
         result = []
         for marker in self.project.markers:
             duration_sec = (marker.end_frame - marker.start_frame) / fps
             result.append({
                 "id": marker.id,
                 "event_name": marker.event_name,
+                "display_name": display_map.get(marker.event_name, marker.event_name),
                 "start_frame": marker.start_frame,
                 "end_frame": marker.end_frame,
                 "duration_sec": duration_sec,
             })
         return result
+
+    def _build_display_name_map(self) -> Dict[str, str]:
+        """Построить словарь event_name → локализованное имя."""
+        try:
+            from services.events.custom_event_manager import get_custom_event_manager
+            manager = get_custom_event_manager()
+            result: Dict[str, str] = {}
+            for ev in manager.get_all_events():
+                result[ev.name] = ev.get_localized_name()
+            return result
+        except Exception:
+            return {}
 
     # ──────────────────────────────────────────────────────────────────────
     # Video Export
@@ -218,11 +235,14 @@ class ExportController(QObject):
             if not markers:
                 markers = list(self.project.markers)
 
+            name_mapping = self._build_display_name_map()
+
             success = ReportExporter.export_csv(
                 markers=markers, fps=self.fps,
                 output_path=output_path,
                 project_name=getattr(self.project, "name", ""),
                 video_path=self.video_path,
+                name_mapping=name_mapping,
             )
             if self.view:
                 if success:
@@ -239,11 +259,14 @@ class ExportController(QObject):
             if not markers:
                 markers = list(self.project.markers)
 
+            name_mapping = self._build_display_name_map()
+
             success = ReportExporter.export_pdf(
                 markers=markers, fps=self.fps,
                 output_path=output_path,
                 project_name=getattr(self.project, "name", ""),
                 video_path=self.video_path,
+                name_mapping=name_mapping,
             )
             if self.view:
                 if success:

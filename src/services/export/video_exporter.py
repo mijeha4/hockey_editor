@@ -15,10 +15,10 @@ CancelCheck = Optional[Callable[[], bool]]
 
 
 class VideoExporter:
-    """Service for exporting video segments.
+    """Сервис экспорта видеосегментов.
 
-    Marker contract:
-        start_frame inclusive, end_frame exclusive
+    Контракт Marker:
+        start_frame включительно, end_frame исключительно
     """
 
     @staticmethod
@@ -40,7 +40,7 @@ class VideoExporter:
     ) -> bool:
         try:
             if not os.path.exists(video_path):
-                raise FileNotFoundError(f"Video file not found: {video_path}")
+                raise FileNotFoundError(f"Видеофайл не найден: {video_path}")
 
             if fps <= 0:
                 fps = 30.0
@@ -91,11 +91,11 @@ class VideoExporter:
             )
 
         except Exception as e:
-            print(f"Export error: {e}")
+            print(f"Ошибка экспорта: {e}")
             raise
 
     # ──────────────────────────────────────────────────────────────────────
-    # ★ Path normalization
+    # ★ Нормализация пути
     # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -111,31 +111,25 @@ class VideoExporter:
         if merge_segments:
             # Нужен файл с расширением .mp4
             if os.path.isdir(output_path):
-                # Путь — директория, добавляем имя файла
                 output_path = os.path.join(output_path, "export.mp4")
 
             _base, ext = os.path.splitext(output_path)
             if not ext:
-                # Нет расширения — добавляем .mp4
                 output_path = output_path + ".mp4"
         else:
             # Нужна директория
             if os.path.isdir(output_path):
-                # Для _export_separate_files нужен "файл-шаблон" внутри директории
                 output_path = os.path.join(output_path, "segment.mp4")
             else:
-                # Проверить — это файл или путь без расширения?
                 _base, ext = os.path.splitext(output_path)
                 if not ext:
-                    # Путь без расширения — считаем директорией
                     os.makedirs(output_path, exist_ok=True)
                     output_path = os.path.join(output_path, "segment.mp4")
-                # Если есть расширение — ОК, будет использован как шаблон
 
         return output_path
 
     # ──────────────────────────────────────────────────────────────────────
-    # Stream copy
+    # Копирование потока (без перекодирования)
     # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -177,7 +171,7 @@ class VideoExporter:
                     cmd += ["-an"]
                 cmd += ["-y", seg_path]
 
-                VideoExporter._run_ffmpeg(cmd, "segment copy extraction failed")
+                VideoExporter._run_ffmpeg(cmd, "Ошибка извлечения сегмента (копирование)")
                 segment_files.append(seg_path)
 
                 if progress_callback:
@@ -201,14 +195,12 @@ class VideoExporter:
 
     @staticmethod
     def _concat_segments_copy(segment_files: List[str], output_path: str) -> None:
-        """Concat segments using ffmpeg concat demuxer."""
-        # ★ Файл списка создаём во временной директории, не рядом с output
+        """Объединить сегменты через ffmpeg concat demuxer."""
         import tempfile as _tmp
         concat_fd, concat_file = _tmp.mkstemp(suffix=".txt", prefix="ffconcat_")
         try:
             with os.fdopen(concat_fd, "w", encoding="utf-8") as f:
                 for seg in segment_files:
-                    # Используем абсолютные пути и экранируем одинарные кавычки
                     safe_path = os.path.abspath(seg).replace("'", "'\\''")
                     f.write(f"file '{safe_path}'\n")
 
@@ -218,7 +210,7 @@ class VideoExporter:
                 "-i", concat_file,
                 "-c", "copy", "-y", output_path,
             ]
-            VideoExporter._run_ffmpeg(cmd, "ffmpeg concat failed")
+            VideoExporter._run_ffmpeg(cmd, "Ошибка объединения сегментов (ffmpeg concat)")
         finally:
             try:
                 os.remove(concat_file)
@@ -226,7 +218,7 @@ class VideoExporter:
                 pass
 
     # ──────────────────────────────────────────────────────────────────────
-    # Re-encode
+    # Перекодирование
     # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -289,7 +281,7 @@ class VideoExporter:
 
                 cmd += ["-avoid_negative_ts", "make_zero", "-y", seg_path]
 
-                VideoExporter._run_ffmpeg(cmd, "segment re-encode extraction failed")
+                VideoExporter._run_ffmpeg(cmd, "Ошибка перекодирования сегмента")
                 segment_files.append(seg_path)
 
                 if progress_callback:
@@ -312,11 +304,12 @@ class VideoExporter:
         return True
 
     # ──────────────────────────────────────────────────────────────────────
-    # Helpers
+    # Вспомогательные методы
     # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def _run_ffmpeg(cmd: List[str], context: str) -> None:
+        """Запустить ffmpeg и проверить результат."""
         result = subprocess.run(
             cmd, capture_output=True, text=True, encoding="utf-8"
         )
@@ -326,6 +319,7 @@ class VideoExporter:
 
     @staticmethod
     def _resolution_vf(resolution: Optional[str]) -> Optional[str]:
+        """Получить видеофильтр масштабирования для заданного разрешения."""
         if not resolution or resolution == "source":
             return None
         height_map = {
@@ -337,9 +331,10 @@ class VideoExporter:
 
     @staticmethod
     def _sanitize_filename(text: str) -> str:
+        """Очистить строку для использования в имени файла."""
         text = (text or "").strip()
         if not text:
-            return "event"
+            return "событие"
         text = re.sub(r'[\\/:*?"<>|]+', "_", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text[:80]
@@ -356,10 +351,9 @@ class VideoExporter:
 
         output_path используется для определения директории и базового имени.
         """
-        # ★ Определить директорию и базовое имя
         if os.path.isdir(output_path):
             output_dir = output_path
-            base_name = "segment"
+            base_name = "сегмент"
         else:
             output_dir = os.path.dirname(output_path) or "."
             base_name = os.path.splitext(os.path.basename(output_path))[0]
@@ -388,7 +382,7 @@ class VideoExporter:
             filename = VideoExporter._sanitize_filename(filename)
             seg_out = os.path.join(output_dir, f"{filename}.mp4")
 
-            # ★ Не перезаписывать существующие — добавить суффикс
+            # Не перезаписывать существующие — добавить суффикс
             if os.path.exists(seg_out):
                 counter = 1
                 while os.path.exists(seg_out):
@@ -400,11 +394,12 @@ class VideoExporter:
             shutil.copy2(seg_file, seg_out)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Legacy compatibility
+    # Обратная совместимость
     # ──────────────────────────────────────────────────────────────────────
 
     @staticmethod
     def export(video_path, markers, total_frames, fps, output_path, **kwargs):
+        """Устаревший метод — обёртка для export_segments."""
         return VideoExporter.export_segments(
             video_path=video_path, markers=markers,
             fps=fps, output_path=output_path, **kwargs
@@ -412,10 +407,10 @@ class VideoExporter:
 
     @staticmethod
     def _export_empty_clip(video_path: str, fps: float, output_path: str) -> bool:
-        # Нормализовать путь
+        """Экспорт пустого клипа (когда нет маркеров)."""
         if os.path.isdir(output_path) or not os.path.splitext(output_path)[1]:
             if os.path.isdir(output_path):
-                output_path = os.path.join(output_path, "empty.mp4")
+                output_path = os.path.join(output_path, "пустой.mp4")
             else:
                 output_path = output_path + ".mp4"
 
@@ -426,5 +421,5 @@ class VideoExporter:
             "-preset", "ultrafast", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-y", output_path,
         ]
-        VideoExporter._run_ffmpeg(cmd, "empty clip export failed")
+        VideoExporter._run_ffmpeg(cmd, "Ошибка экспорта пустого клипа")
         return True

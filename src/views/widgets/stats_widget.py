@@ -136,10 +136,11 @@ class StatsWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # ── Легенда (компактная, без заголовка — он уже на вкладке) ──
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(4, 2, 4, 2)
 
-        self._header_label = QLabel("Статистика")
+        self._header_label = QLabel("")
         self._header_label.setStyleSheet(
             "color: #ffffff; font-weight: bold; font-size: 11px;"
         )
@@ -153,12 +154,12 @@ class StatsWidget(QWidget):
 
         layout.addLayout(header_layout)
 
+        # ── Scroll area (без ограничения высоты) ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._scroll.setMaximumHeight(200)
         self._scroll.setStyleSheet("""
             QScrollArea { background-color: #2a2a2a; border: none; }
             QScrollBar:vertical {
@@ -178,8 +179,9 @@ class StatsWidget(QWidget):
         self._bars_layout.setSpacing(2)
 
         self._scroll.setWidget(self._bars_container)
-        layout.addWidget(self._scroll)
+        layout.addWidget(self._scroll, 1)
 
+        # ── Итого ──
         self._total_label = QLabel("")
         self._total_label.setFixedHeight(22)
         self._total_label.setStyleSheet(
@@ -255,7 +257,7 @@ class StatsWidget(QWidget):
         )
         self._total_label.setVisible(True)
 
-        self._header_label.setText(f"Статистика ({total_count})")
+        self._header_label.setText(f"{total_count} событий, {types_count} типов")
 
     def _show_empty_state(self) -> None:
         while self._bars_layout.count():
@@ -272,7 +274,7 @@ class StatsWidget(QWidget):
         self._total_label.setText("")
         self._total_label.setVisible(False)
 
-        self._header_label.setText("Статистика")
+        self._header_label.setText("")
 
     def _compute_stats(self) -> List[Tuple[str, int, float, float]]:
         fps = self._fps if self._fps > 0 else 30.0

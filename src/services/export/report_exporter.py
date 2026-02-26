@@ -1,5 +1,5 @@
 """
-Report Exporter - экспорт данных о сегментах в CSV и PDF.
+Report Exporter — экспорт данных о сегментах в CSV и PDF.
 
 CSV: Простая таблица с колонками ID, Тип, Начало, Конец, Длительность, Заметка.
 PDF: Отчёт с заголовком, таблицей сегментов, статистикой по типам.
@@ -35,30 +35,33 @@ class ReportExporter:
         output_path: str,
         project_name: str = "",
         video_path: str = "",
-        encoding: str = "utf-8-sig",  # BOM для Excel
+        encoding: str = "utf-8-sig",
+        name_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Экспортировать сегменты в CSV файл."""
         try:
             fps = fps if fps > 0 else 30.0
+            if name_mapping is None:
+                name_mapping = {}
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
             with open(output_path, "w", newline="", encoding=encoding) as f:
                 writer = csv.writer(f, delimiter=";")
 
                 # Заголовок с метаданными
-                writer.writerow(["# Project", project_name or "Untitled"])
-                writer.writerow(["# Video", video_path or "N/A"])
+                writer.writerow(["# Проект", project_name or "Без названия"])
+                writer.writerow(["# Видео", video_path or "Н/Д"])
                 writer.writerow(["# FPS", f"{fps:.2f}"])
-                writer.writerow(["# Export date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
-                writer.writerow(["# Total segments", str(len(markers))])
+                writer.writerow(["# Дата экспорта", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                writer.writerow(["# Всего сегментов", str(len(markers))])
                 writer.writerow([])
 
                 # Заголовки колонок
                 writer.writerow([
-                    "#", "Event type", "Start (MM:SS)",
-                    "End (MM:SS)", "Duration (sec)",
-                    "Start (frame)", "End (frame)",
-                    "Duration (frames)", "Note"
+                    "№", "Тип события", "Начало (ММ:СС)",
+                    "Конец (ММ:СС)", "Длительность (сек)",
+                    "Начало (кадр)", "Конец (кадр)",
+                    "Длительность (кадры)", "Заметка"
                 ])
 
                 # Данные
@@ -69,9 +72,11 @@ class ReportExporter:
                     duration_sec = (marker.end_frame - marker.start_frame) / fps
                     duration_frames = marker.end_frame - marker.start_frame
 
+                    display_name = name_mapping.get(marker.event_name, marker.event_name)
+
                     writer.writerow([
                         i,
-                        marker.event_name,
+                        display_name,
                         ReportExporter._format_time(start_sec),
                         ReportExporter._format_time(end_sec),
                         f"{duration_sec:.2f}",
@@ -83,13 +88,14 @@ class ReportExporter:
 
                 # Статистика
                 writer.writerow([])
-                writer.writerow(["# === STATISTICS ==="])
+                writer.writerow(["# === СТАТИСТИКА ==="])
 
                 stats = ReportExporter._compute_stats(markers, fps)
-                writer.writerow(["# Event type", "Count", "Total time (sec)", "Avg time (sec)"])
+                writer.writerow(["# Тип события", "Количество", "Общее время (сек)", "Среднее время (сек)"])
                 for event_name, count, total_dur, avg_dur in stats:
+                    display_name = name_mapping.get(event_name, event_name)
                     writer.writerow([
-                        f"# {event_name}",
+                        f"# {display_name}",
                         count,
                         f"{total_dur:.2f}",
                         f"{avg_dur:.2f}",
@@ -98,7 +104,7 @@ class ReportExporter:
             return True
 
         except Exception as e:
-            print(f"CSV export error: {e}")
+            print(f"Ошибка экспорта CSV: {e}")
             return False
 
     # ──────────────────────────────────────────────────────────────────────
@@ -112,42 +118,38 @@ class ReportExporter:
         output_path: str,
         project_name: str = "",
         video_path: str = "",
+        name_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Экспортировать отчёт в PDF или HTML."""
+        if name_mapping is None:
+            name_mapping = {}
         try:
             return ReportExporter._export_pdf_reportlab(
-                markers, fps, output_path, project_name, video_path
+                markers, fps, output_path, project_name, video_path, name_mapping
             )
         except ImportError:
-            # reportlab не установлен — HTML fallback
             html_path = output_path
             if html_path.lower().endswith(".pdf"):
                 html_path = html_path[:-4] + ".html"
             elif not html_path.lower().endswith(".html"):
                 html_path += ".html"
             return ReportExporter._export_html_report(
-                markers, fps, html_path, project_name, video_path
+                markers, fps, html_path, project_name, video_path, name_mapping
             )
         except Exception as e:
-            print(f"PDF export error: {e}")
-            # Fallback на HTML при любой ошибке reportlab
+            print(f"Ошибка экспорта PDF: {e}")
             html_path = output_path
             if html_path.lower().endswith(".pdf"):
                 html_path = html_path[:-4] + ".html"
             elif not html_path.lower().endswith(".html"):
                 html_path += ".html"
             return ReportExporter._export_html_report(
-                markers, fps, html_path, project_name, video_path
+                markers, fps, html_path, project_name, video_path, name_mapping
             )
 
     @staticmethod
     def _find_unicode_font() -> Optional[str]:
-        """Найти шрифт с поддержкой Unicode/кириллицы в системе.
-
-        Returns:
-            Путь к .ttf файлу или None.
-        """
-        # Список шрифтов с поддержкой кириллицы (в порядке приоритета)
+        """Найти шрифт с поддержкой Unicode/кириллицы в системе."""
         font_candidates = [
             # Windows
             "C:/Windows/Fonts/arial.ttf",
@@ -202,6 +204,7 @@ class ReportExporter:
         output_path: str,
         project_name: str,
         video_path: str,
+        name_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Экспорт PDF через reportlab с поддержкой Unicode."""
         from reportlab.lib.pagesizes import A4
@@ -216,6 +219,8 @@ class ReportExporter:
         from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
         fps = fps if fps > 0 else 30.0
+        if name_mapping is None:
+            name_mapping = {}
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
         # === Регистрация Unicode шрифта ===
@@ -238,9 +243,9 @@ class ReportExporter:
                 else:
                     font_bold = "UnicodeFont"
 
-                print(f"PDF: Using Unicode font: {ttf_path}")
+                print(f"PDF: Используется Unicode шрифт: {ttf_path}")
             except Exception as e:
-                print(f"PDF: Failed to register Unicode font: {e}")
+                print(f"PDF: Не удалось зарегистрировать Unicode шрифт: {e}")
                 font_regular = "Helvetica"
                 font_bold = "Helvetica-Bold"
 
@@ -283,26 +288,26 @@ class ReportExporter:
 
         # === Заголовок ===
         elements.append(Paragraph(
-            f"Report: {project_name or 'Untitled'}",
+            f"Отчёт: {project_name or 'Без названия'}",
             title_style
         ))
         elements.append(Paragraph(
-            f"Video: {os.path.basename(video_path) if video_path else 'N/A'}",
+            f"Видео: {os.path.basename(video_path) if video_path else 'Н/Д'}",
             subtitle_style
         ))
         elements.append(Paragraph(
-            f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')} | "
-            f"FPS: {fps:.1f} | Segments: {len(markers)}",
+            f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M')} | "
+            f"FPS: {fps:.1f} | Сегментов: {len(markers)}",
             subtitle_style
         ))
         elements.append(Spacer(1, 10))
 
         # === Таблица сегментов ===
-        elements.append(Paragraph("Segments", section_style))
+        elements.append(Paragraph("Сегменты", section_style))
 
         sorted_markers = sorted(markers, key=lambda m: m.start_frame)
 
-        table_data = [["#", "Event type", "Start", "End", "Dur.", "Note"]]
+        table_data = [["№", "Тип события", "Начало", "Конец", "Длит.", "Заметка"]]
         for i, marker in enumerate(sorted_markers, 1):
             start_sec = marker.start_frame / fps
             end_sec = marker.end_frame / fps
@@ -314,10 +319,10 @@ class ReportExporter:
 
             table_data.append([
                 str(i),
-                marker.event_name,
+                name_mapping.get(marker.event_name, marker.event_name),
                 ReportExporter._format_time(start_sec),
                 ReportExporter._format_time(end_sec),
-                f"{dur_sec:.1f}s",
+                f"{dur_sec:.1f}с",
                 note_text,
             ])
 
@@ -346,16 +351,16 @@ class ReportExporter:
         elements.append(Spacer(1, 15))
 
         # === Статистика ===
-        elements.append(Paragraph("Statistics by event type", section_style))
+        elements.append(Paragraph("Статистика по типам событий", section_style))
 
         stats = ReportExporter._compute_stats(markers, fps)
-        stats_data = [["Event type", "Count", "Total time", "Avg time"]]
+        stats_data = [["Тип события", "Количество", "Общее время", "Среднее время"]]
         for event_name, count, total_dur, avg_dur in stats:
             stats_data.append([
-                event_name,
+                name_mapping.get(event_name, event_name),
                 str(count),
-                f"{total_dur:.1f}s",
-                f"{avg_dur:.1f}s",
+                f"{total_dur:.1f}с",
+                f"{avg_dur:.1f}с",
             ])
 
         # Итого
@@ -364,10 +369,10 @@ class ReportExporter:
             (m.end_frame - m.start_frame) / fps for m in markers
         )
         stats_data.append([
-            "TOTAL",
+            "ИТОГО",
             str(total_count),
-            f"{total_time:.1f}s",
-            f"{total_time / max(1, total_count):.1f}s",
+            f"{total_time:.1f}с",
+            f"{total_time / max(1, total_count):.1f}с",
         ])
 
         stats_table = Table(stats_data, colWidths=[150, 80, 90, 90], repeatRows=1)
@@ -401,7 +406,7 @@ class ReportExporter:
             textColor=colors.HexColor("#aaaaaa"),
         )
         elements.append(Paragraph(
-            "Hockey Editor Pro — auto-generated report",
+            "Hockey Editor Pro — автоматически сгенерированный отчёт",
             footer_style
         ))
 
@@ -415,9 +420,12 @@ class ReportExporter:
         output_path: str,
         project_name: str,
         video_path: str,
+        name_mapping: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Fallback: HTML отчёт если reportlab не установлен."""
         fps = fps if fps > 0 else 30.0
+        if name_mapping is None:
+            name_mapping = {}
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
         sorted_markers = sorted(markers, key=lambda m: m.start_frame)
@@ -433,10 +441,10 @@ class ReportExporter:
             rows_html += f"""
             <tr style="background:{bg}">
                 <td style="text-align:center">{i}</td>
-                <td>{marker.event_name}</td>
+                <td>{name_mapping.get(marker.event_name, marker.event_name)}</td>
                 <td style="text-align:center">{ReportExporter._format_time(start_sec)}</td>
                 <td style="text-align:center">{ReportExporter._format_time(end_sec)}</td>
-                <td style="text-align:center">{dur_sec:.1f}s</td>
+                <td style="text-align:center">{dur_sec:.1f}с</td>
                 <td>{note}</td>
             </tr>"""
 
@@ -444,10 +452,10 @@ class ReportExporter:
         for event_name, count, total_dur, avg_dur in stats:
             stats_html += f"""
             <tr>
-                <td>{event_name}</td>
+                <td>{name_mapping.get(event_name, event_name)}</td>
                 <td style="text-align:center">{count}</td>
-                <td style="text-align:center">{total_dur:.1f}s</td>
-                <td style="text-align:center">{avg_dur:.1f}s</td>
+                <td style="text-align:center">{total_dur:.1f}с</td>
+                <td style="text-align:center">{avg_dur:.1f}с</td>
             </tr>"""
 
         total_count = len(markers)
@@ -456,7 +464,7 @@ class ReportExporter:
         html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<title>Report - {project_name or 'Untitled'}</title>
+<title>Отчёт — {project_name or 'Без названия'}</title>
 <style>
     body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 30px; color: #333; }}
     h1 {{ color: #1a4d7a; margin-bottom: 5px; }}
@@ -469,33 +477,33 @@ class ReportExporter:
     @media print {{ body {{ margin: 10mm; }} }}
 </style>
 </head><body>
-<h1>Report: {project_name or 'Untitled'}</h1>
+<h1>Отчёт: {project_name or 'Без названия'}</h1>
 <div class="meta">
-    Video: {os.path.basename(video_path) if video_path else 'N/A'}<br>
-    Date: {datetime.now().strftime('%Y-%m-%d %H:%M')} |
-    FPS: {fps:.1f} | Segments: {len(markers)}
+    Видео: {os.path.basename(video_path) if video_path else 'Н/Д'}<br>
+    Дата: {datetime.now().strftime('%Y-%m-%d %H:%M')} |
+    FPS: {fps:.1f} | Сегментов: {len(markers)}
 </div>
 
-<h2>Segments</h2>
+<h2>Сегменты</h2>
 <table>
-<tr><th>#</th><th>Event type</th><th>Start</th><th>End</th><th>Dur.</th><th>Note</th></tr>
+<tr><th>№</th><th>Тип события</th><th>Начало</th><th>Конец</th><th>Длит.</th><th>Заметка</th></tr>
 {rows_html}
 </table>
 
-<h2>Statistics by event type</h2>
+<h2>Статистика по типам событий</h2>
 <table>
-<tr><th>Event type</th><th>Count</th><th>Total time</th><th>Avg time</th></tr>
+<tr><th>Тип события</th><th>Количество</th><th>Общее время</th><th>Среднее время</th></tr>
 {stats_html}
 <tr class="total">
-    <td>TOTAL</td>
+    <td>ИТОГО</td>
     <td style="text-align:center">{total_count}</td>
-    <td style="text-align:center">{total_time:.1f}s</td>
-    <td style="text-align:center">{total_time / max(1, total_count):.1f}s</td>
+    <td style="text-align:center">{total_time:.1f}с</td>
+    <td style="text-align:center">{total_time / max(1, total_count):.1f}с</td>
 </tr>
 </table>
 
 <p style="color:#aaa; font-size:11px; margin-top:30px;">
-    Hockey Editor Pro — auto-generated report
+    Hockey Editor Pro — автоматически сгенерированный отчёт
 </p>
 </body></html>"""
 

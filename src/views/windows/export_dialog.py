@@ -53,6 +53,7 @@ class ExportDialog(QDialog):
 
         self._segment_items: List[Dict] = []
         self._all_event_types: List[str] = []
+        self._event_display_names: Dict[str, str] = {}
 
         self._setup_ui()
 
@@ -321,13 +322,16 @@ class ExportDialog(QDialog):
             item["checkbox"].setParent(None)
         self._segment_items.clear()
 
-        event_types: set = set()
+        event_types_map: Dict[str, str] = {}  # event_name → display_name
 
         for seg in segments_data:
-            event_types.add(seg["event_name"])
+            event_name = seg["event_name"]
+            display_name = seg.get("display_name", event_name)
+            event_types_map[event_name] = display_name
+
             start_time = self._format_time(seg["start_frame"] / self.fps)
             end_time = self._format_time(seg["end_frame"] / self.fps)
-            text = f"{seg['event_name']}  ({start_time} – {end_time})  [{seg['duration_sec']:.1f}с]"
+            text = f"{display_name}  ({start_time} – {end_time})  [{seg['duration_sec']:.1f}с]"
 
             cb = QCheckBox(text)
             cb.setChecked(True)
@@ -335,7 +339,8 @@ class ExportDialog(QDialog):
 
             self._segment_items.append({
                 "id": seg["id"],
-                "event_name": seg["event_name"],
+                "event_name": event_name,
+                "display_name": display_name,
                 "start_frame": seg["start_frame"],
                 "end_frame": seg["end_frame"],
                 "duration_sec": seg["duration_sec"],
@@ -343,13 +348,16 @@ class ExportDialog(QDialog):
             })
             self._checkboxes_layout.addWidget(cb)
 
-        self._all_event_types = sorted(event_types)
+        self._all_event_types = sorted(event_types_map.keys())
+        self._event_display_names = event_types_map
+
         self.event_type_filter.blockSignals(True)
         self.event_type_filter.clear()
         self.event_type_filter.addItem(f"Все типы ({len(segments_data)})")
         for et in self._all_event_types:
             cnt = sum(1 for s in segments_data if s["event_name"] == et)
-            self.event_type_filter.addItem(f"{et} ({cnt})")
+            display = event_types_map.get(et, et)
+            self.event_type_filter.addItem(f"{display} ({cnt})")
         self.event_type_filter.blockSignals(False)
 
         self._update_counter()

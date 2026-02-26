@@ -110,6 +110,10 @@ class InstanceEditController(QObject):
                 current_filtered_idx = i
                 break
 
+        # Остановить воспроизведение главного окна
+        if self.playback_controller.playing:
+            self.playback_controller.pause()
+
         self.set_marker(marker, all_pairs, current_filtered_idx)
 
         try:

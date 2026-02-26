@@ -85,8 +85,8 @@
         "SHIFT": "S"
     },
     "recording_mode": "fixed_length",
-    "fixed_duration_sec": 10,
-    "pre_roll_sec": 3.0,
+    "fixed_duration_sec": 6,
+    "pre_roll_sec": 0.0,
     "post_roll_sec": 0.0,
     "track_colors": {
         "ATTACK": "#8b0000",
@@ -98,7 +98,7 @@
     "window_width": 1800,
     "window_height": 1000,
     "autosave_enabled": true,
-    "autosave_interval_minutes": 5,
+    "autosave_interval_minutes": 1,
     "recent_projects": [],
     "custom_events": [],
     "language": "ru",
@@ -115,18 +115,18 @@
     "export_padding_after": 0.0,
     "export_auto_open": true,
     "window_geometry": {
-        "x": 0,
-        "y": 23,
-        "width": 2560,
-        "height": 1369,
-        "maximized": true,
+        "x": 108,
+        "y": 215,
+        "width": 1800,
+        "height": 1000,
+        "maximized": false,
         "main_splitter": [
-            786,
-            492
+            441,
+            276
         ],
         "top_splitter": [
-            1590,
-            944
+            937,
+            837
         ],
         "active_tab": 0
     }

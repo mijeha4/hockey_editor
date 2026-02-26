@@ -269,6 +269,40 @@ class TimelineController(QObject):
 
     def set_main_controller(self, controller) -> None:
         self._main_controller = controller
+    
+    def set_project(self, project: Project) -> None:
+        """Установить новый проект и переподключить сигналы."""
+        # Отключить сигналы старого проекта
+        try:
+            self.project.marker_added.disconnect(self._on_project_changed)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            self.project.marker_removed.disconnect(self._on_project_changed_int)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            self.project.markers_cleared.disconnect(self._on_project_changed)
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            if hasattr(self.project, "markers_replaced"):
+                self.project.markers_replaced.disconnect(self._on_project_changed)
+        except (RuntimeError, TypeError):
+            pass
+
+        # Установить новый проект
+        self.project = project
+
+        # Подключить сигналы нового проекта
+        self.project.marker_added.connect(self._on_project_changed)
+        self.project.marker_removed.connect(self._on_project_changed_int)
+        self.project.markers_cleared.connect(self._on_project_changed)
+        if hasattr(self.project, "markers_replaced"):
+            self.project.markers_replaced.connect(self._on_project_changed)
+
+        # Сбросить выделение
+        self.selected_markers.clear()
 
     def set_playback_controller(self, playback_controller) -> None:
         self.playback_controller = playback_controller

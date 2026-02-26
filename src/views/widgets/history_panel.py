@@ -44,23 +44,6 @@ class HistoryPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # ── Header ──
-        header = QHBoxLayout()
-        header.setSpacing(4)
-
-        title = QLabel("📜 История")
-        title.setStyleSheet(
-            "color: #ffffff; font-weight: bold; font-size: 12px;"
-        )
-        header.addWidget(title)
-        header.addStretch()
-
-        self._count_label = QLabel("")
-        self._count_label.setStyleSheet("color: #888888; font-size: 10px;")
-        header.addWidget(self._count_label)
-
-        layout.addLayout(header)
-
         # ── Buttons ──
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(4)
@@ -84,6 +67,12 @@ class HistoryPanel(QWidget):
         self._style_button(self._clear_btn)
         btn_layout.addWidget(self._clear_btn)
 
+        btn_layout.addStretch()
+
+        self._count_label = QLabel("")
+        self._count_label.setStyleSheet("color: #888888; font-size: 10px;")
+        btn_layout.addWidget(self._count_label)
+
         layout.addLayout(btn_layout)
 
         # ── Separator ──
@@ -92,7 +81,7 @@ class HistoryPanel(QWidget):
         line.setStyleSheet("background-color: #444444;")
         layout.addWidget(line)
 
-        # ── Command list ──
+        # ── Command list (без ограничения высоты) ──
         self._list = QListWidget()
         self._list.setStyleSheet("""
             QListWidget {
@@ -113,7 +102,6 @@ class HistoryPanel(QWidget):
                 background-color: #333333;
             }
         """)
-        self._list.setMaximumHeight(200)
         self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list, 1)
 
