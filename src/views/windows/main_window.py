@@ -428,6 +428,17 @@ class MainWindow(QMainWindow):
 
         self._right_tabs.addTab(history_tab, "📜 История")
 
+        # ── Tab 3: Горячие клавиши ──
+        hotkeys_tab = QWidget()
+        hotkeys_layout = QVBoxLayout(hotkeys_tab)
+        hotkeys_layout.setContentsMargins(4, 4, 4, 4)
+        hotkeys_layout.setSpacing(0)
+
+        self.event_shortcut_list_widget = EventShortcutListWidget()
+        hotkeys_layout.addWidget(self.event_shortcut_list_widget, 1)
+
+        self._right_tabs.addTab(hotkeys_tab, "⌨️ События")
+
         self.top_splitter.addWidget(self._right_tabs)
         self.top_splitter.setSizes([600, 400])
 
@@ -449,8 +460,6 @@ class MainWindow(QMainWindow):
         # ── Bottom row ──
         bottom_layout = QHBoxLayout()
 
-        self.event_shortcut_list_widget = EventShortcutListWidget()
-        bottom_layout.addWidget(self.event_shortcut_list_widget)
         bottom_layout.addStretch()
 
         self.status_label = QLabel("Готов")
@@ -895,7 +904,8 @@ class MainWindow(QMainWindow):
             "markers": 0, "маркеры": 0,
             "stats": 1, "статистика": 1,
             "history": 2, "история": 2,
-            "tracking": 3, "трекинг": 3,
+            "hotkeys": 3, "события": 3, "горячие клавиши": 3,
+            "tracking": 4, "трекинг": 4,
         }
         idx = tab_map.get(tab_name.lower())
         if idx is not None and idx < self._right_tabs.count():

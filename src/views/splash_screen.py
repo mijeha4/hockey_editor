@@ -182,7 +182,7 @@ class SplashScreen(QWidget):
         p.setFont(copy_font)
         p.setPen(QColor("#30363d"))
         copy_rect = QRect(0, h - 28, content_w, 16)
-        p.drawText(copy_rect, Qt.AlignCenter, "© 2024 Hockey Editor Pro")
+        p.drawText(copy_rect, Qt.AlignCenter, "© 2026 Hockey Editor Pro")
 
         p.end()
 
